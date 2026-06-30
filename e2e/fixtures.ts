@@ -28,8 +28,14 @@ export async function settle(page: Page, ms = 1500): Promise<void> {
   await page.waitForTimeout(ms)
 }
 
-/** Open a brand-new device: isolated storage, geolocation + clipboard granted. */
-export async function newPerson(browser: Browser, geolocation = LONDON): Promise<Page> {
+/** Open a brand-new device: isolated storage, geolocation + clipboard granted.
+ *  `opts.clock` installs Playwright's clock control before load, so a spec can
+ *  fast-forward this device's time (e.g. to fire a dead-man's-switch). */
+export async function newPerson(
+  browser: Browser,
+  geolocation = LONDON,
+  opts: { clock?: boolean } = {},
+): Promise<Page> {
   const context = await browser.newContext({
     baseURL: BASE_URL,
     permissions: ['geolocation', 'clipboard-read', 'clipboard-write'],
@@ -37,6 +43,7 @@ export async function newPerson(browser: Browser, geolocation = LONDON): Promise
     locale: 'en-GB',
   })
   const page = await context.newPage()
+  if (opts.clock) await page.clock.install({ time: new Date() })
   await page.goto('/')
   // Onboarding hero is the first screen for a fresh identity.
   await expect(page.getByRole('button', { name: 'Create a circle' })).toBeVisible()
@@ -182,4 +189,47 @@ export async function setPetname(page: Page, name: string): Promise<void> {
 export async function addCircle(page: Page): Promise<void> {
   await page.click('[data-action="add-circle"]')
   await expect(page.locator('[data-action="create"]')).toBeVisible()
+}
+
+/** Add a Safe (geofence) or Private (no-report) place via the map editor.
+ *  Both are saved at the current map centre (the device's location). */
+export async function addZoneOnMap(page: Page, kind: 'safe' | 'noreport' = 'safe'): Promise<void> {
+  await gotoTab(page, 'map')
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
+  await page.waitForTimeout(1_500) // let the style finish loading before addSource
+  await page.click(`[data-action="add-zone"][data-kind="${kind}"]`)
+  await page.click('[data-action="save-zone"]')
+}
+
+/** Move this device to a new emulated position. */
+export async function setLocation(page: Page, pos: { latitude: number; longitude: number }): Promise<void> {
+  await page.context().setGeolocation(pos)
+  await settle(page)
+}
+
+/**
+ * Move to a new position and re-arm sharing so the new spot is sampled now.
+ * Emulated geolocation (CDP override) doesn't re-push to an already-running
+ * `watchPosition`, so we toggle sharing off→on to take a fresh fix — the
+ * equivalent of a phone actually walking out of a safe zone.
+ */
+export async function moveAndReshare(page: Page, pos: { latitude: number; longitude: number }): Promise<void> {
+  await page.context().setGeolocation(pos)
+  await gotoTab(page, 'home')
+  await page.click(sel.toggleShare) // stop
+  await page.click(sel.toggleShare) // start → fresh onFix at the new position
+  await settle(page)
+}
+
+/** Arm the dead-man's-switch on Home with the given cadence (seconds: 900/1800/3600). */
+export async function armCheckin(page: Page, intervalSeconds = 900): Promise<void> {
+  await gotoTab(page, 'home')
+  await page.click('[data-action="arm-menu"]')
+  await page.click(`[data-action="arm"][data-interval="${intervalSeconds}"]`)
+}
+
+/** Rotate the circle key (reseed) from the You tab. */
+export async function reseed(page: Page): Promise<void> {
+  await gotoTab(page, 'you')
+  await page.click('[data-action="reseed"]')
 }
