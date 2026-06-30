@@ -30,6 +30,9 @@ import {
   buildBuzzSignal,
   decryptBuzz,
   DEFAULT_BUZZ_REASONS,
+  buildDisbandSignal,
+  decryptDisband,
+  DISBAND_SIGNAL_TYPE,
   assessArrival,
   buildRendezvousSignal,
   decryptRendezvous,
@@ -81,6 +84,7 @@ let onboardStep: 'intro' | 'create' | 'join' | 'await' = 'intro'
 let onboardMode: Mode = 'family'
 let adding = false // adding another circle from within the app (not first-run onboarding)
 let newCircleTtl = 0 // chosen transient lifetime (sec) for a new circle; 0 = long-lived
+let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
 
 // Per-circle live state — signals are circle-scoped, so beacons/alerts/etc. from
 // one circle must never bleed into another. Keyed by circle id.
@@ -146,6 +150,7 @@ function switchCircle(id: string): void {
   store.save(persisted)
   breachActive = false
   alertActive = false
+  disbandConfirm = false
   tab = 'home'
   render()
 }
@@ -422,6 +427,13 @@ function youView(): string {
       <div class="kv"><span class="k">Lifetime</span><span>${c.expiresAt ? `transient · ends in ${fmtTtl(c.expiresAt)}` : 'long-lived'}</span></div>
       <button class="btn ghost" data-action="leave">Leave this circle</button>
       <div class="note">Leaving removes it from this device only. Your other circles and your key stay put.</div>
+      ${disbandConfirm
+        ? `<div class="note" style="color:var(--alert)">This ends “${esc(c.name)}” for <strong>everyone</strong> and wipes its key — it can't be undone.</div>
+           <div class="row" style="gap:10px">
+             <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="disband">Disband for everyone</button>
+             <button class="btn small ghost" data-action="cancel-disband">Cancel</button>
+           </div>`
+        : '<button class="btn small ghost" style="color:var(--alert)" data-action="ask-disband">Disband for everyone…</button>'}
     </div>
     <div class="card stack" style="margin-top:14px">
       <button class="btn small ghost" data-action="reset-device">Sign out &amp; reset this device</button>
@@ -1044,6 +1056,9 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'disarm-checkin': disarmCheckin(); break
     case 'save-relay': saveRelay(); break
     case 'leave': leave(); break
+    case 'ask-disband': disbandConfirm = true; render(); break
+    case 'cancel-disband': disbandConfirm = false; render(); break
+    case 'disband': void disbandCircle(); break
     case 'reset-device': resetDevice(); break
     case 'add-zone': addMode = true; renderMapPanel(); updatePreview(); break
     case 'cancel-zone': addMode = false; mapView?.setPreview(null); renderMapPanel(); break
@@ -1230,8 +1245,27 @@ function leave(): void {
   removeCircle(c.id)
   breachActive = false
   alertActive = false
+  disbandConfirm = false
   tab = 'home'
   toast(`Left ${c.name}`)
+  render()
+}
+
+/** Disband the active circle for *everyone* — broadcast a tombstone, then wipe locally. */
+async function disbandCircle(): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id) return
+  try {
+    await publishSignal(await buildDisbandSignal({ groupId: c.id, seedHex: c.seedHex, by: id.pk }), c)
+  } catch { /* still drop locally even if the broadcast fails */ }
+  const name = c.name
+  removeCircle(c.id)
+  disbandConfirm = false
+  breachActive = false
+  alertActive = false
+  tab = 'home'
+  toast(`Disbanded ${name}`)
   render()
 }
 
@@ -1328,6 +1362,14 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       if (status.status === 'at-risk' && st.rendezvous?.setBy === me?.pk && status.member !== me?.pk) {
         toast(`⚠ ${shortNpub(status.member)} may miss the rendezvous`)
       }
+    } else if (t === DISBAND_SIGNAL_TYPE) {
+      const d = await decryptDisband(c.seedHex, e.content)
+      const name = c.name
+      removeCircle(c.id) // the owner ended it for everyone — drop it and wipe its seed
+      if (!activeCircle()) tab = 'home'
+      toast(`${d.by === me?.pk ? 'You' : shortNpub(d.by)} disbanded ${name}`)
+      render()
+      return
     } else {
       return
     }

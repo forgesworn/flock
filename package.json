@@ -42,6 +42,10 @@
     "./rendezvous": {
       "types": "./dist/rendezvous.d.ts",
       "import": "./dist/rendezvous.js"
+    },
+    "./disband": {
+      "types": "./dist/disband.d.ts",
+      "import": "./dist/disband.js"
     }
   },
   "files": [
