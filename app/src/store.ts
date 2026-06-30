@@ -9,7 +9,7 @@ export interface Circle { id: string; seedHex: string; name: string; mode: Mode 
 export interface Persisted { identity: Identity | null; circle: Circle | null; relayUrl: string }
 
 const KEY = 'flock:v1'
-const DEFAULT_RELAY = 'wss://relay.damus.io'
+const DEFAULT_RELAY = 'wss://relay.trotters.cc'
 
 const toHex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')

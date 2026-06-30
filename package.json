@@ -42,6 +42,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "smoke": "npm run build && node scripts/smoke.mjs",
     "dev": "vite",
     "build:app": "vite build",
     "preview:app": "vite preview"
