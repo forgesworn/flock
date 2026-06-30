@@ -23,4 +23,10 @@ describe('barrel exports', () => {
     expect(typeof flock.buildHelpSignal).toBe('function')
     expect(typeof flock.signalTypeForReason).toBe('function')
   })
+
+  it('re-exports flock night-out helpers', () => {
+    expect(typeof flock.buildNightOutGroupEvent).toBe('function')
+    expect(typeof flock.classifyPresence).toBe('function')
+    expect(typeof flock.geoOutliers).toBe('function')
+  })
 })

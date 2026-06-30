@@ -26,6 +26,10 @@
     "./signals": {
       "types": "./dist/signals.d.ts",
       "import": "./dist/signals.js"
+    },
+    "./nightout": {
+      "types": "./dist/nightout.d.ts",
+      "import": "./dist/nightout.js"
     }
   },
   "files": [
