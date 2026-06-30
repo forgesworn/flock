@@ -24,6 +24,7 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 - [ ] **Transient vs long-lived** — "just tonight" (NIP-40 auto-expiry) vs family (ongoing).
 - [x] Create / join (in-person QR + remote gift-wrap) — *done, to be re-based on Phase A.*
 - [x] Reseed / remove member — *done (hand-rolled); migrate to **dominion**.*
+- [x] **Buzz** — one-tap encrypted ping to the circle with a chosen reason (preset or custom; adults can assign their own); receiver's phone **vibrates + shows a banner**; optional **targeted** buzz (parent → child). `buzz.ts` lib + Circle UI.
 - [ ] **Disband / destroy a group** — owner tombstones the group (canary-kit `dissolveGroup` + replaceable-state tombstone / NIP-40 immediate expiry); members' apps drop it and wipe local keys.
 - [ ] **dominion** — epoch-based access control with tiers (guardians vs children).
 
@@ -44,6 +45,7 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 - [ ] **stash** — encrypted-to-self vault; survive device loss.
 - [ ] **keystore-kit** — secure the local-signer key at rest (when published).
 - [ ] **mesh-kit** / **mesh-webrtc-lan** — off-relay LAN transport (no internet).
+- [ ] **LoRa mesh transport** — phone ↔ a pocket LoRa device over **BLE**, via **Meshtastic** or **MeshCore**. flock signals ride as opaque **E2E-encrypted bytes** over the LoRa mesh → works **fully off-grid** (no relay, no cell, no internet) — the ultimate "the relay can't track you". Web Bluetooth (Android/GrapheneOS Chromium) for the PWA; **Capacitor BLE** for iOS. Slots behind the same transport seam as Nostr/mesh-kit. (canary-kit already lists Meshtastic as a target.)
 
 ## Phase F — Meeting
 

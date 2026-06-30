@@ -401,3 +401,20 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .checkin-armed.overdue { border-color: var(--warn-dim); box-shadow: 0 0 0 1px var(--warn-dim); }
 .avatar.small { width: 30px; height: 30px; font-size: 12px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); font-weight: 700; color: var(--muted); }
 #my-npub, #qr-npub { margin-left: auto; margin-right: auto; }
+
+/* ── Buzz ──────────────────────────────────────────────────── */
+.buzz-banner {
+  position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+  width: min(480px, 100%); z-index: 200;
+  display: flex; align-items: center; gap: 12px;
+  padding: max(14px, env(safe-area-inset-top)) 18px 14px;
+  background: var(--calm); color: #0c111a; font-weight: 600;
+  box-shadow: var(--shadow); cursor: pointer;
+  animation: buzzdrop 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.buzz-banner.for-me { background: var(--warn); }
+.buzz-banner .bz-icon { font-size: 20px; animation: ring 0.6s ease-in-out 3; transform-origin: 50% 12%; }
+.buzz-banner .bz-text { flex: 1; min-width: 0; }
+.buzz-banner .bz-x { opacity: 0.6; font-size: 13px; }
+@keyframes buzzdrop { from { transform: translateX(-50%) translateY(-100%); } to { transform: translateX(-50%) translateY(0); } }
+@keyframes ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-16deg); } 60% { transform: rotate(16deg); } }

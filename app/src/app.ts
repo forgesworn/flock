@@ -22,6 +22,9 @@ import {
   classifyCheckins,
   missedCheckins,
   CHECKIN_SIGNAL_TYPE,
+  buildBuzzSignal,
+  decryptBuzz,
+  DEFAULT_BUZZ_REASONS,
   deriveBeaconKey,
   decryptBeacon,
   deriveDuressKey,
@@ -56,6 +59,7 @@ let awaitingInvite = false
 let armingCheckin = false
 let checkinAlert = false
 let monitorTimer = 0
+let activeBuzz: { from: string; reason: string; mine: boolean } | null = null
 
 let onboardStep: 'intro' | 'create' | 'join' | 'await' = 'intro'
 let onboardMode: Mode = 'family'
@@ -119,7 +123,7 @@ function render(): void {
   ensureSubscription()
   startMonitor()
   const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
-  root.innerHTML = `<main class="screen fade-in ${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
+  root.innerHTML = `${buzzBanner()}<main class="screen fade-in ${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   wireApp()
 }
 
@@ -248,6 +252,18 @@ function circleView(): string {
     <h2 style="margin-bottom:14px">${esc(c.name)}</h2>
     <div class="section-title">Members</div>
     <div class="list">${rows}</div>
+
+    <div class="section-title" style="margin-top:22px">Buzz the circle</div>
+    <div class="card stack">
+      <div class="chip-row">
+        ${DEFAULT_BUZZ_REASONS.map((r) => `<button class="btn small" data-action="buzz" data-reason="${esc(r)}">${esc(r)}</button>`).join('')}
+      </div>
+      <div class="row" style="gap:8px">
+        <input class="input" id="buzz-custom" placeholder="Custom reason…" autocapitalize="sentences" />
+        <button class="btn small primary" data-action="buzz">Buzz</button>
+      </div>
+      <div class="note">A gentle alert to everyone — their phone buzzes with your reason.</div>
+    </div>
 
     <div class="section-title" style="margin-top:22px">Invite securely (remote)</div>
     <div class="card stack">
@@ -671,6 +687,30 @@ function startMonitor(): void {
   }, 30_000)
 }
 
+// ── Buzz ─────────────────────────────────────────────────────────────────────
+async function sendBuzz(reason: string, target?: string): Promise<void> {
+  const c = persisted.circle
+  const id = persisted.identity
+  if (!c || !id) return
+  const r = reason.trim()
+  if (!r) { toast('Pick or type a reason'); return }
+  try {
+    const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: r, ...(target ? { target } : {}) })
+    await svc.publishEvent(persisted.relayUrl, tmpl, getSigner() as FlockSigner)
+    toast(target ? 'Buzzed' : 'Buzzed everyone')
+  } catch { toast('Buzz failed') }
+}
+
+function buzzBanner(): string {
+  if (!activeBuzz) return ''
+  const who = activeBuzz.from === persisted.identity?.pk ? 'You' : shortNpub(activeBuzz.from)
+  return `<div class="buzz-banner${activeBuzz.mine ? ' for-me' : ''}" data-action="dismiss-buzz" role="alert">
+    <span class="bz-icon">🔔</span>
+    <span class="bz-text"><strong>${esc(who)}</strong> · ${esc(activeBuzz.reason)}</span>
+    <span class="bz-x">✕</span>
+  </div>`
+}
+
 function handleAction(action: string, node: HTMLElement): void {
   switch (action) {
     case 'tab': tab = (node.dataset.tab as typeof tab); render(); break
@@ -683,6 +723,8 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'reseed': reseedCircle(); break
     case 'remove-member': reseedCircle(node.dataset.pk); break
     case 'checkin': void sendCheckIn(); break
+    case 'buzz': void sendBuzz(node.dataset.reason ?? (document.getElementById('buzz-custom') as HTMLInputElement | null)?.value ?? ''); break
+    case 'dismiss-buzz': activeBuzz = null; render(); break
     case 'arm-menu': armingCheckin = true; render(); break
     case 'cancel-arm': armingCheckin = false; render(); break
     case 'arm': armCheckin(Number(node.dataset.interval)); break
@@ -920,6 +962,13 @@ async function onIncoming(e: { pubkey: string; content: string; tags: string[][]
       const ci = await decryptCheckIn(c.seedHex, e.content)
       checkins.set(ci.member, ci)
       evaluateCheckinAlarm()
+    } else if (t === 'buzz') {
+      const bz = await decryptBuzz(c.seedHex, e.content)
+      if (!me || bz.from !== me.pk) {
+        const mine = !!me && bz.target === me.pk
+        activeBuzz = { from: bz.from, reason: bz.reason, mine }
+        try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
+      }
     } else {
       return
     }

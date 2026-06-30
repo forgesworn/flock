@@ -34,6 +34,10 @@
     "./checkin": {
       "types": "./dist/checkin.d.ts",
       "import": "./dist/checkin.js"
+    },
+    "./buzz": {
+      "types": "./dist/buzz.d.ts",
+      "import": "./dist/buzz.js"
     }
   },
   "files": [
