@@ -29,6 +29,16 @@ import {
   buildBuzzSignal,
   decryptBuzz,
   DEFAULT_BUZZ_REASONS,
+  assessArrival,
+  buildRendezvousSignal,
+  decryptRendezvous,
+  buildRendezvousStatusSignal,
+  decryptRendezvousStatus,
+  RENDEZVOUS_SIGNAL_TYPE,
+  RENDEZVOUS_STATUS_TYPE,
+  type Rendezvous,
+  type RendezvousStatus,
+  type TravelMode,
   deriveBeaconKey,
   decryptBeacon,
   deriveDuressKey,
@@ -63,6 +73,11 @@ let armingCheckin = false
 let checkinAlert = false
 let monitorTimer = 0
 let activeBuzz: { from: string; reason: string; mine: boolean } | null = null
+let activeRendezvous: Rendezvous | null = null
+let travelMode: TravelMode = 'walk'
+let rzvDurationMin = 60
+let lastRzvStatus = 0
+const rzvStatuses = new Map<string, RendezvousStatus>()
 
 let onboardStep: 'intro' | 'create' | 'join' | 'await' = 'intro'
 let onboardMode: Mode = 'family'
@@ -268,6 +283,8 @@ function circleView(): string {
       </div>
       <div class="note">A gentle alert to everyone — their phone buzzes with your reason.</div>
     </div>
+
+    ${rzvCard()}
 
     <div class="section-title" style="margin-top:22px">Invite securely (remote)</div>
     <div class="card stack">
@@ -766,6 +783,87 @@ function buzzBanner(): string {
   </div>`
 }
 
+// ── Rendezvous ───────────────────────────────────────────────────────────────
+function broadcastRzvStatus(): void {
+  const c = persisted.circle
+  const id = persisted.identity
+  if (!c || !id || !activeRendezvous || !fix) return
+  const p = assessArrival(activeRendezvous, id.pk, { lat: fix.lat, lon: fix.lon }, travelMode, nowSec())
+  rzvStatuses.set(id.pk, { rendezvousId: activeRendezvous.id, member: id.pk, status: p.status, etaSeconds: p.etaSeconds, timestamp: nowSec() })
+  if (nowSec() - lastRzvStatus < 30) return
+  lastRzvStatus = nowSec()
+  const status = rzvStatuses.get(id.pk) as RendezvousStatus
+  void (async () => {
+    try { await publishSignal(await buildRendezvousStatusSignal({ groupId: c.id, seedHex: c.seedHex, status })) } catch { /* best effort */ }
+  })()
+}
+
+async function setRendezvous(): Promise<void> {
+  const c = persisted.circle
+  const id = persisted.identity
+  if (!c || !id) return
+  if (!fix) { toast('Start sharing first — the meeting point is set at your location'); return }
+  const r: Rendezvous = {
+    id: `rzv-${nowSec().toString(36)}`,
+    place: { lat: fix.lat, lon: fix.lon },
+    deadline: nowSec() + rzvDurationMin * 60,
+    mode: c.mode === 'family' ? 'be-back' : 'meet-at',
+    setBy: id.pk,
+    createdAt: nowSec(),
+  }
+  try {
+    await publishSignal(await buildRendezvousSignal({ groupId: c.id, seedHex: c.seedHex, rendezvous: r }))
+    activeRendezvous = r
+    rzvStatuses.clear()
+    toast('Rendezvous set')
+    render()
+  } catch { toast('Could not set rendezvous') }
+}
+
+function clearRendezvous(): void {
+  activeRendezvous = null
+  rzvStatuses.clear()
+  render()
+}
+
+function rzvCard(): string {
+  const me = persisted.identity?.pk
+  if (activeRendezvous) {
+    const r = activeRendezvous
+    const dueIn = r.deadline - nowSec()
+    const at = new Date(r.deadline * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const rows = members().map((pk) => {
+      const st = rzvStatuses.get(pk)
+      const isMe = pk === me
+      const pill = !st ? '<span class="pill">no signal</span>'
+        : st.status === 'arrived' ? '<span class="pill active">arrived</span>'
+          : st.status === 'at-risk' ? '<span class="pill alert">at risk</span>'
+            : `<span class="pill warn">${fmtMins(st.etaSeconds)} away</span>`
+      return `<div class="row" style="gap:10px"><span class="avatar small">${isMe ? 'You' : initials(pk)}</span><span class="who" style="font-size:14px">${isMe ? 'You' : shortNpub(pk)}</span><span style="margin-left:auto">${pill}</span></div>`
+    }).join('')
+    const modes = (['walk', 'cycle', 'drive', 'transit'] as const)
+      .map((m) => `<button class="btn small${travelMode === m ? ' primary' : ''}" data-action="rzv-mode" data-mode="${m}">${m}</button>`).join('')
+    return `<div class="section-title" style="margin-top:22px">Rendezvous</div>
+      <div class="card stack">
+        <div class="row" style="justify-content:space-between"><strong>${r.mode === 'be-back' ? 'Be back' : 'Meet'}${dueIn > 0 ? ` in ${fmtMins(dueIn)}` : ' now'}</strong><span class="muted">by ${at}</span></div>
+        <div class="list">${rows}</div>
+        <div class="note">How you're getting there</div>
+        <div class="chip-row">${modes}</div>
+        ${r.setBy === me ? '<button class="btn small ghost" data-action="clear-rzv">Clear rendezvous</button>' : ''}
+      </div>`
+  }
+  return `<div class="section-title" style="margin-top:22px">Rendezvous</div>
+    <div class="card stack">
+      <div class="note">Set a meeting point at your spot and a time — everyone sees who's on track to make it.</div>
+      <div class="chip-row">
+        <button class="btn small${rzvDurationMin === 30 ? ' primary' : ''}" data-action="rzv-dur" data-min="30">30 min</button>
+        <button class="btn small${rzvDurationMin === 60 ? ' primary' : ''}" data-action="rzv-dur" data-min="60">1 hour</button>
+        <button class="btn small${rzvDurationMin === 120 ? ' primary' : ''}" data-action="rzv-dur" data-min="120">2 hours</button>
+      </div>
+      <button class="btn small primary" data-action="set-rzv">Set rendezvous here</button>
+    </div>`
+}
+
 function handleAction(action: string, node: HTMLElement): void {
   switch (action) {
     case 'tab': tab = (node.dataset.tab as typeof tab); render(); break
@@ -780,6 +878,10 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'checkin': void sendCheckIn(); break
     case 'buzz': void sendBuzz(node.dataset.reason ?? (document.getElementById('buzz-custom') as HTMLInputElement | null)?.value ?? ''); break
     case 'dismiss-buzz': activeBuzz = null; render(); break
+    case 'set-rzv': void setRendezvous(); break
+    case 'clear-rzv': clearRendezvous(); break
+    case 'rzv-dur': rzvDurationMin = Number(node.dataset.min); render(); break
+    case 'rzv-mode': travelMode = node.dataset.mode as TravelMode; render(); break
     case 'arm-menu': armingCheckin = true; render(); break
     case 'cancel-arm': armingCheckin = false; render(); break
     case 'arm': armCheckin(Number(node.dataset.interval)); break
@@ -882,6 +984,7 @@ function stopSharing(): void {
 
 function onFix(f: svc.Fix): void {
   fix = f
+  broadcastRzvStatus()
   const c = persisted.circle
   if (sharing && c?.mode === 'family' && persisted.geofences.length) {
     breachActive = !isWithinAnyFence({ lat: f.lat, lon: f.lon }, persisted.geofences)
@@ -982,6 +1085,8 @@ function leave(): void {
   beacons.clear()
   alerts.clear()
   checkins.clear()
+  rzvStatuses.clear()
+  activeRendezvous = null
   persisted = store.load()
   onboardStep = 'intro'
   tab = 'home'
@@ -1032,6 +1137,15 @@ async function onIncoming(e: { pubkey: string; content: string; tags: string[][]
         const mine = !!me && bz.target === me.pk
         activeBuzz = { from: bz.from, reason: bz.reason, mine }
         try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
+      }
+    } else if (t === RENDEZVOUS_SIGNAL_TYPE) {
+      activeRendezvous = await decryptRendezvous(c.seedHex, e.content)
+      rzvStatuses.clear()
+    } else if (t === RENDEZVOUS_STATUS_TYPE) {
+      const st = await decryptRendezvousStatus(c.seedHex, e.content)
+      rzvStatuses.set(st.member, st)
+      if (st.status === 'at-risk' && activeRendezvous?.setBy === me?.pk && st.member !== me?.pk) {
+        toast(`⚠ ${shortNpub(st.member)} may miss the rendezvous`)
       }
     } else {
       return
