@@ -16,7 +16,7 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 - [ ] **Signer abstraction** (`FlockSigner`: `signEvent` + `nip44`) → **signet-login** (`SignetSigner`); LocalSigner fallback. Key out of the app.
 - [ ] **nsec-tree** personas + epochs — unlinkable per-circle identities; reseed = epoch+1.
 - [ ] **Gift-wrap everything** via a rotating **group-inbox** key — relay sees only `kind:1059` from random keys (no real pubkeys, types, or roster).
-- [ ] **Multi-relay** — publish/subscribe across a configurable relay set (our relays); rotate. *(Awaiting the canonical relay list; default `relay.trotters.cc`.)*
+- [~] **Relay strategy** (adopted from `pallasite/src/credits.ts` → `app/src/relays.ts`): sensitive flock traffic → our **no-log relay only** (`relay.trotters.cc`); the broad public set (`PROFILE_RELAYS`) is reserved for reading **kind:0 profiles**. Full multi-relay fan-out of sensitive traffic waits for gift-wrap-everything (spraying before then would leak metadata to public relays).
 
 ## Phase B — Group lifecycle
 
@@ -55,6 +55,8 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 - [ ] **UnifiedPush** — de-Googled alerts.
 - [ ] **anvil** — release CI (like canary-kit).
 
-## Open inputs needed
+## Resolved inputs
 
-- **Canonical relay set** ("our relays") — only `relay.trotters.cc` confirmed; need the full list for multi-relay.
+- **Relay set** ✅ — adopted from `pallasite/src/credits.ts` into `app/src/relays.ts`:
+  private = `relay.trotters.cc` (ours, sensitive traffic); public profile set =
+  trotters/nos.lol/damus/nostr.band/primal/ditto (kind:0 reads only).

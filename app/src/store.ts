@@ -4,6 +4,7 @@
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { decode as nip19decode } from 'nostr-tools/nip19'
 import type { Geofence } from '@forgesworn/flock'
+import { PRIVATE_RELAYS } from './relays'
 
 export type Mode = 'family' | 'nightout'
 export interface Identity { skHex: string; pk: string }
@@ -25,8 +26,8 @@ export interface Persisted {
 }
 
 const KEY = 'flock:v1'
-// Overridable at build time so self-hosters default to their own relay.
-const DEFAULT_RELAY = import.meta.env.VITE_DEFAULT_RELAY || 'wss://relay.trotters.cc'
+// Sensitive traffic defaults to our own no-log relay (see relays.ts / docs/PRIVACY.md).
+const DEFAULT_RELAY = PRIVATE_RELAYS[0]
 
 const toHex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
