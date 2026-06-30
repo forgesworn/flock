@@ -393,3 +393,11 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .zone-meta { display: flex; flex-direction: column; line-height: 1.25; }
 .zone-meta small { color: var(--faint); font-size: 12px; }
 .zone-del { margin-left: auto; background: transparent; border: 1px solid var(--line); color: var(--muted); width: 30px; height: 30px; border-radius: 9px; font-size: 13px; }
+
+/* ── Check-in / members ────────────────────────────────────── */
+.pill.warn { color: var(--warn); border-color: var(--warn-dim); background: var(--warn-dim); }
+.chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip-row .btn { flex: 1; min-width: 84px; }
+.checkin-armed.overdue { border-color: var(--warn-dim); box-shadow: 0 0 0 1px var(--warn-dim); }
+.avatar.small { width: 30px; height: 30px; font-size: 12px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); font-weight: 700; color: var(--muted); }
+#my-npub, #qr-npub { margin-left: auto; margin-right: auto; }

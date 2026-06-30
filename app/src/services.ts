@@ -20,6 +20,26 @@ export async function publishEvent(relayUrl: string, template: EventTemplate, sk
   return signed
 }
 
+/** Publish an already-signed event (e.g. a NIP-59 gift wrap). */
+export async function publishSigned(relayUrl: string, signed: { id: string; sig: string; [k: string]: unknown }) {
+  await Promise.any(getPool().publish([relayUrl], signed as never))
+  return signed
+}
+
+/** Subscribe to NIP-59 gift wraps (kind 1059) addressed to me. Returns an unsubscribe fn. */
+export function subscribeGiftWraps(
+  relayUrl: string,
+  myPubkey: string,
+  onEvent: (e: { id: string; pubkey: string; content: string; tags: string[][]; created_at: number }) => void,
+): () => void {
+  const sub = getPool().subscribeMany(
+    [relayUrl],
+    { kinds: [1059], '#p': [myPubkey] },
+    { onevent: onEvent },
+  )
+  return () => sub.close()
+}
+
 /** Subscribe to a circle's kind-20078 signals by hashed d-tag. Returns an unsubscribe fn. */
 export function subscribeSignals(
   relayUrl: string,

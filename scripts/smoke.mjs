@@ -13,6 +13,8 @@
 import {
   buildHelpSignal,
   buildLocationSignal,
+  buildCheckInSignal,
+  decryptCheckIn,
   deriveBeaconKey,
   decryptBeacon,
   deriveDuressKey,
@@ -20,6 +22,7 @@ import {
   hashGroupId,
 } from '../dist/index.js'
 import { finalizeEvent, verifyEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { wrapEvent, unwrapEvent } from 'nostr-tools/nip59'
 
 const randHex = (n) =>
   [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -69,6 +72,28 @@ console.log('— in-process round-trip —')
   let failed = false
   try { await decryptBeacon(deriveBeaconKey(randHex(32)), signed.content) } catch { failed = true }
   assert(failed, 'wrong seed cannot decrypt the beacon')
+}
+
+// 4. Check-in / dead-man's-switch round-trip.
+{
+  const tmpl = await buildCheckInSignal({ groupId, seedHex, member: pkA, intervalSeconds: 1800, timestamp: 42 })
+  const signed = finalizeEvent(tmpl, skA)
+  assert(tTag(signed) === 'checkin', 'checkin: t=checkin')
+  const ci = await decryptCheckIn(seedHex, signed.content)
+  assert(ci.member === pkA && ci.intervalSeconds === 1800 && ci.timestamp === 42, 'checkin: decrypts to original')
+}
+
+// 5. Gift-wrapped invite (NIP-59): only the recipient can open the seed.
+{
+  const skB = generateSecretKey(); const pkB = getPublicKey(skB)
+  const payload = { t: 'invite', id: groupId, s: seedHex, n: 'Smoke', m: 'family' }
+  const wrap = wrapEvent({ kind: 14, content: JSON.stringify(payload), tags: [] }, skA, pkB)
+  assert(wrap.kind === 1059, 'invite: gift wrap is kind 1059')
+  const got = JSON.parse(unwrapEvent(wrap, skB).content)
+  assert(got.s === seedHex && got.id === groupId, 'invite: recipient unwraps the seed')
+  let denied = false
+  try { unwrapEvent(wrap, generateSecretKey()) } catch { denied = true }
+  assert(denied, 'invite: a non-recipient CANNOT unwrap the seed')
 }
 
 // 4. Optional: live relay round-trip.

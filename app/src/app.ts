@@ -8,6 +8,7 @@ import { encode, decode } from 'geohash-kit'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
+import { buildInviteWrap, buildReseedWraps, readInvite } from './invite'
 import {
   decideEmission,
   signalTypeForReason,
@@ -15,6 +16,11 @@ import {
   buildHelpSignal,
   classifyPresence,
   isWithinAnyFence,
+  buildCheckInSignal,
+  decryptCheckIn,
+  classifyCheckins,
+  missedCheckins,
+  CHECKIN_SIGNAL_TYPE,
   deriveBeaconKey,
   decryptBeacon,
   deriveDuressKey,
@@ -22,6 +28,7 @@ import {
   hashGroupId,
   type MemberBeacon,
   type CircleGeofence,
+  type CheckIn,
 } from '@forgesworn/flock'
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -42,11 +49,19 @@ let mapView: MapView | null = null
 let addMode = false
 let addRadius = 300
 
-let onboardStep: 'intro' | 'create' | 'join' = 'intro'
+let stopInviteSub: (() => void) | null = null
+let inviteSubKey = ''
+let awaitingInvite = false
+let armingCheckin = false
+let checkinAlert = false
+let monitorTimer = 0
+
+let onboardStep: 'intro' | 'create' | 'join' | 'await' = 'intro'
 let onboardMode: Mode = 'family'
 
 const beacons = new Map<string, MemberBeacon>()
 const alerts = new Map<string, number>()
+const checkins = new Map<string, CheckIn>()
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const nowSec = (): number => Math.floor(Date.now() / 1000)
@@ -55,6 +70,9 @@ const esc = (s: string): string =>
 
 function shortNpub(pk: string): string {
   try { const n = npubEncode(pk); return `${n.slice(0, 10)}…${n.slice(-4)}` } catch { return pk.slice(0, 10) }
+}
+function fullNpub(pk: string): string {
+  try { return npubEncode(pk) } catch { return pk }
 }
 const initials = (pk: string): string => pk.slice(0, 2).toUpperCase()
 
@@ -90,12 +108,15 @@ export function mount(el: HTMLElement): void {
 
 function render(): void {
   if (tab !== 'map' && mapView) { mapView.destroy(); mapView = null; addMode = false }
+  if (persisted.identity) ensureInviteSub()
   if (!persisted.identity || !persisted.circle) {
     root.innerHTML = onboardingView()
     wireOnboard()
     return
   }
+  ensureMember(persisted.identity.pk)
   ensureSubscription()
+  startMonitor()
   const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
   root.innerHTML = `<main class="screen fade-in ${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   wireApp()
@@ -118,6 +139,7 @@ function topbar(showModeToggle: boolean): string {
 function orbState(): { cls: string; label: string; sub: string } {
   const c = persisted.circle as store.Circle
   if (alertActive) return { cls: 'state-alert', label: 'Help sent', sub: 'Your circle has been alerted' }
+  if (checkinAlert) return { cls: 'state-alert', label: 'Check-in missed', sub: "Someone hasn't checked in" }
   if (breachActive) return { cls: 'state-alert', label: 'Outside safe zone', sub: 'Location shared with your circle' }
   if (sharing && fix) {
     return c.mode === 'nightout'
@@ -149,20 +171,66 @@ function homeView(): string {
         <span class="label">Hold for help</span>
         <span class="hint">Press and hold to send an SOS</span>
       </div>
-    </div>`
+    </div>
+    <div style="margin-top:14px">${checkinCard()}</div>`
 }
 
-function memberRow(e: ReturnType<typeof classifyPresence>[number], mePk: string): string {
-  const isMe = e.member === mePk
-  const alerted = alerts.has(e.member)
-  const pill = alerted
-    ? '<span class="pill alert">help</span>'
-    : e.status === 'active'
-      ? `<span class="pill active">out · ${fmtAgo(e.ageSeconds)}</span>`
-      : `<span class="pill stale">home · ${fmtAgo(e.ageSeconds)}</span>`
+function fmtMins(sec: number): string {
+  if (sec < 60) return `${Math.max(0, Math.round(sec))}s`
+  return `${Math.round(sec / 60)}m`
+}
+
+function checkinCard(): string {
+  const c = persisted.circle as store.Circle
+  const interval = c.checkinInterval ?? 0
+  if (armingCheckin) {
+    return `<div class="card stack">
+      <div class="row" style="justify-content:space-between"><strong>Check-in cadence</strong><button class="btn small ghost" data-action="cancel-arm">Cancel</button></div>
+      <div class="note">You'll be expected to tap “I'm OK” within this window. Miss it and your circle is alerted.</div>
+      <div class="chip-row">
+        <button class="btn small" data-action="arm" data-interval="900">15 min</button>
+        <button class="btn small" data-action="arm" data-interval="1800">30 min</button>
+        <button class="btn small" data-action="arm" data-interval="3600">1 hour</button>
+      </div>
+    </div>`
+  }
+  if (interval > 0) {
+    const me = persisted.identity?.pk
+    const mine = me ? checkins.get(me) : undefined
+    const dueIn = mine ? (mine.timestamp + interval) - nowSec() : 0
+    const overdue = dueIn <= 0
+    return `<div class="card stack checkin-armed${overdue ? ' overdue' : ''}">
+      <div class="row" style="justify-content:space-between">
+        <div><strong>Dead-man's-switch</strong><div class="note">${overdue ? 'Overdue — check in now' : `Next check-in in ${fmtMins(dueIn)}`}</div></div>
+        <button class="btn small ghost" data-action="disarm-checkin">Turn off</button>
+      </div>
+      <button class="btn primary" data-action="checkin">I'm OK — check in</button>
+    </div>`
+  }
+  return `<button class="btn ghost" data-action="arm-menu">Set up check-ins · dead-man's-switch</button>`
+}
+
+function circleMemberRow(pk: string, mePk: string): string {
+  const isMe = pk === mePk
+  const beacon = beacons.get(pk)
+  const presence = beacon ? classifyPresence([beacon], nowSec(), { staleAfterSeconds: 600 })[0] : null
+  const ci = checkins.get(pk)
+  const ciState = ci ? classifyCheckins([ci], nowSec())[0] : null
+
+  let pill: string
+  if (alerts.has(pk)) pill = '<span class="pill alert">help</span>'
+  else if (ciState?.status === 'missed') pill = '<span class="pill alert">missed</span>'
+  else if (ciState?.status === 'overdue') pill = '<span class="pill warn">overdue</span>'
+  else if (ciState) pill = '<span class="pill active">checked in</span>'
+  else if (presence) pill = presence.status === 'active'
+    ? `<span class="pill active">out · ${fmtAgo(presence.ageSeconds)}</span>`
+    : `<span class="pill stale">home · ${fmtAgo(presence.ageSeconds)}</span>`
+  else pill = '<span class="pill">no activity</span>'
+
+  const sub = beacon ? `~${esc(beacon.geohash)}` : isMe ? 'you' : 'in this circle'
   return `<div class="member">
-    <div class="avatar">${isMe ? 'You' : initials(e.member)}</div>
-    <div class="meta"><div class="who">${isMe ? 'You' : shortNpub(e.member)}</div><div class="when">~${esc(e.geohash)}</div></div>
+    <div class="avatar">${isMe ? 'You' : initials(pk)}</div>
+    <div class="meta"><div class="who">${isMe ? 'You' : shortNpub(pk)}</div><div class="when">${sub}</div></div>
     ${pill}
   </div>`
 }
@@ -170,21 +238,28 @@ function memberRow(e: ReturnType<typeof classifyPresence>[number], mePk: string)
 function circleView(): string {
   const c = persisted.circle as store.Circle
   const me = persisted.identity as store.Identity
-  const entries = classifyPresence([...beacons.values()], nowSec(), { staleAfterSeconds: 600 })
-  const rows = entries.length
-    ? entries.map((e) => memberRow(e, me.pk)).join('')
-    : '<div class="card muted">No-one has shared yet. Send an invite, then start sharing from Home.</div>'
+  const mem = members()
+  const rows = mem.length
+    ? mem.map((pk) => circleMemberRow(pk, me.pk)).join('')
+    : '<div class="card muted">Just you so far — invite someone below.</div>'
   return `
     ${topbar(false)}
     <h2 style="margin-bottom:14px">${esc(c.name)}</h2>
-    <div class="section-title">Who's out</div>
+    <div class="section-title">Members</div>
     <div class="list">${rows}</div>
-    <div class="section-title" style="margin-top:22px">Invite people</div>
+
+    <div class="section-title" style="margin-top:22px">Invite securely (remote)</div>
+    <div class="card stack">
+      <div class="field"><label for="invite-npub">Their key (npub)</label><input class="input" id="invite-npub" placeholder="npub1…" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      <button class="btn small primary" data-action="send-invite">Send encrypted invite</button>
+      <div class="note">The seed is gift-wrapped to their key (NIP-59) — safe over any channel. Ask them to open “Join remotely” and share their key.</div>
+    </div>
+
+    <div class="section-title" style="margin-top:22px">Invite in person</div>
     <div class="card stack">
       <div class="qr" id="qr"></div>
-      <div class="invite-code" id="invite-code">${esc(store.encodeInvite(c))}</div>
       <button class="btn small" data-action="copy-invite">Copy invite code</button>
-      <div class="note">Anyone with this code can join the circle and read its shared locations. Share it privately.</div>
+      <div class="note">Strongest: the QR carries the seed, so scanning keeps it off any network. Treat the copied code like a password.</div>
     </div>`
 }
 
@@ -197,12 +272,19 @@ function youView(): string {
     <div class="section-title">Identity</div>
     <div class="card stack">
       <div class="kv"><span class="k">Your key</span><span>${shortNpub(me.pk)}</span></div>
+      <button class="btn small ghost" data-action="copy-npub">Copy my key (npub)</button>
       <div class="note">Stored on this device only. This preview keeps the key in local storage — not secure key storage. Don't rely on it for real safety yet.</div>
     </div>
     <div class="section-title" style="margin-top:18px">Relay</div>
     <div class="card stack">
       <div class="field"><label for="relay">Nostr relay</label><input class="input" id="relay" value="${esc(persisted.relayUrl)}" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
       <button class="btn small" data-action="save-relay">Save relay</button>
+    </div>
+    <div class="section-title" style="margin-top:18px">Circle security</div>
+    <div class="card stack">
+      <button class="btn small" data-action="reseed">Rotate circle key (reseed)</button>
+      <div class="note">Generates a new seed and sends it encrypted to current members. Do this if an invite code may have leaked.</div>
+      ${members().filter((pk) => pk !== me.pk).map((pk) => `<div class="row"><span class="avatar small">${initials(pk)}</span><span class="who" style="font-size:14px">${shortNpub(pk)}</span><button class="btn small ghost" style="margin-left:auto" data-action="remove-member" data-pk="${pk}">Remove</button></div>`).join('') || '<div class="note">No other members yet.</div>'}
     </div>
     <div class="section-title" style="margin-top:18px">Circle</div>
     <div class="card stack">
@@ -277,12 +359,25 @@ function onboardingView(): string {
   } else if (onboardStep === 'join') {
     inner = `
       <h1>Join a circle</h1>
-      <p class="tagline">Paste the invite code someone shared with you.</p>
-      <div class="field" style="text-align:left;margin-bottom:20px"><label for="jcode">Invite code</label><textarea class="input" id="jcode" rows="4" placeholder="Paste code…"></textarea></div>
+      <p class="tagline">Paste an invite code, or join remotely by sharing your key.</p>
+      <div class="field" style="text-align:left;margin-bottom:16px"><label for="jcode">Invite code</label><textarea class="input" id="jcode" rows="3" placeholder="Paste code…"></textarea></div>
       <div class="actions">
-        <button class="btn primary" data-action="do-join">Join circle</button>
+        <button class="btn primary" data-action="do-join">Join with code</button>
+        <button class="btn" data-action="join-remote">Join remotely (share my key)</button>
         <button class="btn ghost" data-action="back">Back</button>
       </div>`
+  } else if (onboardStep === 'await') {
+    const np = persisted.identity ? fullNpub(persisted.identity.pk) : ''
+    inner = `
+      <h1>Join remotely</h1>
+      <p class="tagline">Share your key with whoever's inviting you. You'll join automatically when they send the invite.</p>
+      <div class="qr" id="qr-npub"></div>
+      <div class="invite-code" id="my-npub">${esc(np)}</div>
+      <div class="actions">
+        <button class="btn primary" data-action="copy-npub">Copy my key</button>
+        <button class="btn ghost" data-action="back">Cancel</button>
+      </div>
+      <div class="note" style="margin-top:12px">⟳ Waiting for a secure invite…</div>`
   } else {
     inner = `
       <img class="hero-logo" src="./icon.svg" alt="" />
@@ -298,15 +393,28 @@ function onboardingView(): string {
 
 // ── Wiring ───────────────────────────────────────────────────────────────────
 function wireOnboard(): void {
+  if (onboardStep === 'await') {
+    const qrEl = document.getElementById('qr-npub')
+    if (qrEl && persisted.identity) {
+      try {
+        const qr = qrcode(0, 'M')
+        qr.addData(fullNpub(persisted.identity.pk))
+        qr.make()
+        qrEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true })
+      } catch { qrEl.remove() }
+    }
+  }
   root.querySelectorAll('[data-action]').forEach((node) => {
     node.addEventListener('click', () => {
       const a = node.getAttribute('data-action')
       if (a === 'create') { onboardStep = 'create'; rerenderOnboard() }
       else if (a === 'join') { onboardStep = 'join'; rerenderOnboard() }
-      else if (a === 'back') { onboardStep = 'intro'; rerenderOnboard() }
+      else if (a === 'back') { onboardStep = 'intro'; awaitingInvite = false; rerenderOnboard() }
       else if (a === 'ob-mode') { onboardMode = (node as HTMLElement).dataset.mode as Mode; rerenderOnboard() }
       else if (a === 'do-create') doCreate()
       else if (a === 'do-join') doJoin()
+      else if (a === 'join-remote') doJoinRemote()
+      else if (a === 'copy-npub') copyNpub()
     })
   })
 }
@@ -414,6 +522,142 @@ function refresh(): void {
   else render()
 }
 
+// ── Members, invites & reseed ────────────────────────────────────────────────
+function members(): string[] { return persisted.circle?.members ?? [] }
+
+function ensureMember(pk: string): void {
+  const c = persisted.circle
+  if (!c) return
+  const m = c.members ?? []
+  if (!m.includes(pk)) { c.members = [...m, pk]; store.save(persisted) }
+}
+
+function ensureInviteSub(): void {
+  const id = persisted.identity
+  if (!id) { stopInviteSub?.(); stopInviteSub = null; inviteSubKey = ''; return }
+  const key = `${id.pk}@${persisted.relayUrl}`
+  if (key === inviteSubKey && stopInviteSub) return
+  stopInviteSub?.()
+  inviteSubKey = key
+  stopInviteSub = svc.subscribeGiftWraps(persisted.relayUrl, id.pk, (e) => onInviteWrap(e))
+}
+
+function onInviteWrap(e: { content: string; tags: string[][] }): void {
+  const id = persisted.identity
+  if (!id) return
+  const payload = readInvite(e, id.skHex)
+  if (!payload) return
+  if (payload.t === 'invite') {
+    if (persisted.circle && persisted.circle.id === payload.id) return
+    persisted.circle = { id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m, members: [id.pk], checkinInterval: 0 }
+    store.save(persisted)
+    beacons.clear(); alerts.clear(); checkins.clear()
+    awaitingInvite = false
+    onboardStep = 'intro'
+    tab = 'home'
+    toast(`You've joined ${payload.n}`)
+    render()
+  } else if (payload.t === 'reseed' && persisted.circle && payload.id === persisted.circle.id) {
+    persisted.circle = { ...persisted.circle, seedHex: payload.s }
+    store.save(persisted)
+    beacons.clear(); alerts.clear(); checkins.clear()
+    toast('Circle key was rotated')
+    refresh()
+  }
+}
+
+function sendInvite(): void {
+  const c = persisted.circle
+  const id = persisted.identity
+  if (!c || !id) return
+  const raw = (document.getElementById('invite-npub') as HTMLInputElement | null)?.value?.trim()
+  if (!raw) { toast('Paste an npub to invite'); return }
+  let pk: string
+  try { pk = raw.startsWith('npub') ? store.npubToHex(raw) : raw } catch { toast('Invalid npub'); return }
+  if (!/^[0-9a-f]{64}$/.test(pk)) { toast('Invalid key'); return }
+  if (pk === id.pk) { toast("That's your own key"); return }
+  try {
+    const wrap = buildInviteWrap(id.skHex, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode })
+    void svc.publishSigned(persisted.relayUrl, wrap as never)
+    ensureMember(pk)
+    toast('Secure invite sent')
+    render()
+  } catch { toast('Could not send invite') }
+}
+
+function reseedCircle(removePk?: string): void {
+  const c = persisted.circle
+  const id = persisted.identity
+  if (!c || !id) return
+  const seed = store.newSeed()
+  const recipients = (c.members ?? []).filter((pk) => pk !== id.pk && pk !== removePk)
+  try {
+    if (recipients.length) {
+      for (const w of buildReseedWraps(id.skHex, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode })) {
+        void svc.publishSigned(persisted.relayUrl, w as never)
+      }
+    }
+    persisted.circle = { ...c, seedHex: seed, members: (c.members ?? []).filter((pk) => pk !== removePk) }
+    store.save(persisted)
+    beacons.clear(); alerts.clear(); checkins.clear()
+    toast(removePk ? 'Member removed & key rotated' : 'Circle key rotated')
+    render()
+  } catch { toast('Reseed failed') }
+}
+
+// ── Check-in / dead-man's-switch ─────────────────────────────────────────────
+async function sendCheckIn(): Promise<void> {
+  const c = persisted.circle
+  const id = persisted.identity
+  if (!c || !id) return
+  const interval = c.checkinInterval ?? 0
+  try {
+    const tmpl = await buildCheckInSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, intervalSeconds: interval })
+    await svc.publishEvent(persisted.relayUrl, tmpl, id.skHex)
+    if (interval > 0) checkins.set(id.pk, { member: id.pk, timestamp: nowSec(), intervalSeconds: interval })
+    else checkins.delete(id.pk)
+    toast(interval > 0 ? "Checked in — you're OK" : 'Checked out')
+  } catch { toast('Check-in failed') }
+  refresh()
+}
+
+function armCheckin(intervalSeconds: number): void {
+  if (!persisted.circle) return
+  persisted.circle = { ...persisted.circle, checkinInterval: intervalSeconds }
+  store.save(persisted)
+  armingCheckin = false
+  startMonitor()
+  void sendCheckIn()
+}
+
+function disarmCheckin(): void {
+  if (!persisted.circle) return
+  persisted.circle = { ...persisted.circle, checkinInterval: 0 }
+  store.save(persisted)
+  void sendCheckIn() // broadcasts a stand-down (interval 0)
+}
+
+function evaluateCheckinAlarm(): void {
+  const me = persisted.identity?.pk
+  const missed = missedCheckins(classifyCheckins([...checkins.values()], nowSec())).filter((s) => s.member !== me)
+  const was = checkinAlert
+  checkinAlert = missed.length > 0
+  if (checkinAlert && !was) toast(`⚠ ${missed.length === 1 ? 'A member' : `${missed.length} members`} missed a check-in`)
+}
+
+function isEditing(): boolean {
+  const el = document.activeElement
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+}
+
+function startMonitor(): void {
+  if (monitorTimer) return
+  monitorTimer = window.setInterval(() => {
+    evaluateCheckinAlarm()
+    if (!isEditing()) refresh()
+  }, 30_000)
+}
+
 function handleAction(action: string, node: HTMLElement): void {
   switch (action) {
     case 'tab': tab = (node.dataset.tab as typeof tab); render(); break
@@ -421,6 +665,15 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'pickup': void emit('pickup'); break
     case 'copy-invite': copyInvite(); break
+    case 'copy-npub': copyNpub(); break
+    case 'send-invite': sendInvite(); break
+    case 'reseed': reseedCircle(); break
+    case 'remove-member': reseedCircle(node.dataset.pk); break
+    case 'checkin': void sendCheckIn(); break
+    case 'arm-menu': armingCheckin = true; render(); break
+    case 'cancel-arm': armingCheckin = false; render(); break
+    case 'arm': armCheckin(Number(node.dataset.interval)); break
+    case 'disarm-checkin': disarmCheckin(); break
     case 'save-relay': saveRelay(); break
     case 'leave': leave(); break
     case 'add-zone': addMode = true; renderMapPanel(); updatePreview(); break
@@ -461,10 +714,20 @@ function wireSos(node: HTMLElement): void {
 function doCreate(): void {
   const name = (document.getElementById('cname') as HTMLInputElement | null)?.value ?? ''
   persisted.identity ??= store.createIdentity()
-  persisted.circle = store.createCircle(name, onboardMode)
+  persisted.circle = store.createCircle(name, onboardMode, persisted.identity.pk)
   store.save(persisted)
   onboardStep = 'intro'
+  awaitingInvite = false
   tab = 'home'
+  render()
+}
+
+/** Remote join: create an identity, show my npub, and wait for a gift-wrapped invite. */
+function doJoinRemote(): void {
+  persisted.identity ??= store.createIdentity()
+  store.save(persisted)
+  awaitingInvite = true
+  onboardStep = 'await'
   render()
 }
 
@@ -568,6 +831,14 @@ function copyInvite(): void {
   navigator.clipboard?.writeText(code).then(() => toast('Invite code copied'), () => toast('Copy failed — select it manually'))
 }
 
+function copyNpub(): void {
+  const id = persisted.identity
+  if (!id) return
+  let npub = id.pk
+  try { npub = npubEncode(id.pk) } catch { /* keep hex */ }
+  navigator.clipboard?.writeText(npub).then(() => toast('Your key copied'), () => toast('Copy failed'))
+}
+
 function saveRelay(): void {
   const url = (document.getElementById('relay') as HTMLInputElement | null)?.value?.trim()
   if (!url || !url.startsWith('ws')) { toast('Enter a ws:// or wss:// relay URL'); return }
@@ -581,16 +852,23 @@ function leave(): void {
   store.reset()
   stopWatch?.(); stopWatch = null
   stopSub?.(); stopSub = null
+  stopInviteSub?.(); stopInviteSub = null
   subKey = ''
+  inviteSubKey = ''
+  if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = 0 }
   sharing = false
   alertActive = false
   breachActive = false
+  checkinAlert = false
+  awaitingInvite = false
+  armingCheckin = false
   addMode = false
   mapView?.destroy()
   mapView = null
   fix = null
   beacons.clear()
   alerts.clear()
+  checkins.clear()
   persisted = store.load()
   onboardStep = 'intro'
   tab = 'home'
@@ -625,9 +903,14 @@ async function onIncoming(e: { pubkey: string; content: string; tags: string[][]
       const p = await decryptBeacon(deriveBeaconKey(c.seedHex), e.content)
       beacons.set(e.pubkey, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
       if (t === 'pickup' && (!me || e.pubkey !== me.pk)) toast('Pick-up request from your circle')
+    } else if (t === CHECKIN_SIGNAL_TYPE) {
+      const ci = await decryptCheckIn(c.seedHex, e.content)
+      checkins.set(ci.member, ci)
+      evaluateCheckinAlarm()
     } else {
       return
     }
+    ensureMember(e.pubkey)
     refresh()
   } catch {
     /* not for us, or undecryptable */
