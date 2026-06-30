@@ -16,7 +16,8 @@ PWA) that:
   (`@capacitor-community/background-geolocation` → `LocationManager` + a
   foreground service, no Google APIs),
 - evaluates the **real** flock geofence (`src/geofence.ts` `isBreach`) on every
-  fix,
+  fix — recording *detection* latency (inside→outside); production adds a
+  sub-second relay publish on top, so the spike grades detection (the dominant term),
 - persists the whole session with `@capacitor/preferences` so it **survives the
   WebView being backgrounded / killed** (the entire point), and
 - shows live pass/fail numbers and a one-tap **Copy session JSON** to get the raw
@@ -112,8 +113,10 @@ and move on.
 > GrapheneOS runs only on Pixel hardware — there is **no GrapheneOS emulator
 > image**, and cloud device farms don't offer it. The emulator also can't
 > represent real Doze, radio wake-ups, or battery. So this tier proves
-> "route → fix → `isBreach` → breach signal → notification" end-to-end and
-> catches wiring/harness bugs — it does **not** answer #1 (cadence), #3 (Doze)
+> the path fires end-to-end — route → background fix → `isBreach` flips →
+> transition detected — and catches wiring/harness bugs. On the emulator the
+> cadence/latency numbers reflect your *injected* route, not real GPS, so read
+> them as "did it fire", not as timings. It does **not** answer #1 (cadence), #3 (Doze)
 > or #6 (battery), and it is **not** the decision gate. Green here means "the
 > code works", not "the platform works".
 
@@ -131,7 +134,7 @@ and move on.
 - CLI single point (**lon first**): `adb emu geo fix <lon> <lat>`
 
 Set the safe zone in the app first, then play a route that exits it → watch the
-`#2` breach latency populate.
+breach register (its latency reflects your injected route speed, not real GPS).
 
 **Force Doze** (functional only — *not* representative of a real device):
 

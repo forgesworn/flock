@@ -85,7 +85,7 @@ function wire(root: HTMLElement): void {
 
   byId('zone')?.addEventListener('click', async () => {
     const r = Number((root.querySelector('#radius') as HTMLInputElement | null)?.value || 150)
-    await h.setZoneHere(r)
+    try { await h.setZoneHere(r) } catch { alert('No location yet — inject one (emulator: ⋮ → Location), then try again.') }
     render(root)
   })
   byId('start')?.addEventListener('click', async () => { await h.startWatch(); render(root) })

@@ -33,13 +33,15 @@ it. What you *can* do without one:
 
 | Tier | Environment | Answers | Cost |
 |------|-------------|---------|------|
-| 0 | **Android emulator** (AOSP image, no Google APIs) | Functional path only: route → fix → `isBreach` → breach signal → notification. Catches harness/wiring bugs. | free |
+| 0 | **Android emulator** (AOSP image, no Google APIs) | Functional path only: route → background fix → `isBreach` flips → transition detected. Catches harness/wiring bugs. | free |
 | 1 | **Real stock-Android phone** (a tester's, cheap second-hand, or a cloud farm) | Real Doze / GPS / battery — a strong *proxy*, since GrapheneOS is AOSP and, if anything, stricter. | low / borrow |
 | 2 | **GrapheneOS Pixel** | The de-Googled question definitively — **the gate**. | a Pixel |
 
 Tier 0 proves "the code works", **not** "the platform works": it cannot answer #1
 (cadence), #3 (Doze) or #6 (battery) — the emulator doesn't represent real power
-management or radios. Note too that the **PWA in live** only ever tests the
+management or radios, and the cadence/latency numbers it shows reflect the
+*injected* route, not real GPS (read them as "did the path fire"). Note too that
+the **PWA in live** only ever tests the
 *foreground*; background breach detection is exactly what the PWA can't do, so a
 live-site test doesn't touch this gate either. The real-world equivalent of Tier 1
 is sideloading the **Capacitor APK** onto a real handset. Emulator commands are in
