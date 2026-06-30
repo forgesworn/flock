@@ -30,25 +30,29 @@ VITE_TILE_URL=https://tiles.example.com/{z}/{x}/{y}.png \
 npm run build:app
 ```
 
-## Canonical deploy — flock.forgesworn.dev (Hetzner + Caddy)
+## Canonical deploy — flock.forgesworn.dev (Hetzner + Caddy)  ✅ LIVE
 
-DNS `A` record `flock.forgesworn.dev → 95.217.39.110` is already set.
+Shared box (`deploy@95.217.39.110`) running many sites. The deploy is **fully
+isolated** — own web root + one `conf.d` drop-in — and **never touches the shared
+`/etc/caddy/Caddyfile`** (which `import`s `conf.d/*.Caddyfile`).
 
-**One-time, on the host:**
+**One-time setup (already done):**
 
 ```sh
-sudo apt install -y caddy          # or your distro's package
-sudo mkdir -p /var/www/flock
-# add the flock.forgesworn.dev block from deploy/Caddyfile to /etc/caddy/Caddyfile
-sudo systemctl reload caddy        # Caddy fetches the TLS cert automatically
+# isolated, deploy-owned web root
+ssh deploy@95.217.39.110 'sudo mkdir -p /var/www/flock && sudo chown -R deploy:deploy /var/www/flock'
+# additive site drop-in (deploy/Caddyfile → conf.d, capital-C extension to match the import glob)
+cat deploy/Caddyfile | ssh deploy@95.217.39.110 'sudo tee /etc/caddy/conf.d/flock.forgesworn.dev.Caddyfile >/dev/null'
+# ALWAYS validate before reloading a shared box, then graceful reload (not restart)
+ssh deploy@95.217.39.110 'sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && sudo systemctl reload caddy'
 ```
 
-**Each deploy, from this repo:**
+**Each deploy, from this repo (content only — no reload needed):**
 
 ```sh
 npm run deploy
-# = build dist-app + rsync to root@95.217.39.110:/var/www/flock
-# override target: HOST=user@host REMOTE_DIR=/srv/flock npm run deploy
+# = build dist-app + rsync to deploy@95.217.39.110:/var/www/flock
+# override: HOST=user@host REMOTE_DIR=/srv/flock npm run deploy
 ```
 
 ## Self-hosting (anyone)

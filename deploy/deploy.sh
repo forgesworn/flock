@@ -8,7 +8,9 @@
 #   VITE_DEFAULT_RELAY=wss://relay.example.com ./deploy/deploy.sh
 set -eu
 
-HOST="${HOST:-root@95.217.39.110}"
+# Content updates are just an rsync — Caddy serves the static files live, no
+# reload needed (only the one-time conf.d drop-in needed a reload; see DEPLOY.md).
+HOST="${HOST:-deploy@95.217.39.110}"
 REMOTE_DIR="${REMOTE_DIR:-/var/www/flock}"
 
 echo "→ building dist-app"

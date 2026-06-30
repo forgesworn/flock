@@ -2,9 +2,12 @@
 
 > Coercion-resistant family & friends safety and privacy-preserving location sharing.
 
-**Status:** 🛠️ Core library in progress. The `@forgesworn/flock` library layer
-(geofence, policy, signals, night-out) is built and tested; the PWA and native
-shell are not started. Start with [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+**Status:** 🛠️ Preview live at **https://flock.forgesworn.dev/**. The
+`@forgesworn/flock` library (geofence, policy, signals, night-out, check-in) and
+the PWA (onboarding, status orb, SOS/pick-me-up, map+geofences, secure invites,
+reseed, dead-man's-switch) are built and tested. **Next: a privacy-by-architecture
+foundation rework** (gift-wrap-everything, nsec-tree personas/epochs, multi-circle)
+— see [`docs/PRIVACY.md`](docs/PRIVACY.md). Start with [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 (the stack & why), [`docs/FORGESWORN-TOOLKIT.md`](docs/FORGESWORN-TOOLKIT.md)
 (how flock uses the ForgeSworn freedom-tech toolset),
 [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md), the protocol spec
