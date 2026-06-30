@@ -35,7 +35,12 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 - [x] Create / join (in-person QR + remote gift-wrap) — *done, to be re-based on Phase A.*
 - [x] Reseed / remove member — *done (hand-rolled); migrate to **dominion**.*
 - [x] **Buzz** — one-tap encrypted ping to the circle with a chosen reason (preset or custom; adults can assign their own); receiver's phone **vibrates + shows a banner**; optional **targeted** buzz (parent → child). `buzz.ts` lib + Circle UI.
-- [ ] **Disband / destroy a group** — owner tombstones the group (canary-kit `dissolveGroup` + replaceable-state tombstone / NIP-40 immediate expiry); members' apps drop it and wipe local keys.
+- [x] **Disband / destroy a group** (`disband.ts`) — a member broadcasts a
+  gift-wrapped **disband tombstone** to the circle inbox; every member's app drops
+  the circle and **wipes its seed** (`removeCircle`). The transport complement to
+  canary-kit's `dissolveGroup`; the relay sees only an opaque `kind:1059`. Inline
+  two-step confirm in the UI. **Verified end-to-end across two members** (localhost
+  member A ↔ live-site member B, over relay.trotters.cc — B dropped the circle).
 - [ ] **dominion** — epoch-based access control with tiers (guardians vs children).
 
 ## Phase C — Privacy features
