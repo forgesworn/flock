@@ -9,3 +9,4 @@ export * from 'canary-kit'
 
 // --- flock additions ---
 export * from './geofence.js'
+export * from './policy.js'

@@ -18,6 +18,10 @@
     "./geofence": {
       "types": "./dist/geofence.d.ts",
       "import": "./dist/geofence.js"
+    },
+    "./policy": {
+      "types": "./dist/policy.d.ts",
+      "import": "./dist/policy.js"
     }
   },
   "files": [
