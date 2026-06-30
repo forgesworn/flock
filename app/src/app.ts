@@ -7,6 +7,7 @@ import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
 import { PRIVATE_RELAYS } from './relays'
+import { deriveCircleSeed } from './keys'
 import { encode, decode } from 'geohash-kit'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -656,14 +657,16 @@ async function reseedCircle(removePk?: string): Promise<void> {
   const c = persisted.circle
   const signer = getSigner()
   if (!c || !signer) return
-  const seed = store.newSeed()
+  persisted.circleRootHex ??= store.newSeed()
+  const epoch = (c.epoch ?? 0) + 1
+  const seed = deriveCircleSeed(persisted.circleRootHex, c.id, epoch)
   const recipients = (c.members ?? []).filter((pk) => pk !== signer.pubkey && pk !== removePk)
   try {
     if (recipients.length) {
       const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode })
       for (const w of wraps) await svc.publishSigned(persisted.relayUrl, w as never)
     }
-    persisted.circle = { ...c, seedHex: seed, members: (c.members ?? []).filter((pk) => pk !== removePk) }
+    persisted.circle = { ...c, seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) }
     store.save(persisted)
     beacons.clear(); alerts.clear(); checkins.clear()
     toast(removePk ? 'Member removed & key rotated' : 'Circle key rotated')
@@ -806,7 +809,8 @@ function wireSos(node: HTMLElement): void {
 function doCreate(): void {
   const name = (document.getElementById('cname') as HTMLInputElement | null)?.value ?? ''
   persisted.identity ??= store.createIdentity()
-  persisted.circle = store.createCircle(name, onboardMode, persisted.identity.pk)
+  persisted.circleRootHex ??= store.newSeed()
+  persisted.circle = store.createCircle(name, onboardMode, persisted.identity.pk, persisted.circleRootHex)
   store.save(persisted)
   onboardStep = 'intro'
   awaitingInvite = false

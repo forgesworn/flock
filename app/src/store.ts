@@ -5,6 +5,7 @@ import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { decode as nip19decode } from 'nostr-tools/nip19'
 import type { Geofence } from '@forgesworn/flock'
 import { PRIVATE_RELAYS } from './relays'
+import { deriveCircleSeed } from './keys'
 
 export type Mode = 'family' | 'nightout'
 /** A local identity has `skHex`; a Signet identity is `pk`-only (key in the signer). */
@@ -19,6 +20,8 @@ export interface Circle {
   members?: string[]
   /** Dead-man's-switch cadence in seconds; 0/undefined = disarmed. */
   checkinInterval?: number
+  /** nsec-tree derivation epoch; reseed = epoch + 1 (creator-side). */
+  epoch?: number
 }
 export interface Persisted {
   identity: Identity | null
@@ -27,6 +30,8 @@ export interface Persisted {
   geofences: Geofence[]
   /** How the identity authenticates: a local key, or a Signet/bunker signer. */
   authMethod?: AuthMethod
+  /** Local secret from which circle seeds are deterministically derived (nsec-tree). */
+  circleRootHex?: string
 }
 
 const KEY = 'flock:v1'
@@ -60,8 +65,17 @@ export function createIdentity(): Identity {
   return { skHex: toHex(sk), pk: getPublicKey(sk) }
 }
 
-export function createCircle(name: string, mode: Mode, ownerPk: string): Circle {
-  return { id: randHex(8), seedHex: randHex(32), name: name.trim() || 'My circle', mode, members: [ownerPk], checkinInterval: 0 }
+export function createCircle(name: string, mode: Mode, ownerPk: string, circleRootHex: string): Circle {
+  const id = randHex(8)
+  return {
+    id,
+    seedHex: deriveCircleSeed(circleRootHex, id, 0),
+    name: name.trim() || 'My circle',
+    mode,
+    members: [ownerPk],
+    checkinInterval: 0,
+    epoch: 0,
+  }
 }
 
 /** A fresh 32-byte group seed (hex) — used when reseeding. */
