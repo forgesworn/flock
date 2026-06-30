@@ -41,7 +41,10 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix"
+    "lint:fix": "eslint src/ --fix",
+    "dev": "vite",
+    "build:app": "vite build",
+    "preview:app": "vite preview"
   },
   "keywords": [
     "flock",
@@ -69,11 +72,17 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@fontsource-variable/fraunces": "^5.2.5",
+    "@fontsource-variable/hanken-grotesk": "^5.2.5",
     "@types/node": "^25.6.0",
     "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^10.0.3",
+    "geohash-kit": "^1.5.1",
+    "nostr-tools": "^2.23.3",
+    "qrcode-generator": "^2.0.4",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.57.1",
+    "vite": "^8.0.0",
     "vitest": "^4.1.0"
   }
 }

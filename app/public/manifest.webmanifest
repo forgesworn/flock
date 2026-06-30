@@ -1,0 +1,20 @@
+{
+  "name": "flock",
+  "short_name": "flock",
+  "description": "Coercion-resistant family & friends safety and privacy-preserving location sharing.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e1116",
+  "theme_color": "#0e1116",
+  "categories": ["lifestyle", "navigation", "social"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
