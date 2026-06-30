@@ -11,6 +11,7 @@ night-out sharing over Nostr.
 
 - `README.md` — overview, module status, the make-or-break platform constraint.
 - `docs/ARCHITECTURE.md` — the full stack and the rationale for each choice.
+- `docs/FORGESWORN-TOOLKIT.md` — how flock maps onto the ForgeSworn freedom-tech toolset (the real focus).
 - `FLOCK.md` — protocol spec (event kinds, payloads, privacy invariants).
 - `docs/plans/DESIGN.md` — architecture + phased roadmap.
 - `docs/research/2026-06-30-feasibility-research.md` — the cited feasibility research.

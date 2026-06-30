@@ -5,8 +5,10 @@
 **Status:** 🛠️ Core library in progress. The `@forgesworn/flock` library layer
 (geofence, policy, signals, night-out) is built and tested; the PWA and native
 shell are not started. Start with [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-(the stack & why), [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md), the protocol
-spec [`FLOCK.md`](FLOCK.md), and the
+(the stack & why), [`docs/FORGESWORN-TOOLKIT.md`](docs/FORGESWORN-TOOLKIT.md)
+(how flock uses the ForgeSworn freedom-tech toolset),
+[`docs/plans/DESIGN.md`](docs/plans/DESIGN.md), the protocol spec
+[`FLOCK.md`](FLOCK.md), and the
 [feasibility research](docs/research/2026-06-30-feasibility-research.md).
 
 `flock` extends [`canary-kit`](https://github.com/forgesworn/canary-kit) (which itself
