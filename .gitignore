@@ -12,6 +12,8 @@ coverage/
 .vitest/
 test-results/
 playwright-report/
+blob-report/
+playwright/.cache/
 
 # Capacitor / native
 android/

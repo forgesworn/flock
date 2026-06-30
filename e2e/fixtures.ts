@@ -1,0 +1,185 @@
+// Shared e2e helpers: spin up an isolated "person" (a fresh browser context =
+// a fresh device + identity), and drive the real UI by the same data-action
+// hooks the app wires. Everything two people do to each other goes through the
+// live relay, so assertions on the *other* person's screen prove the transport.
+
+import { test as base, expect, type Browser, type Page } from '@playwright/test'
+import { BASE_URL } from '../playwright.config'
+
+export { expect }
+export const test = base
+
+/** Geolocations used across specs (London + a point ~1.4 km away in Soho). */
+export const LONDON = { latitude: 51.5074, longitude: -0.1278 }
+export const SOHO = { latitude: 51.5137, longitude: -0.1337 }
+/** Far enough to sit outside a 1 km London safe zone (Paris). */
+export const PARIS = { latitude: 48.8566, longitude: 2.3522 }
+
+export type Mode = 'family' | 'nightout'
+export type Ttl = 'ongoing' | 'today' | 'custom'
+
+/**
+ * Give a device time to register its relay subscription before the other side
+ * acts. flock keeps gift-wrapped signals (kind:1059) flowing through a relay; a
+ * receiver must have its REQ in flight before the sender publishes, so we settle
+ * briefly after any step that (re)establishes a subscription.
+ */
+export async function settle(page: Page, ms = 1500): Promise<void> {
+  await page.waitForTimeout(ms)
+}
+
+/** Open a brand-new device: isolated storage, geolocation + clipboard granted. */
+export async function newPerson(browser: Browser, geolocation = LONDON): Promise<Page> {
+  const context = await browser.newContext({
+    baseURL: BASE_URL,
+    permissions: ['geolocation', 'clipboard-read', 'clipboard-write'],
+    geolocation,
+    locale: 'en-GB',
+  })
+  const page = await context.newPage()
+  await page.goto('/')
+  // Onboarding hero is the first screen for a fresh identity.
+  await expect(page.getByRole('button', { name: 'Create a circle' })).toBeVisible()
+  return page
+}
+
+const sel = {
+  create: '[data-action="create"]',
+  doCreate: '[data-action="do-create"]',
+  join: '[data-action="join"]',
+  doJoin: '[data-action="do-join"]',
+  joinRemote: '[data-action="join-remote"]',
+  copyInvite: '[data-action="copy-invite"]',
+  sendInvite: '[data-action="send-invite"]',
+  sos: '[data-action="sos-hold"]',
+  pickup: '[data-action="pickup"]',
+  toggleShare: '[data-action="toggle-share"]',
+  tab: (t: string) => `[data-action="tab"][data-tab="${t}"]`,
+}
+
+/** Create a circle from the onboarding hero. Lands on the Circle tab. */
+export async function createCircle(
+  page: Page,
+  opts: { name: string; mode?: Mode; ttl?: Ttl } = { name: 'Circle' },
+): Promise<void> {
+  const { name, mode = 'family', ttl = 'ongoing' } = opts
+  await page.click(sel.create)
+  await page.fill('#cname', name)
+  await page.click(`[data-action="ob-mode"][data-mode="${mode}"]`)
+  await page.click(`[data-action="ob-ttl"][data-ttl="${ttl}"]`)
+  await page.click(sel.doCreate)
+  // doCreate sets tab='circle' — invite section is the proof we landed.
+  await expect(page.locator(sel.copyInvite)).toBeVisible()
+  await settle(page) // let the creator's inbox subscription come up
+}
+
+/** Copy the in-person invite code (carries the seed) from the Circle tab. */
+export async function inviteCode(page: Page): Promise<string> {
+  await gotoTab(page, 'circle')
+  await expect(page.locator(sel.copyInvite)).toBeVisible()
+  await page.click(sel.copyInvite)
+  const code = await page.evaluate(() => navigator.clipboard.readText())
+  expect(code, 'invite code should be a non-empty string').toBeTruthy()
+  return code
+}
+
+/** Join an existing circle by pasting an invite code. Lands on Home. */
+export async function joinByCode(page: Page, code: string): Promise<void> {
+  await page.click(sel.join)
+  await page.fill('#jcode', code)
+  await page.click(sel.doJoin)
+  // doJoin sets tab='home' — the bottom nav appears once we're in the app.
+  await expect(page.locator(sel.tab('circle'))).toBeVisible()
+  await settle(page) // let the joiner subscribe before the sender acts
+}
+
+/** The recipient half of a remote (gift-wrap) invite: reveal & return my npub. */
+export async function joinRemoteAwait(page: Page): Promise<string> {
+  await page.click(sel.join)
+  await page.click(sel.joinRemote)
+  await expect(page.locator('#my-npub')).toBeVisible()
+  const npub = (await page.locator('#my-npub').textContent())?.trim() ?? ''
+  expect(npub.startsWith('npub')).toBeTruthy()
+  await settle(page) // the awaiter must be subscribed to its own inbox first
+  return npub
+}
+
+/** The sender half of a remote invite: gift-wrap the seed to a recipient npub. */
+export async function sendRemoteInvite(page: Page, npub: string): Promise<void> {
+  await gotoTab(page, 'circle')
+  await page.fill('#invite-npub', npub)
+  await page.click(sel.sendInvite)
+  // On a successful send, sendInvite adds the invitee to the sender's roster —
+  // a durable signal. (The "Secure invite sent" toast is wiped by the immediate
+  // re-render, so it can't be asserted on.)
+  await expect(page.locator('.member')).toHaveCount(2)
+}
+
+export async function gotoTab(page: Page, tab: 'home' | 'map' | 'circle' | 'you'): Promise<void> {
+  await page.click(sel.tab(tab))
+}
+
+/** Press-and-hold the SOS until it fires (>1.4 s), from the Home tab. */
+export async function sendSOS(page: Page): Promise<void> {
+  await gotoTab(page, 'home')
+  const sos = page.locator(sel.sos)
+  await expect(sos).toBeVisible()
+  await sos.dispatchEvent('pointerdown')
+  await page.waitForTimeout(1700) // hold past the 1.4 s arm threshold
+  await sos.dispatchEvent('pointerup')
+}
+
+/** Start foreground location sharing (enables fixes for pick-up / coarse). */
+export async function startSharing(page: Page): Promise<void> {
+  await gotoTab(page, 'home')
+  await page.click(sel.toggleShare)
+  await settle(page) // let the first geolocation fix land before we act on it
+}
+
+/** Request a pick-up (needs a location fix first — call startSharing). */
+export async function requestPickup(page: Page): Promise<void> {
+  await gotoTab(page, 'home')
+  await page.click(sel.pickup)
+}
+
+/** A member row on the Circle tab, addressed by the pill it currently shows. */
+export function memberPill(page: Page, text: string | RegExp) {
+  return page.locator('.member .pill', { hasText: text })
+}
+
+/** Buzz the circle with a custom reason (from the Circle tab). */
+export async function sendBuzz(page: Page, reason: string): Promise<void> {
+  await gotoTab(page, 'circle')
+  await page.fill('#buzz-custom', reason)
+  await page.click('[data-action="buzz"]:not([data-reason])')
+}
+
+/** Take a 1-hour break (off-grid), optionally with a reason, from Home. */
+export async function takeBreak(page: Page, why?: string): Promise<void> {
+  await gotoTab(page, 'home')
+  await page.click('[data-action="ask-dark"]')
+  await page.click('[data-action="dark-dur"][data-sec="3600"]')
+  if (why) await page.fill('#dark-why', why)
+  await page.click('[data-action="do-dark"]')
+}
+
+/** Disband the active circle for everyone (from the You tab, two-step confirm). */
+export async function disbandCircle(page: Page): Promise<void> {
+  await gotoTab(page, 'you')
+  await page.click('[data-action="ask-disband"]')
+  await page.click('[data-action="disband"]')
+}
+
+/** Set a private nickname for the first other member shown on the Circle tab. */
+export async function setPetname(page: Page, name: string): Promise<void> {
+  await gotoTab(page, 'circle')
+  await page.locator('.member [data-action="edit-petname"]').first().click()
+  await page.locator('.member.editing input').fill(name)
+  await page.click('[data-action="save-petname"]')
+}
+
+/** Add another circle (the ＋ chip) — lands on the "Add a circle" chooser. */
+export async function addCircle(page: Page): Promise<void> {
+  await page.click('[data-action="add-circle"]')
+  await expect(page.locator('[data-action="create"]')).toBeVisible()
+}
