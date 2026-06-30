@@ -13,6 +13,7 @@ night-out sharing over Nostr.
 - `docs/ARCHITECTURE.md` — the full stack and the rationale for each choice.
 - `docs/FORGESWORN-TOOLKIT.md` — how flock maps onto the ForgeSworn freedom-tech toolset (the real focus).
 - `docs/PRIVACY.md` — relay threat model + privacy-by-architecture; no-report zones, off-grid mode, multi-group.
+- `docs/ROADMAP.md` — the tracked feature backlog (single source of truth; full features, no bugs).
 - `FLOCK.md` — protocol spec (event kinds, payloads, privacy invariants).
 - `docs/plans/DESIGN.md` — architecture + phased roadmap.
 - `docs/research/2026-06-30-feasibility-research.md` — the cited feasibility research.
