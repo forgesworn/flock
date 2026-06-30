@@ -52,14 +52,14 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 
 Two halves that compose into one feature:
 
-- [ ] **Set rendezvous** (flock-native, `rendezvous.ts`) — anyone sets a
-  `{ place, deadline, mode: 'be-back' | 'meet-at', setBy }`. Parent: "home by 6"
-  for kids on bikes/foot; organiser: "The Crown at 8". Distributed as a
-  gift-wrapped signal. Each device computes **ETA** (distance ÷ travel speed for
-  walk/cycle/drive/transit), shows a **countdown + "leave by X to make it"**,
-  detects **arrival** (reuse `geofence.isInside`), and broadcasts **status**
-  (en-route / arrived / **at-risk**). The setter is **alerted if someone won't
-  make it** — exactly the "are the kids going to be back in time" need.
+- [x] **Set rendezvous** (`rendezvous.ts` lib + Circle UI) — anyone sets a
+  `{ place, deadline, mode: 'be-back' | 'meet-at' }`; place by **name/address**
+  (OSM Nominatim geocoding, **no Google**, configurable) or current spot, carrying
+  a precise **geohash** + a **"copy address for a taxi"**. Each device computes
+  **as-the-crow-flies ETA** (walk/cycle/drive/transit), broadcasts **status**
+  (en-route / arrived / **at-risk**), and the setter is **alerted if someone won't
+  make it**. Tested (lib) + deployed. *Still to add: map-pick a place; live
+  countdown tick; rendezvous on the map.*
 - [ ] **Find a fair meeting point** — **rendezvous-kit** `findRendezvous()`:
   members' coarse locations + each one's transport mode → isochrone intersection
   → **Overpass venue search** (pub/café/park, OSM, no key) → **fairness scoring**
