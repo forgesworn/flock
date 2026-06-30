@@ -19,6 +19,10 @@
       "types": "./dist/geofence.d.ts",
       "import": "./dist/geofence.js"
     },
+    "./noreport": {
+      "types": "./dist/noreport.d.ts",
+      "import": "./dist/noreport.js"
+    },
     "./policy": {
       "types": "./dist/policy.d.ts",
       "import": "./dist/policy.js"
@@ -46,6 +50,10 @@
     "./disband": {
       "types": "./dist/disband.d.ts",
       "import": "./dist/disband.js"
+    },
+    "./offgrid": {
+      "types": "./dist/offgrid.d.ts",
+      "import": "./dist/offgrid.js"
     }
   },
   "files": [

@@ -102,6 +102,66 @@ describe('decideEmission — night-out mode (coarse sharing)', () => {
   })
 })
 
+describe('decideEmission — off-grid (deliberately dark)', () => {
+  it('suppresses night-out coarse beacons', () => {
+    const plan = decideEmission({ mode: 'nightout', position: LONDON, offGrid: true })
+    expect(plan).toEqual({ action: 'withhold', precision: 0, reason: 'none' })
+  })
+
+  it('suppresses a geofence breach disclosure', () => {
+    const plan = decideEmission({ mode: 'family', position: { lat: 0, lon: 0 }, geofences: [HOME], offGrid: true })
+    expect(plan).toEqual({ action: 'withhold', precision: 0, reason: 'none' })
+  })
+
+  it('still lets an explicit help through (an SOS is never silenced)', () => {
+    const plan = decideEmission({ mode: 'nightout', position: LONDON, offGrid: true, trigger: 'help' })
+    expect(plan).toEqual({ action: 'full', precision: DEFAULT_PRECISIONS.help, reason: 'help' })
+  })
+
+  it('still lets an explicit pickup through', () => {
+    const plan = decideEmission({ mode: 'family', position: LONDON, offGrid: true, trigger: 'pickup' })
+    expect(plan.reason).toBe('pickup')
+  })
+})
+
+describe('decideEmission — no-report zones (cap disclosure over a sensitive spot)', () => {
+  const NEAR_LONDON: LatLng = { lat: 51.5079, lon: -0.1278 } // ~55 m from LONDON
+  const homeWithhold = { area: { kind: 'circle', centre: LONDON, radiusMetres: 150 } as CircleGeofence, policy: 'withhold' as const }
+  const homeCoarse = { area: { kind: 'circle', centre: LONDON, radiusMetres: 150 } as CircleGeofence, policy: 'coarse' as const }
+
+  it('withholds a breach disclosure while inside a withhold zone', () => {
+    const plan = decideEmission({
+      mode: 'family', position: NEAR_LONDON, geofences: [SCHOOL], noReportZones: [homeWithhold],
+    })
+    // Outside SCHOOL → would be a breach, but inside the no-report zone → withheld.
+    expect(plan).toEqual({ action: 'withhold', precision: 0, reason: 'breach' })
+  })
+
+  it('coarsens a help disclosure but still fires (reason kept)', () => {
+    const plan = decideEmission({
+      mode: 'family', position: NEAR_LONDON, trigger: 'help', noReportZones: [homeCoarse],
+    })
+    expect(plan).toEqual({ action: 'coarse', precision: DEFAULT_PRECISIONS.coarse, reason: 'help' })
+  })
+
+  it('keeps the help reason while withholding location (a location-less SOS)', () => {
+    const plan = decideEmission({
+      mode: 'family', position: NEAR_LONDON, trigger: 'help', noReportZones: [homeWithhold],
+    })
+    expect(plan).toEqual({ action: 'withhold', precision: 0, reason: 'help' })
+  })
+
+  it('caps a night-out coarse beacon to no finer than coarse (already coarse → unchanged)', () => {
+    const plan = decideEmission({ mode: 'nightout', position: NEAR_LONDON, noReportZones: [homeCoarse] })
+    expect(plan).toEqual({ action: 'coarse', precision: DEFAULT_PRECISIONS.coarse, reason: 'nightout' })
+  })
+
+  it('does not cap when outside every no-report zone', () => {
+    const plan = decideEmission({ mode: 'family', position: PARIS, trigger: 'pickup', noReportZones: [homeWithhold] })
+    expect(plan).toEqual({ action: 'full', precision: DEFAULT_PRECISIONS.full, reason: 'pickup' })
+  })
+})
+
 describe('decideEmission — precision overrides', () => {
   it('honours custom precisions', () => {
     const ctx: EmissionContext = { mode: 'nightout', position: LONDON }

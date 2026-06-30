@@ -17,6 +17,7 @@
 
 import { isInside } from './geofence.js'
 import type { LatLng, Geofence } from './geofence.js'
+import { noReportPolicyAt, type NoReportZone, type NoReportPolicy } from './noreport.js'
 
 /** Operating mode. Family is asymmetric (guardian↔child); night-out is symmetric peers. */
 export type EmissionMode = 'family' | 'nightout'
@@ -52,6 +53,17 @@ export interface EmissionContext {
   geofences?: Geofence[]
   /** Explicit user trigger; defaults to 'none'. */
   trigger?: EmissionTrigger
+  /**
+   * Off-grid (deliberately dark). Suppresses *automatic* emission (night-out
+   * beacons, breach disclosure) but NOT an explicit help/pickup trigger.
+   */
+  offGrid?: boolean
+  /**
+   * Inverse geofences. Inside one, the decision is *capped* — even a triggered
+   * full disclosure is withheld or coarsened, so a sensitive address is never
+   * pinned. Applies in every mode.
+   */
+  noReportZones?: NoReportZone[]
 }
 
 /** The policy's decision. */
@@ -95,11 +107,24 @@ export function decideEmission(
   validatePrecision(p.full, 'full')
   validatePrecision(p.help, 'help')
 
-  const trigger: EmissionTrigger = ctx.trigger ?? 'none'
   const position = ctx.position ?? null
+  const base = decideBase(ctx, p, position)
+
+  // No-report cap — applies last, after the base decision, so even a triggered
+  // full disclosure is suppressed over a sensitive address.
+  if (position && ctx.noReportZones?.length) {
+    const cap = noReportPolicyAt(position, ctx.noReportZones)
+    if (cap) return applyNoReportCap(base, cap, p)
+  }
+  return base
+}
+
+/** The base decision, before the no-report cap is applied. */
+function decideBase(ctx: EmissionContext, p: EmissionPrecisions, position: LatLng | null): EmissionPlan {
+  const trigger: EmissionTrigger = ctx.trigger ?? 'none'
   const hasPosition = position !== null
 
-  // 1. Explicit user triggers win — strongest intent.
+  // 1. Explicit user triggers win — strongest intent. These fire even off-grid.
   if (trigger === 'help') {
     return hasPosition
       ? { action: 'full', precision: p.help, reason: 'help' }
@@ -111,12 +136,17 @@ export function decideEmission(
       : { action: 'withhold', precision: 0, reason: 'pickup' }
   }
 
-  // 2. Without a position there is nothing further to emit.
+  // 2. Off-grid suppresses all *automatic* emission (but not the triggers above).
+  if (ctx.offGrid) {
+    return { action: 'withhold', precision: 0, reason: 'none' }
+  }
+
+  // 3. Without a position there is nothing further to emit.
   if (!hasPosition) {
     return { action: 'withhold', precision: 0, reason: 'none' }
   }
 
-  // 3. Family mode — disclose only on a geofence breach (outside every safe zone).
+  // 4. Family mode — disclose only on a geofence breach (outside every safe zone).
   if (ctx.mode === 'family') {
     const fences = ctx.geofences ?? []
     if (fences.length > 0 && !isWithinAnyFence(position, fences)) {
@@ -125,8 +155,20 @@ export function decideEmission(
     return { action: 'withhold', precision: 0, reason: 'none' }
   }
 
-  // 4. Night-out mode — share a coarse, cloaked location.
+  // 5. Night-out mode — share a coarse, cloaked location.
   //    (Geohash truncation gives grid-cell cloaking; planar-Laplace noise for
   //    formal geo-indistinguishability is a future enhancement at the edge.)
   return { action: 'coarse', precision: p.coarse, reason: 'nightout' }
+}
+
+/**
+ * Cap a plan for a no-report zone. `withhold` drops emission entirely (the
+ * reason is kept so the caller can still fire a location-less alert); `coarse`
+ * downgrades a full disclosure to a coarse grid cell.
+ */
+function applyNoReportCap(plan: EmissionPlan, cap: NoReportPolicy, p: EmissionPrecisions): EmissionPlan {
+  if (plan.action === 'withhold') return plan // nothing to emit either way
+  if (cap === 'withhold') return { action: 'withhold', precision: 0, reason: plan.reason }
+  // cap === 'coarse' — never exceed the coarse precision, downgrade full → coarse.
+  return { action: 'coarse', precision: Math.min(plan.precision, p.coarse), reason: plan.reason }
 }

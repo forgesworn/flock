@@ -11,6 +11,7 @@ export * from 'canary-kit/nostr'
 
 // --- flock additions ---
 export * from './geofence.js'
+export * from './noreport.js'
 export * from './policy.js'
 export * from './signals.js'
 export * from './nightout.js'
@@ -18,3 +19,4 @@ export * from './checkin.js'
 export * from './buzz.js'
 export * from './rendezvous.js'
 export * from './disband.js'
+export * from './offgrid.js'
