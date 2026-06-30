@@ -10,6 +10,7 @@ night-out sharing over Nostr.
 ## Read first
 
 - `README.md` — overview, module status, the make-or-break platform constraint.
+- `docs/ARCHITECTURE.md` — the full stack and the rationale for each choice.
 - `FLOCK.md` — protocol spec (event kinds, payloads, privacy invariants).
 - `docs/plans/DESIGN.md` — architecture + phased roadmap.
 - `docs/research/2026-06-30-feasibility-research.md` — the cited feasibility research.
