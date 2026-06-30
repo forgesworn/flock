@@ -1,6 +1,6 @@
 # Phase 0 — GrapheneOS background-location spike
 
-**Date:** 2026-06-30 · **Owner:** TBD · **Status:** not started
+**Date:** 2026-06-30 · **Owner:** TBD · **Status:** harness scaffolded — ready to run on a device (`native/spike/`)
 
 ## Why this exists
 
@@ -26,10 +26,17 @@ battery cost.
 
 ## Setup
 
-1. `native/README.md` steps 1–4 (install, `cap add android`, permissions).
+The measurement harness + step-by-step runbook live in
+[`native/spike/`](../../native/spike/README.md) (a throwaway Capacitor app that
+records fixes, evaluates the real `geofence.ts`, and shows the pass/fail numbers
+below). In short:
+
+1. `native/spike/README.md` steps 1–3 (install plugins, `npm run build:spike`,
+   `cap add android`, permissions).
 2. Grant **“Allow all the time”** location + allow the foreground-service
    notification.
-3. Create a circle, define one small safe zone (~150 m) around a start point.
+3. In the spike app, **Set safe zone here** (~150 m) at a start point, then
+   **Start watch**.
 
 ## Procedure & pass/fail
 

@@ -73,6 +73,7 @@
     "test:e2e:report": "playwright show-report",
     "dev": "vite",
     "build:app": "vite build",
+    "build:spike": "vite build -c vite.spike.config.ts",
     "preview:app": "vite preview",
     "deploy": "sh deploy/deploy.sh"
   },
