@@ -83,8 +83,9 @@ the family/coercion case; possibly overkill for consensual night-out. Decide per
 - [x] `policy` — disclosure-on-event decision (withhold | coarse | full), tested.
 - [x] `signals` — `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078, tested.
 - [x] `nightout` — ephemeral group (NIP-40), presence ("still out / gone home"), separation, tested.
-- [ ] PWA: create/join group, manual **SOS** and **pick-me-up**, guardian alert view.
-- [ ] Night-out PWA view: coarse geo-indistinguishable beacons, "who's still out / who's home".
+- [x] PWA shell: onboarding (create/join circle), status orb, manual **SOS** (hold-to-fire) and **pick-me-up**, circle invites (QR + code), presence list.
+- [x] PWA transport: real `nostr-tools` publish/subscribe of kind-20078 signals; geolocation `watchPosition`; beacon/alert decryption via the flock library.
+- [ ] Polish: live map view, push/notification on incoming help, geofence editor UI.
 
 ### Phase 2 — geofencing
 - [x] On-device geofence engine (point-in-polygon + circular), breach → emission policy *(library; landed early in Phase 1)*.

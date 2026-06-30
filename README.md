@@ -68,10 +68,17 @@ encryption stay at the edge.
 | `policy` | Disclosure-on-event decision: withhold \| coarse \| full, by mode/trigger/breach | ✅ tested |
 | `signals` | `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078 events | ✅ tested |
 | `nightout` | Ephemeral groups (NIP-40), presence ("still out / gone home"), separation ("lost") | ✅ tested |
-| `app/` (PWA) | Foreground UI — manual SOS/pick-me-up, night-out view | ⬜ not started |
+| `app/` (PWA) | Foreground UI — onboarding, status orb, SOS/pick-me-up, circle invites + presence; real Nostr publish/subscribe + geolocation | ✅ MVP |
 | `native/` (Capacitor) | Background geofencing + UnifiedPush | ⬜ not started |
 
-`npm run build` · `npm test` · `npm run typecheck` · `npm run lint`
+**Library:** `npm run build` · `npm test` · `npm run typecheck` · `npm run lint`
+**PWA:** `npm run dev` (localhost) · `npm run build:app` (→ `dist-app/`) · `npm run preview:app`
+
+The PWA is vanilla TS + Vite, fonts self-hosted (Fraunces + Hanken Grotesk — no
+Google CDN), installable (manifest + service worker). It signs and publishes real
+kind-20078 signals via `nostr-tools` and reads them back, decrypting beacons/
+alerts with the flock library. Foreground only — background geofencing needs the
+native shell (Phase 2).
 
 ## Built on canary-kit
 
