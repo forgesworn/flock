@@ -4,6 +4,7 @@
 import * as store from './store'
 import type { Mode } from './store'
 import * as svc from './services'
+import { makeLocalSigner, type FlockSigner } from './signer'
 import { encode, decode } from 'geohash-kit'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -522,6 +523,18 @@ function refresh(): void {
   else render()
 }
 
+// ── Signer (LocalSigner today; SignetSigner next) ────────────────────────────
+let _signer: FlockSigner | null = null
+let _signerFor = ''
+function getSigner(): FlockSigner | null {
+  const id = persisted.identity
+  if (!id) { _signer = null; _signerFor = ''; return null }
+  if (_signer && _signerFor === id.skHex) return _signer
+  _signer = makeLocalSigner(id.skHex)
+  _signerFor = id.skHex
+  return _signer
+}
+
 // ── Members, invites & reseed ────────────────────────────────────────────────
 function members(): string[] { return persisted.circle?.members ?? [] }
 
@@ -613,7 +626,7 @@ async function sendCheckIn(): Promise<void> {
   const interval = c.checkinInterval ?? 0
   try {
     const tmpl = await buildCheckInSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, intervalSeconds: interval })
-    await svc.publishEvent(persisted.relayUrl, tmpl, id.skHex)
+    await svc.publishEvent(persisted.relayUrl, tmpl, getSigner() as FlockSigner)
     if (interval > 0) checkins.set(id.pk, { member: id.pk, timestamp: nowSec(), intervalSeconds: interval })
     else checkins.delete(id.pk)
     toast(interval > 0 ? "Checked in — you're OK" : 'Checked out')
@@ -817,7 +830,7 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
       template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision })
       beacons.set(id.pk, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
     }
-    await svc.publishEvent(persisted.relayUrl, template, id.skHex)
+    await svc.publishEvent(persisted.relayUrl, template, getSigner() as FlockSigner)
     toast(trigger === 'help' ? 'Help sent to your circle' : trigger === 'pickup' ? 'Pick-up request sent' : 'Location shared')
   } catch {
     toast('Could not send — check your relay and connection.')

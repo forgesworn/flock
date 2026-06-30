@@ -1,11 +1,10 @@
 // Transport + sensors: Nostr relay publish/subscribe and foreground geolocation.
 
 import { SimplePool } from 'nostr-tools/pool'
-import { finalizeEvent } from 'nostr-tools/pure'
-import { fromHex } from './store'
+import type { FlockSigner, EventTemplate } from './signer'
 
+export type { EventTemplate }
 export interface Fix { lat: number; lon: number; accuracy: number; at: number }
-export interface EventTemplate { kind: number; content: string; tags: string[][]; created_at: number }
 
 let pool: SimplePool | null = null
 function getPool(): SimplePool {
@@ -13,10 +12,10 @@ function getPool(): SimplePool {
   return pool
 }
 
-/** Sign an unsigned flock builder event and publish it to the relay. */
-export async function publishEvent(relayUrl: string, template: EventTemplate, skHex: string) {
-  const signed = finalizeEvent(template, fromHex(skHex))
-  await Promise.any(getPool().publish([relayUrl], signed))
+/** Sign an unsigned flock builder event via the signer and publish it to the relay. */
+export async function publishEvent(relayUrl: string, template: EventTemplate, signer: FlockSigner) {
+  const signed = await signer.signEvent(template)
+  await Promise.any(getPool().publish([relayUrl], signed as never))
   return signed
 }
 

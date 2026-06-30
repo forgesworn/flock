@@ -20,6 +20,7 @@ import {
 } from '@forgesworn/flock'
 import * as store from '../app/src/store'
 import * as svc from '../app/src/services'
+import { makeLocalSigner } from '../app/src/signer'
 
 interface BgLocation { latitude: number; longitude: number; accuracy: number; time: number }
 interface BgError { code: string; message: string }
@@ -89,5 +90,5 @@ async function onBackgroundFix(loc: BgLocation): Promise<void> {
     geohash,
     precision: plan.precision,
   })
-  await svc.publishEvent(s.relayUrl, template, s.identity.skHex)
+  await svc.publishEvent(s.relayUrl, template, makeLocalSigner(s.identity.skHex))
 }
