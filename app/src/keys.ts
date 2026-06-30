@@ -20,3 +20,14 @@ export function deriveCircleSeed(circleRootHex: string, circleId: string, epoch:
   const identity = derive(root, `flock:circle:${circleId}`, epoch)
   return toHex(identity.privateKey)
 }
+
+/**
+ * Derive the circle's shared **group-inbox** keypair from its seed. Every member
+ * derives the same one. Signals are gift-wrapped (NIP-59) p-tagged to this pubkey,
+ * so the relay sees only `kind:1059` to an opaque inbox — no real pubkeys, types,
+ * or roster. It rotates whenever the seed rotates (reseed = new epoch = new inbox).
+ */
+export function deriveInbox(seedHex: string): { sk: Uint8Array; pk: string } {
+  const id = derive(fromNsec(fromHex(seedHex)), 'flock:inbox', 0)
+  return { sk: id.privateKey, pk: toHex(id.publicKey) }
+}

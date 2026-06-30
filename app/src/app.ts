@@ -7,7 +7,8 @@ import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
 import { PRIVATE_RELAYS } from './relays'
-import { deriveCircleSeed } from './keys'
+import { deriveCircleSeed, deriveInbox } from './keys'
+import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { encode, decode } from 'geohash-kit'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -32,7 +33,6 @@ import {
   decryptBeacon,
   deriveDuressKey,
   decryptDuressAlert,
-  hashGroupId,
   type MemberBeacon,
   type CircleGeofence,
   type CheckIn,
@@ -439,7 +439,12 @@ function wireOnboard(): void {
       if (a === 'create') { onboardStep = 'create'; rerenderOnboard() }
       else if (a === 'join') { onboardStep = 'join'; rerenderOnboard() }
       else if (a === 'back') { onboardStep = 'intro'; awaitingInvite = false; rerenderOnboard() }
-      else if (a === 'ob-mode') { onboardMode = (node as HTMLElement).dataset.mode as Mode; rerenderOnboard() }
+      else if (a === 'ob-mode') {
+        // Flip the mode in place. A full re-render here would discard whatever's
+        // half-typed in the #cname field (it's uncontrolled, read only on create).
+        onboardMode = (node as HTMLElement).dataset.mode as Mode
+        root.querySelectorAll<HTMLElement>('[data-action="ob-mode"]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === onboardMode)))
+      }
       else if (a === 'do-create') doCreate()
       else if (a === 'do-join') doJoin()
       else if (a === 'join-remote') doJoinRemote()
@@ -590,6 +595,16 @@ async function restoreSignet(): Promise<void> {
   } catch { /* leave unsigned; user can re-auth */ }
 }
 
+/** Publish a flock signal as a gift-wrap to the circle's shared inbox (relay sees only kind:1059). */
+async function publishSignal(unsigned: { kind: number; content: string; tags: string[][]; created_at?: number }): Promise<void> {
+  const c = persisted.circle
+  const signer = getSigner()
+  if (!c || !signer) return
+  const inbox = deriveInbox(c.seedHex)
+  const wrap = await giftWrap(signer, inbox.pk, unsigned)
+  await svc.publishSigned(persisted.relayUrl, wrap as never)
+}
+
 // ── Members, invites & reseed ────────────────────────────────────────────────
 function members(): string[] { return persisted.circle?.members ?? [] }
 
@@ -682,7 +697,7 @@ async function sendCheckIn(): Promise<void> {
   const interval = c.checkinInterval ?? 0
   try {
     const tmpl = await buildCheckInSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, intervalSeconds: interval })
-    await svc.publishEvent(persisted.relayUrl, tmpl, getSigner() as FlockSigner)
+    await publishSignal(tmpl)
     if (interval > 0) checkins.set(id.pk, { member: id.pk, timestamp: nowSec(), intervalSeconds: interval })
     else checkins.delete(id.pk)
     toast(interval > 0 ? "Checked in — you're OK" : 'Checked out')
@@ -736,7 +751,7 @@ async function sendBuzz(reason: string, target?: string): Promise<void> {
   if (!r) { toast('Pick or type a reason'); return }
   try {
     const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: r, ...(target ? { target } : {}) })
-    await svc.publishEvent(persisted.relayUrl, tmpl, getSigner() as FlockSigner)
+    await publishSignal(tmpl)
     toast(target ? 'Buzzed' : 'Buzzed everyone')
   } catch { toast('Buzz failed') }
 }
@@ -913,7 +928,7 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
       template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision })
       beacons.set(id.pk, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
     }
-    await svc.publishEvent(persisted.relayUrl, template, getSigner() as FlockSigner)
+    await publishSignal(template)
     toast(trigger === 'help' ? 'Help sent to your circle' : trigger === 'pickup' ? 'Pick-up request sent' : 'Location shared')
   } catch {
     toast('Could not send — check your relay and connection.')
@@ -977,12 +992,18 @@ function leave(): void {
 function ensureSubscription(): void {
   const c = persisted.circle
   if (!c) { stopSub?.(); stopSub = null; subKey = ''; return }
-  const key = `${c.id}@${persisted.relayUrl}`
+  const inbox = deriveInbox(c.seedHex)
+  // Keyed by the inbox so a reseed (new seed → new inbox) re-subscribes.
+  const key = `${c.id}@${persisted.relayUrl}@${inbox.pk}`
   if (key === subKey && stopSub) return
   stopSub?.()
   subKey = key
-  const dTag = `ssg/${hashGroupId(c.id)}`
-  stopSub = svc.subscribeSignals(persisted.relayUrl, dTag, (e) => { void onIncoming(e) })
+  stopSub = svc.subscribeGiftWraps(persisted.relayUrl, inbox.pk, (wrap) => { void onSignalWrap(wrap, inbox.sk) })
+}
+
+async function onSignalWrap(wrap: { pubkey: string; content: string }, inboxSk: Uint8Array): Promise<void> {
+  const rumor = await giftUnwrap(rawNip44Decrypt(inboxSk), wrap)
+  if (rumor) await onIncoming(rumor)
 }
 
 async function onIncoming(e: { pubkey: string; content: string; tags: string[][]; created_at: number }): Promise<void> {

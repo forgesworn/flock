@@ -117,6 +117,25 @@ if (relay) {
     // Give the subscription a moment to register, then publish.
     setTimeout(() => { pool.publish([relay], signed) }, 500)
   })
+  // gift-wrap-everything: confirm the relay forwards kind:1059 by #p (the transport
+  // every flock signal now rides).
+  {
+    const skB = generateSecretKey(); const pkB = getPublicKey(skB)
+    const gw = wrapEvent({ kind: 14, content: 'hello-inbox', tags: [] }, skA, pkB)
+    const got = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 9000)
+      const sub = pool.subscribeMany([relay], { kinds: [1059], '#p': [pkB], ids: [gw.id] }, {
+        onevent: (e) => { clearTimeout(timer); sub.close(); resolve(e) },
+      })
+      setTimeout(() => { pool.publish([relay], gw) }, 500)
+    })
+    if (!got) console.warn('⚠ live relay: kind:1059 #p not received (relay may not forward gift wraps)')
+    else {
+      const r = unwrapEvent(got, skB)
+      assert(r.content === 'hello-inbox', 'live relay: gift-wrap (kind:1059) round-trips by #p — gift-wrap-everything transport OK')
+    }
+  }
+
   pool.close([relay])
 
   if (!received) {
