@@ -15,4 +15,12 @@ describe('barrel exports', () => {
     expect(typeof flock.buildDuressAlert).toBe('function')
     expect(typeof flock.createGroup).toBe('function')
   })
+
+  it('re-exports canary-kit Nostr builders and flock signals/policy', () => {
+    expect(typeof flock.buildSignalEvent).toBe('function')
+    expect(typeof flock.decideEmission).toBe('function')
+    expect(typeof flock.buildLocationSignal).toBe('function')
+    expect(typeof flock.buildHelpSignal).toBe('function')
+    expect(typeof flock.signalTypeForReason).toBe('function')
+  })
 })

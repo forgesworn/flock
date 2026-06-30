@@ -22,6 +22,10 @@
     "./policy": {
       "types": "./dist/policy.d.ts",
       "import": "./dist/policy.js"
+    },
+    "./signals": {
+      "types": "./dist/signals.d.ts",
+      "import": "./dist/signals.js"
     }
   },
   "files": [
