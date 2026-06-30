@@ -95,6 +95,9 @@ Spike protocol written: [`2026-06-30-phase0-graphene-spike.md`](2026-06-30-phase
 - [ ] UnifiedPush + persistent-relay alert delivery.
 
 ### Phase 3 — coercion hardening
+- [x] Secure remote onboarding — NIP-59 gift-wrapped invites (seed encrypted to the recipient's key).
+- [x] Reseed / remove-member — rotate the seed and re-distribute to kept members; locks out a leaked code or removed member.
+- [x] Dead-man's-switch check-ins — encrypted "I'm OK" heartbeats; a missed check-in alarms the circle (`classifyCheckins`).
 - [ ] Silent-alarm duress, observationally identical to normal use (reuse `canary-kit` duress).
 - [ ] Generative duress vocabulary (not a small memorised set).
 - [ ] Liveness challenges; anti-tamper; constant-observable-behaviour guarantees.

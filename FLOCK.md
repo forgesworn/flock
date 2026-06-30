@@ -81,6 +81,7 @@ not stored by relays. Four types:
 | `breach` | `BeaconPayload` | beacon key | left every geofence |
 | `pickup` | `BeaconPayload` | beacon key | "pick me up" pressed |
 | `help`  | `DuressAlert`  | duress key | SOS / duress |
+| `checkin` | `CheckIn {member, timestamp, intervalSeconds}` | group envelope key (`deriveGroupKey`) | dead-man's-switch heartbeat |
 
 `BeaconPayload` (`encryptBeacon`/`decryptBeacon`):
 
@@ -98,6 +99,33 @@ persona, master}` for propagation and `precision` upgraded toward 11.
 > sender + event kind from relays — recommended for family mode; optional for
 > consensual night-out. (Gift-wrapping live signals is a forward step from
 > canary-kit's current AES-GCM envelope path.)
+
+### 3.4 Secure onboarding & reseed (NIP-59)
+
+The circle **seed** is the shared secret. Two distribution paths:
+
+- **In person** — the seed is encoded into a QR/text invite code and scanned/typed.
+  The seed never touches a network (strongest).
+- **Remote** — the seed is **gift-wrapped (NIP-59)** to a specific recipient
+  pubkey: a kind-14 rumour `{t:'invite', id, s:seed, n, m}` → seal (kind 13) →
+  gift wrap (kind 1059), published `#p`-tagged to the recipient. Only they can
+  unwrap it; the relay learns neither sender nor contents. The recipient shares
+  their npub (public, non-secret) out of band first.
+
+**Reseed / member removal** reuses the same primitive: generate a fresh seed and
+`wrapManyEvents` it as `{t:'reseed', …}` to the members you keep. A removed member
+is simply excluded from the recipient set, so they never receive the new seed and
+are locked out. Old beacons/alerts under the previous seed no longer decrypt.
+
+### 3.5 Check-in / dead-man's-switch
+
+A member arms a cadence and broadcasts an encrypted `checkin` (`t=checkin`,
+envelope-keyed) on each manual "I'm OK". Every device runs `classifyCheckins`:
+`ok` while within the interval, `overdue` within a grace window, **`missed`**
+(the alarm) beyond it. Absence of action raises the alarm — the dead-man's-switch.
+A stand-down is a final check-in with `intervalSeconds <= 0`. **Auto-sending is
+deliberately not done** — the user must actively check in, so incapacitation
+surfaces as a missed check-in.
 
 ## 4. Disclosure-on-event policy
 

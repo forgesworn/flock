@@ -68,6 +68,7 @@ encryption stay at the edge.
 | `policy` | Disclosure-on-event decision: withhold \| coarse \| full, by mode/trigger/breach | ✅ tested |
 | `signals` | `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078 events | ✅ tested |
 | `nightout` | Ephemeral groups (NIP-40), presence ("still out / gone home"), separation ("lost") | ✅ tested |
+| `checkin` | Dead-man's-switch — encrypted "I'm OK" heartbeats; `ok`/`overdue`/`missed` classifier | ✅ tested |
 | `app/` (PWA) | Foreground UI — onboarding, status orb, SOS/pick-me-up, circle invites + presence; real Nostr publish/subscribe + geolocation | ✅ MVP |
 | `native/` (Capacitor) | Background geofencing + UnifiedPush — config + bridge scaffolded, reuses the same policy/transport | 🧱 scaffold |
 
