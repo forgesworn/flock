@@ -1,0 +1,67 @@
+{
+  "name": "@forgesworn/flock",
+  "version": "0.0.0",
+  "description": "Coercion-resistant family & friends safety and privacy-preserving location sharing. Built on canary-kit over Nostr.",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./geofence": {
+      "types": "./dist/geofence.d.ts",
+      "import": "./dist/geofence.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
+  },
+  "keywords": [
+    "flock",
+    "family-safety",
+    "location-sharing",
+    "geofence",
+    "duress",
+    "coercion-resistance",
+    "nostr",
+    "privacy",
+    "canary-kit",
+    "spoken-token"
+  ],
+  "author": "forgesworn",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/forgesworn/flock.git"
+  },
+  "bugs": {
+    "url": "https://github.com/forgesworn/flock/issues"
+  },
+  "dependencies": {
+    "canary-kit": "^2.10.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.6.0",
+    "@vitest/coverage-v8": "^4.1.0",
+    "eslint": "^10.0.3",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.57.1",
+    "vitest": "^4.1.0"
+  }
+}

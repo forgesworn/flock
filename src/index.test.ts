@@ -1,0 +1,18 @@
+import { describe, it, expect } from 'vitest'
+import * as flock from './index.js'
+
+describe('barrel exports', () => {
+  it('re-exports flock geofence helpers', () => {
+    expect(typeof flock.isInside).toBe('function')
+    expect(typeof flock.isBreach).toBe('function')
+    expect(typeof flock.haversineMetres).toBe('function')
+  })
+
+  it('re-exports canary-kit primitives', () => {
+    // A representative sample of the canary-kit surface flock builds on.
+    expect(typeof flock.deriveBeaconKey).toBe('function')
+    expect(typeof flock.encryptBeacon).toBe('function')
+    expect(typeof flock.buildDuressAlert).toBe('function')
+    expect(typeof flock.createGroup).toBe('function')
+  })
+})
