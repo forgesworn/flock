@@ -233,3 +233,13 @@ export async function reseed(page: Page): Promise<void> {
   await gotoTab(page, 'you')
   await page.click('[data-action="reseed"]')
 }
+
+/** This device's own public key (hex), read from local state. */
+export async function myPubkey(page: Page): Promise<string> {
+  const pk = await page.evaluate(() => {
+    const raw = localStorage.getItem('flock:v1')
+    return raw ? (JSON.parse(raw).identity?.pk ?? '') : ''
+  })
+  expect(pk, 'identity pubkey should be present').toMatch(/^[0-9a-f]{64}$/)
+  return pk
+}
