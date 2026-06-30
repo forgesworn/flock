@@ -4,7 +4,9 @@
 import * as store from './store'
 import type { Mode } from './store'
 import * as svc from './services'
-import { makeLocalSigner, type FlockSigner } from './signer'
+import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
+import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
+import { PRIVATE_RELAYS } from './relays'
 import { encode, decode } from 'geohash-kit'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -109,6 +111,7 @@ const ICON = {
 export function mount(el: HTMLElement): void {
   root = el
   render()
+  void restoreSignet()
 }
 
 function render(): void {
@@ -289,8 +292,11 @@ function youView(): string {
     <div class="section-title">Identity</div>
     <div class="card stack">
       <div class="kv"><span class="k">Your key</span><span>${shortNpub(me.pk)}</span></div>
+      <div class="kv"><span class="k">Signer</span><span>${persisted.authMethod === 'signet' ? 'Signet (key in your signer)' : 'Local key (preview)'}</span></div>
       <button class="btn small ghost" data-action="copy-npub">Copy my key (npub)</button>
-      <div class="note">Stored on this device only. This preview keeps the key in local storage — not secure key storage. Don't rely on it for real safety yet.</div>
+      <div class="note">${persisted.authMethod === 'signet'
+        ? 'Signed in with Signet — your key lives in your signer and never touches flock.'
+        : 'Quick-start key, stored in this browser only — not secure key storage. Sign in with Signet for real use.'}</div>
     </div>
     <div class="section-title" style="margin-top:18px">Relay</div>
     <div class="card stack">
@@ -396,6 +402,10 @@ function onboardingView(): string {
       </div>
       <div class="note" style="margin-top:12px">⟳ Waiting for a secure invite…</div>`
   } else {
+    const signedInSignet = persisted.authMethod === 'signet' && persisted.identity
+    const signetRow = signedInSignet
+      ? '<div class="note" style="margin-top:16px">✓ Signed in with Signet — your key stays in your signer</div>'
+      : '<button class="btn ghost" data-action="signet" style="margin-top:10px">Sign in with Signet</button>'
     inner = `
       <img class="hero-logo" src="./icon.svg" alt="" />
       <h1>Stay close,<br/>stay private.</h1>
@@ -403,6 +413,7 @@ function onboardingView(): string {
       <div class="actions">
         <button class="btn primary" data-action="create">Create a circle</button>
         <button class="btn ghost" data-action="join">Join with a code</button>
+        ${signetRow}
       </div>`
   }
   return `<main class="screen onboard fade-in">${inner}</main><div class="toast" id="toast"></div>`
@@ -432,6 +443,7 @@ function wireOnboard(): void {
       else if (a === 'do-join') doJoin()
       else if (a === 'join-remote') doJoinRemote()
       else if (a === 'copy-npub') copyNpub()
+      else if (a === 'signet') void doSignetLogin()
     })
   })
 }
@@ -539,16 +551,42 @@ function refresh(): void {
   else render()
 }
 
-// ── Signer (LocalSigner today; SignetSigner next) ────────────────────────────
+// ── Signer (LocalSigner or SignetSigner) ─────────────────────────────────────
 let _signer: FlockSigner | null = null
 let _signerFor = ''
+let signetSigner: FlockSigner | null = null // live Signet signer (from login/restore)
 function getSigner(): FlockSigner | null {
+  if (persisted.authMethod === 'signet') return signetSigner
   const id = persisted.identity
-  if (!id) { _signer = null; _signerFor = ''; return null }
+  if (!id?.skHex) { _signer = null; _signerFor = ''; return null }
   if (_signer && _signerFor === id.skHex) return _signer
   _signer = makeLocalSigner(id.skHex)
   _signerFor = id.skHex
   return _signer
+}
+
+async function doSignetLogin(): Promise<void> {
+  try {
+    const session = await signetLogin({ appName: 'flock', relayUrl: PRIVATE_RELAYS[0] })
+    if (!session) { toast('Sign-in cancelled'); return }
+    if (!session.signer.capabilities.hasNip44) { toast('That signer lacks NIP-44 — pick another'); return }
+    signetSigner = makeSignetSigner(session.signer)
+    persisted.identity = { pk: session.pubkey }
+    persisted.authMethod = 'signet'
+    store.save(persisted)
+    onboardStep = 'intro'
+    toast(`Signed in${session.displayName ? ` as ${session.displayName}` : ''}`)
+    render()
+  } catch { toast('Sign-in failed') }
+}
+
+/** On reload, rehydrate the Signet signer from its stored session. */
+async function restoreSignet(): Promise<void> {
+  if (persisted.authMethod !== 'signet' || signetSigner) return
+  try {
+    const session = await signetRestore()
+    if (session) { signetSigner = makeSignetSigner(session.signer); render() }
+  } catch { /* leave unsigned; user can re-auth */ }
 }
 
 // ── Members, invites & reseed ────────────────────────────────────────────────
@@ -903,6 +941,8 @@ function saveRelay(): void {
 }
 
 function leave(): void {
+  if (persisted.authMethod === 'signet') { try { void signetLogout() } catch { /* ignore */ } }
+  signetSigner = null
   store.reset()
   stopWatch?.(); stopWatch = null
   stopSub?.(); stopSub = null

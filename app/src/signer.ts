@@ -7,6 +7,7 @@
 
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { getConversationKey, encrypt as nip44encrypt, decrypt as nip44decrypt } from 'nostr-tools/nip44'
+import type { SignetSigner } from 'signet-login'
 import { fromHex } from './store'
 
 export interface SignedEvent {
@@ -62,4 +63,24 @@ export class LocalSigner implements FlockSigner {
 
 export function makeLocalSigner(skHex: string): FlockSigner {
   return new LocalSigner(skHex)
+}
+
+/**
+ * Adapt a signet-login `SignetSigner` (key in a NIP-46 bunker / Signet / Amber /
+ * NIP-07 — never in flock) to the FlockSigner interface. Requires NIP-44 support
+ * (the default Signet login requests `nip44_encrypt`/`nip44_decrypt` perms).
+ */
+export function makeSignetSigner(s: SignetSigner): FlockSigner {
+  return {
+    pubkey: s.pubkey,
+    signEvent: (template) => s.signEvent(template) as Promise<SignedEvent>,
+    nip44Encrypt: (peer, plaintext) => {
+      if (!s.nip44) throw new Error('Signet signer has no NIP-44 capability')
+      return s.nip44.encrypt(peer, plaintext)
+    },
+    nip44Decrypt: (peer, ciphertext) => {
+      if (!s.nip44) throw new Error('Signet signer has no NIP-44 capability')
+      return s.nip44.decrypt(peer, ciphertext)
+    },
+  }
 }

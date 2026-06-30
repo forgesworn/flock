@@ -66,7 +66,7 @@ export function stopBackgroundWatch(id: string): Promise<void> {
 
 async function onBackgroundFix(loc: BgLocation): Promise<void> {
   const s = store.load()
-  if (!s.circle || !s.identity) return
+  if (!s.circle || !s.identity?.skHex) return // background path assumes a local key
   const position = { lat: loc.latitude, lon: loc.longitude }
 
   const plan = decideEmission({

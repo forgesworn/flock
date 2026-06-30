@@ -91,6 +91,7 @@
     "maplibre-gl": "^5.20.2",
     "nostr-tools": "^2.23.3",
     "qrcode-generator": "^2.0.4",
+    "signet-login": "^0.11.1",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.57.1",
     "vite": "^8.0.0",

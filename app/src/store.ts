@@ -7,7 +7,9 @@ import type { Geofence } from '@forgesworn/flock'
 import { PRIVATE_RELAYS } from './relays'
 
 export type Mode = 'family' | 'nightout'
-export interface Identity { skHex: string; pk: string }
+/** A local identity has `skHex`; a Signet identity is `pk`-only (key in the signer). */
+export interface Identity { skHex?: string; pk: string }
+export type AuthMethod = 'local' | 'signet'
 export interface Circle {
   id: string
   seedHex: string
@@ -23,6 +25,8 @@ export interface Persisted {
   circle: Circle | null
   relayUrl: string
   geofences: Geofence[]
+  /** How the identity authenticates: a local key, or a Signet/bunker signer. */
+  authMethod?: AuthMethod
 }
 
 const KEY = 'flock:v1'
