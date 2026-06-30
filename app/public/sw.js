@@ -2,7 +2,7 @@
 // Makes the app installable and offline-capable for visited assets without
 // needing to know Vite's hashed filenames at build time.
 
-const CACHE = 'flock-runtime-v2'
+const CACHE = 'flock-runtime-v3'
 
 self.addEventListener('install', () => self.skipWaiting())
 
@@ -31,7 +31,11 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         const cache = await caches.open(CACHE)
         try {
-          const res = await fetch(request)
+          // `reload` bypasses the HTTP cache so a deploy is picked up even when
+          // index.html carries no Cache-Control (otherwise the SW's network-first
+          // fetch can be served a stale HTML from the browser cache, pinning the
+          // old hashed CSS/JS — which silently kept a broken build live).
+          const res = await fetch(request, { cache: 'reload' })
           if (res && res.status === 200) cache.put(request, res.clone())
           return res
         } catch {
