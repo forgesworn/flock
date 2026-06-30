@@ -113,8 +113,11 @@ Two halves that compose into one feature:
 
 ## Phase G — Platform & release
 
-- [ ] **Capacitor native shell** — background geofencing (scaffolded; Phase 0 spike first).
-- [ ] **UnifiedPush** — de-Googled alerts.
+- [ ] **Capacitor native shell** — background geofencing (scaffolded; Phase 0 spike harness ready — `native/spike/`).
+- [ ] **Inbound alerts (app closed)** — receive SOS/breach with flock closed.
+  Persistent foreground-service relay socket (Option A, recommended) →
+  UnifiedPush + bridge (Option B). De-Googled; gated on the Phase 0 result. See
+  `docs/plans/2026-06-30-background-inbound.md`.
 - [ ] **anvil** — release CI (like canary-kit).
 
 ## Resolved inputs
