@@ -106,6 +106,45 @@ the app is opened — expect test #4 to show **no auto-resume**. Record the gap.
 needs custom native work and is **out of scope for the spike** — note it as a gap
 and move on.
 
+## Emulator — functional validation only (no device needed)
+
+> ⚠️ An emulator validates the **code path**, not the research question.
+> GrapheneOS runs only on Pixel hardware — there is **no GrapheneOS emulator
+> image**, and cloud device farms don't offer it. The emulator also can't
+> represent real Doze, radio wake-ups, or battery. So this tier proves
+> "route → fix → `isBreach` → breach signal → notification" end-to-end and
+> catches wiring/harness bugs — it does **not** answer #1 (cadence), #3 (Doze)
+> or #6 (battery), and it is **not** the decision gate. Green here means "the
+> code works", not "the platform works".
+
+**Setup**
+
+1. Android Studio → Device Manager → new AVD. Pick a system image **without
+   Google APIs** (plain "Android", not "Google APIs" / "Play Store") to mirror
+   the no-Play-Services target.
+2. `npm run build:spike && npx cap sync && npx cap run android` → pick the emulator.
+
+**Inject a route** (drives fixes; `distanceFilter` is 25 m, so points must move
+> 25 m apart to fire):
+
+- GUI: emulator **⋮ → Location** → load a `.gpx`/`.kml` → set speed → **Play route**.
+- CLI single point (**lon first**): `adb emu geo fix <lon> <lat>`
+
+Set the safe zone in the app first, then play a route that exits it → watch the
+`#2` breach latency populate.
+
+**Force Doze** (functional only — *not* representative of a real device):
+
+```sh
+adb shell dumpsys deviceidle force-idle   # enter
+adb shell dumpsys deviceidle step         # advance
+adb shell dumpsys deviceidle unforce      # exit
+```
+
+**Reboot / BOOT_COMPLETED** (test #4, functional): `adb reboot`, re-inject
+location, and confirm whether the watcher resumes (expect **not** without the
+boot receiver above).
+
 ## Decision gate
 
 Per the plan: **#1, #2, #3, #5 all pass → build the native shell (Phase G).** #1
