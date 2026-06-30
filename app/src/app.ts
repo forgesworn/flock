@@ -4,35 +4,43 @@
 import * as store from './store'
 import type { Mode } from './store'
 import * as svc from './services'
-import { encode } from 'geohash-kit'
+import { encode, decode } from 'geohash-kit'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
+import type { MapView, MapPoint } from './map'
 import {
   decideEmission,
   signalTypeForReason,
   buildLocationSignal,
   buildHelpSignal,
   classifyPresence,
+  isWithinAnyFence,
   deriveBeaconKey,
   decryptBeacon,
   deriveDuressKey,
   decryptDuressAlert,
   hashGroupId,
   type MemberBeacon,
+  type CircleGeofence,
 } from '@forgesworn/flock'
 
 // ── State ──────────────────────────────────────────────────────────────────
 let persisted = store.load()
-let tab: 'home' | 'circle' | 'you' = 'home'
+let tab: 'home' | 'map' | 'circle' | 'you' = 'home'
 let fix: svc.Fix | null = null
 let sharing = false
 let alertActive = false
+let breachActive = false
 let stopWatch: (() => void) | null = null
 let stopSub: (() => void) | null = null
 let subKey = ''
 let lastSelfBeacon = 0
 let root: HTMLElement
 let toastTimer = 0
+
+let mapView: MapView | null = null
+let addMode = false
+let addRadius = 300
 
 let onboardStep: 'intro' | 'create' | 'join' = 'intro'
 let onboardMode: Mode = 'family'
@@ -69,6 +77,7 @@ function toast(msg: string): void {
 // ── Icons ──────────────────────────────────────────────────────────────────
 const ICON = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>',
+  map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.7 6.5-11A6.5 6.5 0 0 0 5.5 10c0 5.3 6.5 11 6.5 11Z"/><circle cx="12" cy="10" r="2.3"/></svg>',
   circle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.5a3 3 0 0 1 0 5.8M16.5 20a5.5 5.5 0 0 0-3-4.9"/></svg>',
   you: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6z"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16.5a3.6 3.6 0 0 1 7 0"/></svg>',
 }
@@ -80,14 +89,15 @@ export function mount(el: HTMLElement): void {
 }
 
 function render(): void {
+  if (tab !== 'map' && mapView) { mapView.destroy(); mapView = null; addMode = false }
   if (!persisted.identity || !persisted.circle) {
     root.innerHTML = onboardingView()
     wireOnboard()
     return
   }
   ensureSubscription()
-  const body = tab === 'home' ? homeView() : tab === 'circle' ? circleView() : youView()
-  root.innerHTML = `<main class="screen fade-in">${body}</main>${navView()}<div class="toast" id="toast"></div>`
+  const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
+  root.innerHTML = `<main class="screen fade-in ${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   wireApp()
 }
 
@@ -108,6 +118,7 @@ function topbar(showModeToggle: boolean): string {
 function orbState(): { cls: string; label: string; sub: string } {
   const c = persisted.circle as store.Circle
   if (alertActive) return { cls: 'state-alert', label: 'Help sent', sub: 'Your circle has been alerted' }
+  if (breachActive) return { cls: 'state-alert', label: 'Outside safe zone', sub: 'Location shared with your circle' }
   if (sharing && fix) {
     return c.mode === 'nightout'
       ? { cls: 'state-share', label: 'Sharing', sub: 'Coarse location · night out' }
@@ -205,7 +216,46 @@ function youView(): string {
 function navView(): string {
   const item = (id: string, label: string, icon: string): string =>
     `<button data-action="tab" data-tab="${id}" aria-current="${tab === id}">${icon}<span>${label}</span></button>`
-  return `<nav class="nav">${item('home', 'Home', ICON.home)}${item('circle', 'Circle', ICON.circle)}${item('you', 'You', ICON.you)}</nav>`
+  return `<nav class="nav">${item('home', 'Home', ICON.home)}${item('map', 'Map', ICON.map)}${item('circle', 'Circle', ICON.circle)}${item('you', 'You', ICON.you)}</nav>`
+}
+
+// ── Map screen ───────────────────────────────────────────────────────────────
+function mapView_screen(): string {
+  return `
+    ${topbar(false)}
+    <div class="map-shell">
+      <div class="map-stage">
+        <div id="map" class="map-canvas"></div>
+        <div id="crosshair" class="crosshair" hidden></div>
+      </div>
+      <div class="map-panel" id="map-panel">${mapPanelInner()}</div>
+    </div>`
+}
+
+function mapPanelInner(): string {
+  if (addMode) {
+    return `
+      <div class="row" style="justify-content:space-between">
+        <strong>New safe zone</strong>
+        <span class="muted" id="radius-label">${addRadius} m</span>
+      </div>
+      <input class="slider" id="radius" type="range" min="100" max="2000" step="50" value="${addRadius}" />
+      <div class="note">Pan the map so the crosshair sits at the centre, then save.</div>
+      <div class="row" style="gap:10px">
+        <button class="btn small primary" data-action="save-zone">Save zone</button>
+        <button class="btn small ghost" data-action="cancel-zone">Cancel</button>
+      </div>`
+  }
+  const zones = persisted.geofences
+  const list = zones.length
+    ? zones.map((z, i) => {
+        const r = z.kind === 'circle' ? `${Math.round(z.radiusMetres)} m radius` : `${z.vertices.length}-point area`
+        return `<div class="zone-row"><span class="dot-safe"></span><span class="zone-meta">Safe zone ${i + 1}<small>${r}</small></span><button class="zone-del" data-action="del-zone" data-i="${i}" aria-label="Delete">✕</button></div>`
+      }).join('')
+    : '<div class="note">No safe zones yet. Add one and you\'ll be alerted if a circle member leaves it.</div>'
+  return `
+    <div class="row" style="justify-content:space-between;margin-bottom:8px"><strong>Safe zones</strong><button class="btn small" data-action="add-zone">＋ Add</button></div>
+    <div class="zone-list">${list}</div>`
 }
 
 // ── Views: onboarding ────────────────────────────────────────────────────────
@@ -273,10 +323,95 @@ function wireApp(): void {
     } catch { qrEl.remove() }
   }
   root.querySelectorAll('[data-action]').forEach((node) => {
+    if ((node as HTMLElement).closest('#map-panel')) return // wired by wireMapPanel
     const action = node.getAttribute('data-action') as string
     if (action === 'sos-hold') { wireSos(node as HTMLElement); return }
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   })
+  if (tab === 'map') void initMap()
+}
+
+// ── Map controller ───────────────────────────────────────────────────────────
+async function initMap(): Promise<void> {
+  mapView?.destroy()
+  const container = document.getElementById('map')
+  if (!container) return
+  const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
+  mapView = new MapView(container, fix ?? undefined)
+  mapView.setGeofences(persisted.geofences)
+  mapView.onMove(() => { if (addMode) updatePreview() })
+  updateMapData()
+  wireMapPanel()
+  requestAnimationFrame(() => mapView?.map.resize())
+}
+
+function wireMapPanel(): void {
+  const slider = document.getElementById('radius') as HTMLInputElement | null
+  if (slider) {
+    slider.addEventListener('input', () => {
+      addRadius = Number(slider.value)
+      const l = document.getElementById('radius-label')
+      if (l) l.textContent = `${addRadius} m`
+      updatePreview()
+    })
+  }
+  document.querySelectorAll('#map-panel [data-action]').forEach((n) => {
+    n.addEventListener('click', () => handleAction(n.getAttribute('data-action') as string, n as HTMLElement))
+  })
+}
+
+function renderMapPanel(): void {
+  const panel = document.getElementById('map-panel')
+  if (panel) panel.innerHTML = mapPanelInner()
+  const ch = document.getElementById('crosshair')
+  if (ch) (ch as HTMLElement).hidden = !addMode
+  wireMapPanel()
+}
+
+function updatePreview(): void {
+  if (!mapView) return
+  const c = mapView.center()
+  mapView.setPreview({ kind: 'circle', centre: { lat: c.lat, lon: c.lon }, radiusMetres: addRadius } as CircleGeofence)
+}
+
+function memberPoints(): MapPoint[] {
+  const me = persisted.identity?.pk
+  return classifyPresence([...beacons.values()], nowSec(), { staleAfterSeconds: 600 }).map((e) => {
+    const d = decode(e.geohash)
+    return {
+      member: e.member,
+      lat: d.lat,
+      lon: d.lon,
+      label: e.member === me ? 'You' : initials(e.member),
+      status: alerts.has(e.member) ? 'alert' as const : e.status,
+    }
+  })
+}
+function updateMapData(): void { mapView?.setMembers(memberPoints()) }
+
+function saveZone(): void {
+  if (!mapView) return
+  const c = mapView.center()
+  persisted.geofences = [...persisted.geofences, { kind: 'circle', centre: { lat: c.lat, lon: c.lon }, radiusMetres: addRadius }]
+  store.save(persisted)
+  addMode = false
+  mapView.setPreview(null)
+  mapView.setGeofences(persisted.geofences)
+  renderMapPanel()
+  toast('Safe zone added')
+}
+
+function delZone(i: number): void {
+  persisted.geofences = persisted.geofences.filter((_, idx) => idx !== i)
+  store.save(persisted)
+  mapView?.setGeofences(persisted.geofences)
+  renderMapPanel()
+}
+
+/** Re-render without tearing down a live map. */
+function refresh(): void {
+  if (tab === 'map' && mapView) { updateMapData(); renderMapPanel() }
+  else render()
 }
 
 function handleAction(action: string, node: HTMLElement): void {
@@ -288,6 +423,10 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'copy-invite': copyInvite(); break
     case 'save-relay': saveRelay(); break
     case 'leave': leave(); break
+    case 'add-zone': addMode = true; renderMapPanel(); updatePreview(); break
+    case 'cancel-zone': addMode = false; mapView?.setPreview(null); renderMapPanel(); break
+    case 'save-zone': saveZone(); break
+    case 'del-zone': delZone(Number(node.dataset.i)); break
     default: break
   }
 }
@@ -348,6 +487,7 @@ function setMode(mode: Mode): void {
   if (!persisted.circle) return
   persisted.circle = { ...persisted.circle, mode }
   store.save(persisted)
+  breachActive = false
   render()
 }
 
@@ -360,6 +500,7 @@ function startSharing(): void {
 
 function stopSharing(): void {
   sharing = false
+  breachActive = false
   stopWatch?.()
   stopWatch = null
   render()
@@ -367,12 +508,16 @@ function stopSharing(): void {
 
 function onFix(f: svc.Fix): void {
   fix = f
-  if (sharing && persisted.circle?.mode === 'nightout' && nowSec() - lastSelfBeacon > 45) {
+  const c = persisted.circle
+  if (sharing && c?.mode === 'family' && persisted.geofences.length) {
+    breachActive = !isWithinAnyFence({ lat: f.lat, lon: f.lon }, persisted.geofences)
+    if (breachActive && nowSec() - lastSelfBeacon > 30) { lastSelfBeacon = nowSec(); void emit('none'); return }
+  } else if (sharing && c?.mode === 'nightout' && nowSec() - lastSelfBeacon > 45) {
     lastSelfBeacon = nowSec()
     void emit('none')
-  } else {
-    render()
+    return
   }
+  refresh()
 }
 
 async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
@@ -380,7 +525,13 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
   const id = persisted.identity
   if (!c || !id) return
   const position = fix ? { lat: fix.lat, lon: fix.lon } : null
-  const plan = decideEmission({ mode: c.mode, position, trigger })
+  const plan = decideEmission({
+    mode: c.mode,
+    position,
+    trigger,
+    geofences: c.mode === 'family' ? persisted.geofences : undefined,
+  })
+  if (plan.reason === 'breach') breachActive = true
   const type = signalTypeForReason(plan.reason)
   if (!type) {
     if (trigger === 'pickup') toast('Need your location first — start sharing.')
@@ -408,7 +559,7 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
   } catch {
     toast('Could not send — check your relay and connection.')
   }
-  render()
+  refresh()
 }
 
 function copyInvite(): void {
@@ -433,6 +584,10 @@ function leave(): void {
   subKey = ''
   sharing = false
   alertActive = false
+  breachActive = false
+  addMode = false
+  mapView?.destroy()
+  mapView = null
   fix = null
   beacons.clear()
   alerts.clear()
@@ -473,7 +628,7 @@ async function onIncoming(e: { pubkey: string; content: string; tags: string[][]
     } else {
       return
     }
-    render()
+    refresh()
   } catch {
     /* not for us, or undecryptable */
   }

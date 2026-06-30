@@ -2,11 +2,17 @@
 // demo but is NOT secure key storage — flagged in the UI and DESIGN.
 
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import type { Geofence } from '@forgesworn/flock'
 
 export type Mode = 'family' | 'nightout'
 export interface Identity { skHex: string; pk: string }
 export interface Circle { id: string; seedHex: string; name: string; mode: Mode }
-export interface Persisted { identity: Identity | null; circle: Circle | null; relayUrl: string }
+export interface Persisted {
+  identity: Identity | null
+  circle: Circle | null
+  relayUrl: string
+  geofences: Geofence[]
+}
 
 const KEY = 'flock:v1'
 const DEFAULT_RELAY = 'wss://relay.trotters.cc'
@@ -20,9 +26,9 @@ const randHex = (n: number): string => toHex(crypto.getRandomValues(new Uint8Arr
 export function load(): Persisted {
   try {
     const raw = localStorage.getItem(KEY)
-    if (raw) return { identity: null, circle: null, relayUrl: DEFAULT_RELAY, ...JSON.parse(raw) }
+    if (raw) return { identity: null, circle: null, relayUrl: DEFAULT_RELAY, geofences: [], ...JSON.parse(raw) }
   } catch { /* ignore corrupt state */ }
-  return { identity: null, circle: null, relayUrl: DEFAULT_RELAY }
+  return { identity: null, circle: null, relayUrl: DEFAULT_RELAY, geofences: [] }
 }
 
 export function save(state: Persisted): void {
