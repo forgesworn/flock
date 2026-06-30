@@ -2,9 +2,10 @@
 
 > Coercion-resistant family & friends safety and privacy-preserving location sharing.
 
-**Status:** 🔬 Research / design stage — no application code yet. Start with
-[`docs/plans/DESIGN.md`](docs/plans/DESIGN.md) and
-[`docs/research/2026-06-30-feasibility-research.md`](docs/research/2026-06-30-feasibility-research.md).
+**Status:** 🛠️ Core library in progress. The `@forgesworn/flock` library layer
+(geofence, policy, signals, night-out) is built and tested; the PWA and native
+shell are not started. Start with [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md)
+and [`docs/research/2026-06-30-feasibility-research.md`](docs/research/2026-06-30-feasibility-research.md).
 
 `flock` extends [`canary-kit`](https://github.com/forgesworn/canary-kit) (which itself
 extends `spoken-token`) into a location-aware safety tool for two audiences:
@@ -53,6 +54,23 @@ geofencing APIs). De-Googled push uses **UnifiedPush** or a persistent Nostr rel
 > **Biggest unproven risk:** reliable background location wake-ups on **GrapheneOS without
 > Google APIs** could not be confirmed by the research and **must be prototyped on a real
 > device first** (Phase 0). Do not lock the architecture until this spike passes.
+
+## Library modules (`src/`)
+
+The library is framework-free and pure (like `canary-kit`): it builds/evaluates,
+it does not own transport, persistence, or lifecycle. Geohash encoding and
+encryption stay at the edge.
+
+| Module | What it does | Status |
+|---|---|:--:|
+| `geofence` | On-device circle/polygon fence eval; `isBreach` (haversine + ray-casting) | ✅ tested |
+| `policy` | Disclosure-on-event decision: withhold \| coarse \| full, by mode/trigger/breach | ✅ tested |
+| `signals` | `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078 events | ✅ tested |
+| `nightout` | Ephemeral groups (NIP-40), presence ("still out / gone home"), separation ("lost") | ✅ tested |
+| `app/` (PWA) | Foreground UI — manual SOS/pick-me-up, night-out view | ⬜ not started |
+| `native/` (Capacitor) | Background geofencing + UnifiedPush | ⬜ not started |
+
+`npm run build` · `npm test` · `npm run typecheck` · `npm run lint`
 
 ## Built on canary-kit
 

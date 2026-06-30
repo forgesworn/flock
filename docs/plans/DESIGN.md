@@ -79,14 +79,17 @@ the family/coercion case; possibly overkill for consensual night-out. Decide per
 - [ ] Measure battery cost of the chosen background duty-cycle.
 
 ### Phase 1 — MVP (ships on iOS/Android/Graphene with **no** background needed)
-- [ ] `@forgesworn/flock` core: group lifecycle (roles), beacon emission policy, signal types.
+- [x] `geofence` — on-device circle/polygon fence evaluation + `isBreach` (pure, tested).
+- [x] `policy` — disclosure-on-event decision (withhold | coarse | full), tested.
+- [x] `signals` — `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078, tested.
+- [x] `nightout` — ephemeral group (NIP-40), presence ("still out / gone home"), separation, tested.
 - [ ] PWA: create/join group, manual **SOS** and **pick-me-up**, guardian alert view.
-- [ ] Night-out mode: ephemeral group (NIP-40), coarse geo-indistinguishable beacons,
-      "who's still out / who's home" view.
+- [ ] Night-out PWA view: coarse geo-indistinguishable beacons, "who's still out / who's home".
 
 ### Phase 2 — geofencing
+- [x] On-device geofence engine (point-in-polygon + circular), breach → emission policy *(library; landed early in Phase 1)*.
 - [ ] Capacitor shell; background location via community plugin.
-- [ ] On-device geofence engine (point-in-polygon + circular), breach → encrypted alert.
+- [ ] Wire background fixes → `decideEmission` → `buildLocationSignal` → publish.
 - [ ] UnifiedPush + persistent-relay alert delivery.
 
 ### Phase 3 — coercion hardening
