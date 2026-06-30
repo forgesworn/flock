@@ -6,7 +6,7 @@
 
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import type { Geofence, CircleGeofence } from '@forgesworn/flock'
+import type { Geofence, CircleGeofence, NoReportZone } from '@forgesworn/flock'
 
 export interface MapPoint {
   member: string
@@ -65,6 +65,7 @@ export class MapView {
   private markers: maplibregl.Marker[] = []
   private ready = false
   private pendingFences: Geofence[] | null = null
+  private pendingNoReport: NoReportZone[] | null = null
   private pendingPreview: CircleGeofence | null = null
 
   constructor(container: HTMLElement, centre?: { lat: number; lon: number }) {
@@ -80,11 +81,16 @@ export class MapView {
       this.map.addSource('fences', { type: 'geojson', data: fc([]) })
       this.map.addLayer({ id: 'fences-fill', type: 'fill', source: 'fences', paint: { 'fill-color': '#5fd0a8', 'fill-opacity': 0.14 } })
       this.map.addLayer({ id: 'fences-line', type: 'line', source: 'fences', paint: { 'line-color': '#5fd0a8', 'line-width': 2, 'line-opacity': 0.7 } })
+      // No-report zones — amber, hatched feel via a stronger dashed outline.
+      this.map.addSource('noreport', { type: 'geojson', data: fc([]) })
+      this.map.addLayer({ id: 'noreport-fill', type: 'fill', source: 'noreport', paint: { 'fill-color': '#f0a93b', 'fill-opacity': 0.13 } })
+      this.map.addLayer({ id: 'noreport-line', type: 'line', source: 'noreport', paint: { 'line-color': '#f0a93b', 'line-width': 2, 'line-opacity': 0.8, 'line-dasharray': [3, 2] } })
       this.map.addSource('preview', { type: 'geojson', data: fc([]) })
       this.map.addLayer({ id: 'preview-fill', type: 'fill', source: 'preview', paint: { 'fill-color': '#6ea8fe', 'fill-opacity': 0.16 } })
       this.map.addLayer({ id: 'preview-line', type: 'line', source: 'preview', paint: { 'line-color': '#6ea8fe', 'line-width': 2, 'line-dasharray': [2, 2] } })
       this.ready = true
       if (this.pendingFences) this.setGeofences(this.pendingFences)
+      if (this.pendingNoReport) this.setNoReportZones(this.pendingNoReport)
       this.setPreview(this.pendingPreview)
     })
   }
@@ -103,6 +109,11 @@ export class MapView {
   setGeofences(fences: Geofence[]): void {
     if (!this.ready) { this.pendingFences = fences; return }
     ;(this.map.getSource('fences') as maplibregl.GeoJSONSource).setData(fc(fences.map(fenceFeature)))
+  }
+
+  setNoReportZones(zones: NoReportZone[]): void {
+    if (!this.ready) { this.pendingNoReport = zones; return }
+    ;(this.map.getSource('noreport') as maplibregl.GeoJSONSource).setData(fc(zones.map((z) => fenceFeature(z.area))))
   }
 
   setPreview(f: CircleGeofence | null): void {

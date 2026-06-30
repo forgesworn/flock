@@ -33,6 +33,14 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
   exactly the "5-day trip with a mate, plus a night out with another group, all at
   once" case.)*
 - [x] Create / join (in-person QR + remote gift-wrap) — *done, to be re-based on Phase A.*
+- [x] **Sharing is a behaviour, not a persona** — the old *Family / Night-out*
+  toggle is now **Private** (hidden until you raise it) vs **Share live · coarse**
+  (the "who's still out?" view). The circle *name* carries the category. Lib keeps
+  `family`/`nightout` as the internal behaviour keys (no migration). Lifetimes are
+  **Ongoing / Today / Custom** (Today = until next 04:00, so a night out isn't cut
+  off at midnight). After creating a circle you **land on the Circle screen with
+  inviting front-and-centre** (a 👋 lead card + QR/code/remote). Child-first
+  language throughout (see `PRIVACY.md`/design notes).
 - [x] Reseed / remove member — *done (hand-rolled); migrate to **dominion**.*
 - [x] **Buzz** — one-tap encrypted ping to the circle with a chosen reason (preset or custom; adults can assign their own); receiver's phone **vibrates + shows a banner**; optional **targeted** buzz (parent → child). `buzz.ts` lib + Circle UI.
 - [x] **Disband / destroy a group** (`disband.ts`) — a member broadcasts a
@@ -45,12 +53,28 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 
 ## Phase C — Privacy features
 
-- [ ] **No-report zones** — inverse geofences (home, a relative's): location withheld/coarsened even on a triggering event. Stored encrypted, evaluated on-device.
-- [ ] **Off-grid mode** — "dark for 60/120 min"; emit nothing; pre-announce planned absence so the dead-man's-switch doesn't false-alarm; **cancellable — resume early at any time**; auto-resume when the timer ends.
+- [x] **No-report zones** (`noreport.ts`) — inverse geofences, surfaced as **"Private places"** (home, a
+  relative's). Inside one, disclosure is **capped**: withheld or coarsened **even
+  on a triggering event** — an SOS over a refuge still fires, but without pinning
+  the building. The cap folds into `decideEmission`; zones are on-device only,
+  never broadcast. Amber map editor alongside the green "Safe places". Verified
+  in-browser (add/save/list, hidden inputs, 0 console errors).
+- [x] **Off-grid mode** (`offgrid.ts`) — **"Take a break"**: go dark for 1 hour /
+  Today / a custom window. Emits **nothing automatically** (an explicit SOS or
+  pick-up still fires — `decideEmission` keeps the triggers, drops the rest);
+  **pre-announces** the planned silence to every circle so the dead-man's-switch
+  never false-alarms; carries an optional **"why"**; **cancellable** ("I'm back
+  now") and **auto-resumes** when the timer ends. Members see "on a break · …".
+  Verified in-browser (go dark → orb "Taking a break" → come back, 0 errors).
 
 ## Phase D — Identity & social
 
-- [ ] **kind:0 profiles** — fetch + display member names/avatars (not just npub).
+- [x] **Names instead of npubs** (`app/src/profiles.ts`) — private **petnames**
+  (your own label for a member, stored on-device, **default**, always win) plus
+  **opt-in** public **kind:0** names/avatars from the public profile relays
+  (**off by default** — fetching tells public relays which pubkeys you're looking
+  up). Inline nickname edit on the Circle screen; settings toggle. Shown
+  everywhere (members, alerts, buzz, rendezvous).
 - [ ] **canary spoken-verify** — "is this really my parent picking me up?" pick-up confirmation.
 - [ ] **Trust** — `nostr-attestations` / `nostr-veil` vouching (optional).
 

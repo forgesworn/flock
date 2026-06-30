@@ -10,6 +10,7 @@ import { PRIVATE_RELAYS } from './relays'
 import { deriveCircleSeed, deriveInbox } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { geocode } from './geo'
+import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode } from 'geohash-kit'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -33,6 +34,12 @@ import {
   buildDisbandSignal,
   decryptDisband,
   DISBAND_SIGNAL_TYPE,
+  buildOffGridSignal,
+  decryptOffGrid,
+  isOffGrid,
+  OFFGRID_SIGNAL_TYPE,
+  type OffGrid,
+  type NoReportZone,
   assessArrival,
   buildRendezvousSignal,
   decryptRendezvous,
@@ -49,6 +56,7 @@ import {
   decryptDuressAlert,
   type MemberBeacon,
   type CircleGeofence,
+  type Geofence,
   type CheckIn,
 } from '@forgesworn/flock'
 
@@ -83,8 +91,13 @@ let lastRzvStatus = 0
 let onboardStep: 'intro' | 'create' | 'join' | 'await' = 'intro'
 let onboardMode: Mode = 'family'
 let adding = false // adding another circle from within the app (not first-run onboarding)
-let newCircleTtl = 0 // chosen transient lifetime (sec) for a new circle; 0 = long-lived
+let ttlMode: 'ongoing' | 'today' | 'custom' = 'ongoing' // chosen lifetime for a new circle
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
+let goingDark = false // off-grid duration picker is open
+let darkDurSec = 3600 // chosen break length (sec); -1 = custom (read from input)
+let addZoneKind: 'safe' | 'noreport' = 'safe' // which kind of zone the map editor is adding
+let newZonePolicy: 'withhold' | 'coarse' = 'withhold' // suppression strength for a new no-report zone
+let editingPetname: string | null = null // pubkey whose nickname is being edited inline
 
 // Per-circle live state — signals are circle-scoped, so beacons/alerts/etc. from
 // one circle must never bleed into another. Keyed by circle id.
@@ -94,11 +107,12 @@ interface CircleState {
   checkins: Map<string, CheckIn>
   rzvStatuses: Map<string, RendezvousStatus>
   rendezvous: Rendezvous | null
+  offgrid: Map<string, OffGrid>
 }
 const circleStates = new Map<string, CircleState>()
 function cstate(id: string): CircleState {
   let s = circleStates.get(id)
-  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null }; circleStates.set(id, s) }
+  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map() }; circleStates.set(id, s) }
   return s
 }
 
@@ -175,6 +189,46 @@ function fmtAgo(sec: number): string {
   return `${Math.floor(sec / 86_400)}d ago`
 }
 
+// Sharing behaviour — plain words, not personas (internal keys stay family/nightout).
+const isLive = (m: Mode): boolean => m === 'nightout'
+const behaviourLabel = (m: Mode): string => (isLive(m) ? 'Share live · coarse' : 'Private until I raise it')
+
+/** Seconds from now until the next local 04:00 — the "Today" window (covers a night that runs past midnight). */
+function todayWindowSec(): number {
+  const now = new Date()
+  const end = new Date(now)
+  end.setHours(4, 0, 0, 0)
+  if (end.getTime() <= now.getTime()) end.setDate(end.getDate() + 1)
+  return Math.floor((end.getTime() - now.getTime()) / 1000)
+}
+
+/** True while I'm deliberately off-grid ("taking a break"). */
+const isDark = (): boolean => !!persisted.offGridUntil && persisted.offGridUntil > nowSec()
+
+/** Is this member currently off-grid in the active circle? */
+function memberDark(circleId: string, pk: string): boolean {
+  const o = cstate(circleId).offgrid.get(pk)
+  return !!o && isOffGrid(o, nowSec())
+}
+
+/** Display name for a member: my private petname → public profile (if opted-in) → short npub. */
+function nameFor(pk: string): string {
+  const pet = persisted.petnames[pk]
+  if (pet) return pet
+  if (persisted.showProfiles) { const p = getProfile(pk); if (p?.name) return p.name }
+  return shortNpub(pk)
+}
+
+/** Avatar markup — a public picture (opted-in) or initials. `isMe` shows "You". */
+function avatarHtml(pk: string, isMe: boolean, small = false): string {
+  const cls = small ? 'avatar small' : 'avatar'
+  if (persisted.showProfiles) {
+    const pic = getProfile(pk)?.picture
+    if (pic) return `<span class="${cls}"><img src="${esc(pic)}" alt="" loading="lazy" referrerpolicy="no-referrer"/></span>`
+  }
+  return `<span class="${cls}">${isMe ? 'You' : initials(pk)}</span>`
+}
+
 function toast(msg: string): void {
   const t = document.getElementById('toast')
   if (!t) return
@@ -210,6 +264,7 @@ function render(): void {
   }
   ensureMember(activeCircle() as store.Circle, persisted.identity.pk)
   ensureSubscriptions()
+  ensureProfiles()
   startMonitor()
   const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
   root.innerHTML = `${buzzBanner()}<main class="screen fade-in ${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
@@ -220,9 +275,9 @@ function render(): void {
 function topbar(showModeToggle: boolean): string {
   const c = activeCircle() as store.Circle
   const toggle = showModeToggle ? `
-    <div class="mode-toggle" role="group" aria-label="Mode">
-      <button data-action="mode" data-mode="family" aria-pressed="${c.mode === 'family'}">Family</button>
-      <button data-action="mode" data-mode="nightout" aria-pressed="${c.mode === 'nightout'}">Night out</button>
+    <div class="mode-toggle" role="group" aria-label="Sharing">
+      <button data-action="mode" data-mode="family" aria-pressed="${c.mode === 'family'}">Private</button>
+      <button data-action="mode" data-mode="nightout" aria-pressed="${c.mode === 'nightout'}">Share live</button>
     </div>` : ''
   return `<div class="topbar">
     <div class="brand"><img class="logo" src="./icon.svg" alt=""/><span class="name wordmark">flock</span></div>
@@ -256,14 +311,15 @@ function orbState(): { cls: string; label: string; sub: string } {
   const c = activeCircle() as store.Circle
   if (alertActive) return { cls: 'state-alert', label: 'Help sent', sub: 'Your circle has been alerted' }
   if (checkinAlert) return { cls: 'state-alert', label: 'Check-in missed', sub: "Someone hasn't checked in" }
-  if (breachActive) return { cls: 'state-alert', label: 'Outside safe zone', sub: 'Location shared with your circle' }
+  if (isDark()) return { cls: 'state-dark', label: 'Taking a break', sub: `Sharing nothing · back in ${fmtMins((persisted.offGridUntil ?? 0) - nowSec())}` }
+  if (breachActive) return { cls: 'state-alert', label: 'Outside safe place', sub: 'Location shared with your circle' }
   if (sharing && fix) {
-    return c.mode === 'nightout'
-      ? { cls: 'state-share', label: 'Sharing', sub: 'Coarse location · night out' }
-      : { cls: 'state-safe', label: 'On watch', sub: 'Stays private unless you raise it' }
+    return isLive(c.mode)
+      ? { cls: 'state-share', label: 'Sharing live', sub: 'Rough location · your circle can see you' }
+      : { cls: 'state-safe', label: 'On watch', sub: 'Stays hidden unless you raise it' }
   }
   if (sharing && !fix) return { cls: 'state-share', label: 'Locating…', sub: 'Getting a GPS fix' }
-  return { cls: 'state-safe', label: 'Private', sub: 'Location withheld until you need it' }
+  return { cls: 'state-safe', label: 'Private', sub: 'Location hidden until you need it' }
 }
 
 function homeView(): string {
@@ -279,7 +335,7 @@ function homeView(): string {
     </div>
     <div class="actions">
       <button class="btn ${sharing ? 'ghost' : 'primary'}" data-action="toggle-share">
-        ${sharing ? 'Stop sharing' : (c.mode === 'nightout' ? 'Start sharing' : 'Start watch')}
+        ${sharing ? 'Stop sharing' : (isLive(c.mode) ? 'Start sharing' : 'Start watch')}
       </button>
       <button class="btn warn" data-action="pickup">Pick me up</button>
       <div class="sos" data-action="sos-hold" data-armed="false" role="button" tabindex="0" aria-label="Hold to send help">
@@ -288,7 +344,48 @@ function homeView(): string {
         <span class="hint">Press and hold to send an SOS</span>
       </div>
     </div>
+    ${inviteCta()}
+    <div style="margin-top:14px">${breakCard()}</div>
     <div style="margin-top:14px">${checkinCard()}</div>`
+}
+
+/** A loud, friendly nudge to invite people while you're the only one here. */
+function inviteCta(): string {
+  if (members().length > 1) return ''
+  return `<div class="card invite-cta" data-action="go-invite" role="button" tabindex="0">
+    <div class="cta-emoji">👋</div>
+    <div class="cta-text"><strong>It's just you so far</strong><span>Add the people you want to stay close to.</span></div>
+    <span class="cta-go">Invite →</span>
+  </div>`
+}
+
+/** "Take a break" — go off-grid for a while without worrying anyone. */
+function breakCard(): string {
+  if (isDark()) {
+    const back = fmtMins((persisted.offGridUntil ?? 0) - nowSec())
+    return `<div class="card stack break-on">
+      <div class="row" style="justify-content:space-between">
+        <div><strong>On a break</strong><div class="note">Sharing nothing · back in ${back}. Your circle knows it's planned.</div></div>
+      </div>
+      <button class="btn primary" data-action="come-back">I'm back now</button>
+    </div>`
+  }
+  if (goingDark) {
+    const dur = (sec: number, label: string): string =>
+      `<button class="btn small${darkDurSec === sec ? ' primary' : ''}" data-action="dark-dur" data-sec="${sec}">${label}</button>`
+    return `<div class="card stack">
+      <div class="row" style="justify-content:space-between"><strong>Take a break</strong><button class="btn small ghost" data-action="cancel-dark">Cancel</button></div>
+      <div class="note">Stop sharing for a while. Your circle is told it's planned, so no one worries and no alarm goes off.</div>
+      <div class="chip-row">${dur(3600, '1 hour')}${dur(todayWindowSec(), 'Today')}${dur(-1, 'Custom')}</div>
+      <div id="dark-custom" class="row" style="gap:8px"${darkDurSec === -1 ? '' : ' hidden'}>
+        <input class="input" id="dark-num" type="number" min="1" max="48" value="2" style="max-width:90px" />
+        <span class="muted" style="align-self:center">hours</span>
+      </div>
+      <input class="input" id="dark-why" placeholder="Why? (optional) — e.g. at the cinema" autocapitalize="sentences" />
+      <button class="btn primary" data-action="do-dark">Start break</button>
+    </div>`
+  }
+  return `<button class="btn ghost" data-action="ask-dark">Take a break · pause sharing</button>`
 }
 
 function fmtMins(sec: number): string {
@@ -327,15 +424,28 @@ function checkinCard(): string {
 }
 
 function circleMemberRow(pk: string, mePk: string): string {
+  const cid = activeCircle()?.id ?? ''
   const st = active()
   const isMe = pk === mePk
+
+  if (!isMe && editingPetname === pk) {
+    return `<div class="member editing">
+      ${avatarHtml(pk, isMe)}
+      <input class="input" id="pet-${pk}" placeholder="Nickname (just for you)" value="${esc(persisted.petnames[pk] ?? '')}" autocapitalize="words" style="flex:1" />
+      <button class="btn small primary" data-action="save-petname" data-pk="${pk}">Save</button>
+      <button class="btn small ghost" data-action="cancel-petname" aria-label="Cancel">✕</button>
+    </div>`
+  }
+
   const beacon = st?.beacons.get(pk)
   const presence = beacon ? classifyPresence([beacon], nowSec(), { staleAfterSeconds: 600 })[0] : null
   const ci = st?.checkins.get(pk)
   const ciState = ci ? classifyCheckins([ci], nowSec())[0] : null
+  const dark = !isMe && !!cid && memberDark(cid, pk)
 
   let pill: string
   if (st?.alerts.has(pk)) pill = '<span class="pill alert">help</span>'
+  else if (dark) pill = '<span class="pill dark">on a break</span>'
   else if (ciState?.status === 'missed') pill = '<span class="pill alert">missed</span>'
   else if (ciState?.status === 'overdue') pill = '<span class="pill warn">overdue</span>'
   else if (ciState) pill = '<span class="pill active">checked in</span>'
@@ -345,24 +455,48 @@ function circleMemberRow(pk: string, mePk: string): string {
   else pill = '<span class="pill">no activity</span>'
 
   const sub = beacon ? `~${esc(beacon.geohash)}` : isMe ? 'you' : 'in this circle'
+  const edit = isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`
   return `<div class="member">
-    <div class="avatar">${isMe ? 'You' : initials(pk)}</div>
-    <div class="meta"><div class="who">${isMe ? 'You' : shortNpub(pk)}</div><div class="when">${sub}</div></div>
-    ${pill}
+    ${avatarHtml(pk, isMe)}
+    <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}</div><div class="when">${sub}</div></div>
+    ${pill}${edit}
   </div>`
+}
+
+/** The two ways to add someone: in-person QR/code, and remote encrypted invite. */
+function inviteSections(): string {
+  return `
+    <div class="section-title" style="margin-top:22px">Show a code (in person)</div>
+    <div class="card stack">
+      <div class="qr" id="qr"></div>
+      <button class="btn primary" data-action="copy-invite">Copy invite code</button>
+      <div class="note">Strongest: let them scan the QR, or send the code. It carries the secret, so treat it like a password.</div>
+    </div>
+
+    <div class="section-title" style="margin-top:22px">Send to their key (remote)</div>
+    <div class="card stack">
+      <div class="field"><label for="invite-npub">Their key (npub)</label><input class="input" id="invite-npub" placeholder="npub1…" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      <button class="btn small primary" data-action="send-invite">Send encrypted invite</button>
+      <div class="note">Gift-wrapped to their key (NIP-59) — safe over any channel. Ask them to tap “Join remotely” and share their key.</div>
+    </div>`
 }
 
 function circleView(): string {
   const c = activeCircle() as store.Circle
   const me = persisted.identity as store.Identity
   const mem = members()
+  const alone = mem.length <= 1
   const rows = mem.length
     ? mem.map((pk) => circleMemberRow(pk, me.pk)).join('')
-    : '<div class="card muted">Just you so far — invite someone below.</div>'
+    : '<div class="card muted">Just you so far.</div>'
+  const lead = alone
+    ? `<div class="card invite-lead"><div class="cta-emoji">👋</div><div class="cta-text"><strong>Add your people</strong><span>Share a code in person, or send an invite to someone's key.</span></div></div>${inviteSections()}`
+    : ''
   return `
     ${topbar(false)}
     <h2 style="margin-bottom:14px">${esc(c.name)}</h2>
-    <div class="section-title">Members</div>
+    ${lead}
+    <div class="section-title"${alone ? ' style="margin-top:22px"' : ''}>Members</div>
     <div class="list">${rows}</div>
 
     <div class="section-title" style="margin-top:22px">Buzz the circle</div>
@@ -379,19 +513,7 @@ function circleView(): string {
 
     ${rzvCard()}
 
-    <div class="section-title" style="margin-top:22px">Invite securely (remote)</div>
-    <div class="card stack">
-      <div class="field"><label for="invite-npub">Their key (npub)</label><input class="input" id="invite-npub" placeholder="npub1…" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
-      <button class="btn small primary" data-action="send-invite">Send encrypted invite</button>
-      <div class="note">The seed is gift-wrapped to their key (NIP-59) — safe over any channel. Ask them to open “Join remotely” and share their key.</div>
-    </div>
-
-    <div class="section-title" style="margin-top:22px">Invite in person</div>
-    <div class="card stack">
-      <div class="qr" id="qr"></div>
-      <button class="btn small" data-action="copy-invite">Copy invite code</button>
-      <div class="note">Strongest: the QR carries the seed, so scanning keeps it off any network. Treat the copied code like a password.</div>
-    </div>`
+    ${alone ? '' : inviteSections()}`
 }
 
 function youView(): string {
@@ -418,12 +540,20 @@ function youView(): string {
     <div class="card stack">
       <button class="btn small" data-action="reseed">Rotate circle key (reseed)</button>
       <div class="note">Generates a new seed and sends it encrypted to current members. Do this if an invite code may have leaked.</div>
-      ${members().filter((pk) => pk !== me.pk).map((pk) => `<div class="row"><span class="avatar small">${initials(pk)}</span><span class="who" style="font-size:14px">${shortNpub(pk)}</span><button class="btn small ghost" style="margin-left:auto" data-action="remove-member" data-pk="${pk}">Remove</button></div>`).join('') || '<div class="note">No other members yet.</div>'}
+      ${members().filter((pk) => pk !== me.pk).map((pk) => `<div class="row">${avatarHtml(pk, false, true)}<span class="who" style="font-size:14px">${esc(nameFor(pk))}</span><button class="btn small ghost" style="margin-left:auto" data-action="remove-member" data-pk="${pk}">Remove</button></div>`).join('') || '<div class="note">No other members yet.</div>'}
+    </div>
+    <div class="section-title" style="margin-top:18px">Names &amp; photos</div>
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between">
+        <span>Show public profiles</span>
+        <button class="switch${persisted.showProfiles ? ' on' : ''}" data-action="toggle-profiles" role="switch" aria-checked="${!!persisted.showProfiles}"><span class="knob"></span></button>
+      </div>
+      <div class="note">Off by default. When on, flock fetches public names &amp; photos from public relays — which tells them who you're looking up. Your private nicknames always work and never leave this device.</div>
     </div>
     <div class="section-title" style="margin-top:18px">This circle</div>
     <div class="card stack">
       <div class="kv"><span class="k">Name</span><span>${esc(c.name)}</span></div>
-      <div class="kv"><span class="k">Mode</span><span>${c.mode === 'nightout' ? 'Night out' : 'Family'}</span></div>
+      <div class="kv"><span class="k">Sharing</span><span>${behaviourLabel(c.mode)}</span></div>
       <div class="kv"><span class="k">Lifetime</span><span>${c.expiresAt ? `transient · ends in ${fmtTtl(c.expiresAt)}` : 'long-lived'}</span></div>
       <button class="btn ghost" data-action="leave">Leave this circle</button>
       <div class="note">Leaving removes it from this device only. Your other circles and your key stay put.</div>
@@ -461,49 +591,83 @@ function mapView_screen(): string {
     </div>`
 }
 
+function radiusOf(z: Geofence): string {
+  return z.kind === 'circle' ? `${Math.round(z.radiusMetres)} m across` : `${z.vertices.length}-point area`
+}
+
 function mapPanelInner(): string {
   if (addMode) {
+    const noreport = addZoneKind === 'noreport'
+    const kindToggle = `
+      <div class="mode-toggle" role="group" aria-label="Place type" style="margin-bottom:10px">
+        <button data-action="zone-kind" data-kind="safe" aria-pressed="${!noreport}">Safe place</button>
+        <button data-action="zone-kind" data-kind="noreport" aria-pressed="${noreport}">Private place</button>
+      </div>`
+    const policyToggle = noreport ? `
+      <div class="note" style="margin-top:2px">How private?</div>
+      <div class="chip-row">
+        <button class="btn small${newZonePolicy === 'withhold' ? ' primary' : ''}" data-action="zone-policy" data-policy="withhold">Hide completely</button>
+        <button class="btn small${newZonePolicy === 'coarse' ? ' primary' : ''}" data-action="zone-policy" data-policy="coarse">Rough area only</button>
+      </div>` : ''
+    const help = noreport
+      ? 'A spot that stays hidden — like home. Even if you ask for help, the exact place isn’t shared.'
+      : 'Somewhere you’re meant to be. Your circle is told if you leave it.'
     return `
       <div class="row" style="justify-content:space-between">
-        <strong>New safe zone</strong>
+        <strong>${noreport ? 'New private place' : 'New safe place'}</strong>
         <span class="muted" id="radius-label">${addRadius} m</span>
       </div>
+      ${kindToggle}
+      ${policyToggle}
       <input class="slider" id="radius" type="range" min="100" max="2000" step="50" value="${addRadius}" />
-      <div class="note">Pan the map so the crosshair sits at the centre, then save.</div>
+      <div class="note">${help} Pan so the crosshair sits at the centre, then save.</div>
       <div class="row" style="gap:10px">
-        <button class="btn small primary" data-action="save-zone">Save zone</button>
+        <button class="btn small primary" data-action="save-zone">Save</button>
         <button class="btn small ghost" data-action="cancel-zone">Cancel</button>
       </div>`
   }
-  const zones = persisted.geofences
-  const list = zones.length
-    ? zones.map((z, i) => {
-        const r = z.kind === 'circle' ? `${Math.round(z.radiusMetres)} m radius` : `${z.vertices.length}-point area`
-        return `<div class="zone-row"><span class="dot-safe"></span><span class="zone-meta">Safe zone ${i + 1}<small>${r}</small></span><button class="zone-del" data-action="del-zone" data-i="${i}" aria-label="Delete">✕</button></div>`
+  const safe = persisted.geofences
+  const safeList = safe.length
+    ? safe.map((z, i) => `<div class="zone-row"><span class="dot-safe"></span><span class="zone-meta">Safe place ${i + 1}<small>${radiusOf(z)}</small></span><button class="zone-del" data-action="del-zone" data-i="${i}" aria-label="Delete">✕</button></div>`).join('')
+    : '<div class="note">None yet. Add a safe place and you’ll be told if a circle member leaves it.</div>'
+  const priv = persisted.noReportZones
+  const privList = priv.length
+    ? priv.map((z, i) => {
+        const how = (z.policy ?? 'withhold') === 'coarse' ? 'rough area only' : 'hidden completely'
+        return `<div class="zone-row"><span class="dot-private"></span><span class="zone-meta">${esc(z.label || `Private place ${i + 1}`)}<small>${how}</small></span><button class="zone-del" data-action="del-noreport" data-i="${i}" aria-label="Delete">✕</button></div>`
       }).join('')
-    : '<div class="note">No safe zones yet. Add one and you\'ll be alerted if a circle member leaves it.</div>'
+    : '<div class="note">None yet. A private place (like home) stays hidden — even in an emergency.</div>'
   return `
-    <div class="row" style="justify-content:space-between;margin-bottom:8px"><strong>Safe zones</strong><button class="btn small" data-action="add-zone">＋ Add</button></div>
-    <div class="zone-list">${list}</div>`
+    <div class="row" style="justify-content:space-between;margin-bottom:8px"><strong>Safe places</strong><button class="btn small" data-action="add-zone" data-kind="safe">＋ Add</button></div>
+    <div class="zone-list">${safeList}</div>
+    <div class="row" style="justify-content:space-between;margin:16px 0 8px"><strong>Private places</strong><button class="btn small" data-action="add-zone" data-kind="noreport">＋ Add</button></div>
+    <div class="zone-list">${privList}</div>`
 }
 
 // ── Views: onboarding ────────────────────────────────────────────────────────
 function onboardingView(): string {
   let inner: string
   if (onboardStep === 'create') {
-    const ttlBtn = (sec: number, label: string): string =>
-      `<button class="btn small${newCircleTtl === sec ? ' primary' : ''}" data-action="ob-ttl" data-ttl="${sec}">${label}</button>`
+    const ttlChip = (mode: string, label: string): string =>
+      `<button class="btn small${ttlMode === mode ? ' primary' : ''}" data-action="ob-ttl" data-ttl="${mode}">${label}</button>`
+    const pick = (mode: Mode, title: string, desc: string): string =>
+      `<button class="pick${onboardMode === mode ? ' on' : ''}" data-action="ob-mode" data-mode="${mode}" aria-pressed="${onboardMode === mode}"><strong>${title}</strong><span>${desc}</span></button>`
     inner = `
       <h1>New circle</h1>
-      <p class="tagline">Name it, pick a mode, and choose how long it lasts — ongoing for family, or time-boxed for a trip or a night out.</p>
-      <div class="field" style="text-align:left;margin-bottom:14px"><label for="cname">Circle name</label><input class="input" id="cname" placeholder="The Smiths" /></div>
-      <div class="mode-toggle" role="group" aria-label="Mode" style="margin-bottom:16px">
-        <button data-action="ob-mode" data-mode="family" aria-pressed="${onboardMode === 'family'}">Family</button>
-        <button data-action="ob-mode" data-mode="nightout" aria-pressed="${onboardMode === 'nightout'}">Night out</button>
+      <p class="tagline">Give it a name, choose how it shares, and how long it lasts.</p>
+      <div class="field" style="text-align:left;margin-bottom:14px"><label for="cname">Name</label><input class="input" id="cname" placeholder="The Smiths · Lads' trip · Sat night" /></div>
+      <div class="field" style="text-align:left;margin-bottom:8px"><label>How it shares</label></div>
+      <div class="share-pick" style="margin-bottom:18px">
+        ${pick('family', 'Private', 'Hidden until you ask for help, ask for a pick-up, or leave a safe place.')}
+        ${pick('nightout', 'Share live', 'Friends see roughly where you are — handy for "who\'s still out?".')}
       </div>
-      <div class="field" style="text-align:left;margin-bottom:6px"><label>Lifetime</label></div>
-      <div class="chip-row" role="group" aria-label="Lifetime" style="margin-bottom:22px;justify-content:center">
-        ${ttlBtn(0, 'Ongoing')}${ttlBtn(28_800, 'Tonight')}${ttlBtn(432_000, '5 days')}${ttlBtn(604_800, 'A week')}
+      <div class="field" style="text-align:left;margin-bottom:6px"><label>How long</label></div>
+      <div class="chip-row" role="group" aria-label="Lifetime" style="margin-bottom:10px;justify-content:center">
+        ${ttlChip('ongoing', 'Ongoing')}${ttlChip('today', 'Today')}${ttlChip('custom', 'Custom')}
+      </div>
+      <div id="ob-ttl-custom" class="row" style="gap:8px;justify-content:center;margin-bottom:22px"${ttlMode === 'custom' ? '' : ' hidden'}>
+        <input class="input" id="ttl-num" type="number" min="1" max="60" value="3" style="max-width:84px" />
+        <select class="input" id="ttl-unit" style="max-width:120px"><option value="hours">hours</option><option value="days" selected>days</option></select>
       </div>
       <div class="actions">
         <button class="btn primary" data-action="do-create">Create circle</button>
@@ -579,15 +743,20 @@ function wireOnboard(): void {
       else if (a === 'join') { onboardStep = 'join'; rerenderOnboard() }
       else if (a === 'back') { onboardStep = 'intro'; awaitingInvite = false; rerenderOnboard() }
       else if (a === 'ob-mode') {
-        // Flip the mode in place. A full re-render here would discard whatever's
+        // Flip the behaviour in place. A full re-render here would discard whatever's
         // half-typed in the #cname field (it's uncontrolled, read only on create).
         onboardMode = (node as HTMLElement).dataset.mode as Mode
-        root.querySelectorAll<HTMLElement>('[data-action="ob-mode"]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === onboardMode)))
+        root.querySelectorAll<HTMLElement>('[data-action="ob-mode"]').forEach((b) => {
+          const on = b.dataset.mode === onboardMode
+          b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on))
+        })
       }
       else if (a === 'ob-ttl') {
         // Update in place too, for the same reason as ob-mode.
-        newCircleTtl = Number((node as HTMLElement).dataset.ttl)
-        root.querySelectorAll<HTMLElement>('[data-action="ob-ttl"]').forEach((b) => b.classList.toggle('primary', Number(b.dataset.ttl) === newCircleTtl))
+        ttlMode = (node as HTMLElement).dataset.ttl as 'ongoing' | 'today' | 'custom'
+        root.querySelectorAll<HTMLElement>('[data-action="ob-ttl"]').forEach((b) => b.classList.toggle('primary', b.dataset.ttl === ttlMode))
+        const cust = document.getElementById('ob-ttl-custom')
+        if (cust) (cust as HTMLElement).hidden = ttlMode !== 'custom'
       }
       else if (a === 'cancel-add') { adding = false; onboardStep = 'intro'; render() }
       else if (a === 'do-create') doCreate()
@@ -628,6 +797,7 @@ async function initMap(): Promise<void> {
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
   mapView = new MapView(container, fix ?? undefined)
   mapView.setGeofences(persisted.geofences)
+  mapView.setNoReportZones(persisted.noReportZones)
   mapView.onMove(() => { if (addMode) updatePreview() })
   updateMapData()
   wireMapPanel()
@@ -683,19 +853,35 @@ function updateMapData(): void { mapView?.setMembers(memberPoints()) }
 function saveZone(): void {
   if (!mapView) return
   const c = mapView.center()
-  persisted.geofences = [...persisted.geofences, { kind: 'circle', centre: { lat: c.lat, lon: c.lon }, radiusMetres: addRadius }]
+  const area: CircleGeofence = { kind: 'circle', centre: { lat: c.lat, lon: c.lon }, radiusMetres: addRadius }
+  if (addZoneKind === 'noreport') {
+    const zone: NoReportZone = { area, policy: newZonePolicy, label: `Private place ${persisted.noReportZones.length + 1}` }
+    persisted.noReportZones = [...persisted.noReportZones, zone]
+    toast('Private place added — it stays hidden')
+  } else {
+    persisted.geofences = [...persisted.geofences, area]
+    toast('Safe place added')
+  }
   store.save(persisted)
   addMode = false
+  addZoneKind = 'safe'
   mapView.setPreview(null)
   mapView.setGeofences(persisted.geofences)
+  mapView.setNoReportZones(persisted.noReportZones)
   renderMapPanel()
-  toast('Safe zone added')
 }
 
 function delZone(i: number): void {
   persisted.geofences = persisted.geofences.filter((_, idx) => idx !== i)
   store.save(persisted)
   mapView?.setGeofences(persisted.geofences)
+  renderMapPanel()
+}
+
+function delNoReport(i: number): void {
+  persisted.noReportZones = persisted.noReportZones.filter((_, idx) => idx !== i)
+  store.save(persisted)
+  mapView?.setNoReportZones(persisted.noReportZones)
   renderMapPanel()
 }
 
@@ -795,7 +981,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     if (!existing) return
     patchCircleById(existing.id, { seedHex: payload.s })
     const st = cstate(existing.id)
-    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null
+    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     toast('Circle key was rotated')
     refresh()
   }
@@ -835,7 +1021,7 @@ async function reseedCircle(removePk?: string): Promise<void> {
     }
     patchCircleById(c.id, { seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) })
     const st = cstate(c.id)
-    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null
+    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     toast(removePk ? 'Member removed & key rotated' : 'Circle key rotated')
     render()
   } catch { toast('Reseed failed') }
@@ -876,7 +1062,9 @@ function evaluateCheckinAlarm(): void {
   const me = persisted.identity?.pk
   let missed = 0
   for (const c of persisted.circles) {
-    missed += missedCheckins(classifyCheckins([...cstate(c.id).checkins.values()], nowSec())).filter((s) => s.member !== me).length
+    // A member who pre-announced a break is *meant* to be quiet — never alarm on them.
+    missed += missedCheckins(classifyCheckins([...cstate(c.id).checkins.values()], nowSec()))
+      .filter((s) => s.member !== me && !memberDark(c.id, s.member)).length
   }
   const was = checkinAlert
   checkinAlert = missed > 0
@@ -891,6 +1079,12 @@ function isEditing(): boolean {
 function startMonitor(): void {
   if (monitorTimer) return
   monitorTimer = window.setInterval(() => {
+    // Auto-resume a break the moment its timer runs out.
+    if (persisted.offGridUntil && persisted.offGridUntil <= nowSec()) {
+      persisted.offGridUntil = undefined
+      store.save(persisted)
+      toast('Break over — sharing back on')
+    }
     const expired = sweepExpired()
     evaluateCheckinAlarm()
     if (expired && !adding) { toast('A transient circle ended'); render(); return }
@@ -914,13 +1108,50 @@ async function sendBuzz(reason: string, target?: string): Promise<void> {
 
 function buzzBanner(): string {
   if (!activeBuzz) return ''
-  const who = activeBuzz.from === persisted.identity?.pk ? 'You' : shortNpub(activeBuzz.from)
+  const who = activeBuzz.from === persisted.identity?.pk ? 'You' : nameFor(activeBuzz.from)
   const where = activeBuzz.circle ? ` · ${esc(activeBuzz.circle)}` : ''
   return `<div class="buzz-banner${activeBuzz.mine ? ' for-me' : ''}" data-action="dismiss-buzz" role="alert">
     <span class="bz-icon">🔔</span>
     <span class="bz-text"><strong>${esc(who)}</strong> · ${esc(activeBuzz.reason)}${where}</span>
     <span class="bz-x">✕</span>
   </div>`
+}
+
+// ── Off-grid ("take a break") ─────────────────────────────────────────────────
+/** Pre-announce a planned silence (or a cancel, when until<=now) to every circle. */
+async function broadcastOffGrid(until: number, reason?: string): Promise<void> {
+  const id = persisted.identity
+  if (!id) return
+  for (const c of persisted.circles) {
+    try {
+      const tmpl = await buildOffGridSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, until, ...(reason ? { reason } : {}) })
+      await publishSignal(tmpl, c)
+    } catch { /* best effort, per circle */ }
+  }
+}
+
+function goDark(): void {
+  let sec = darkDurSec
+  if (sec === -1) {
+    const n = Number((document.getElementById('dark-num') as HTMLInputElement | null)?.value) || 0
+    sec = Math.max(1, Math.min(48, Math.round(n))) * 3600
+  }
+  const why = (document.getElementById('dark-why') as HTMLInputElement | null)?.value?.trim() || undefined
+  const until = nowSec() + sec
+  persisted.offGridUntil = until
+  store.save(persisted)
+  goingDark = false
+  toast('On a break — sharing paused')
+  void broadcastOffGrid(until, why)
+  render()
+}
+
+function comeBack(): void {
+  persisted.offGridUntil = undefined
+  store.save(persisted)
+  toast("You're back on")
+  void broadcastOffGrid(nowSec()) // until≤now tells every circle the break is over
+  render()
 }
 
 // ── Rendezvous ───────────────────────────────────────────────────────────────
@@ -1001,7 +1232,7 @@ function rzvCard(): string {
         : st.status === 'arrived' ? '<span class="pill active">arrived</span>'
           : st.status === 'at-risk' ? '<span class="pill alert">at risk</span>'
             : `<span class="pill warn">${fmtMins(st.etaSeconds)} away</span>`
-      return `<div class="row" style="gap:10px"><span class="avatar small">${isMe ? 'You' : initials(pk)}</span><span class="who" style="font-size:14px">${isMe ? 'You' : shortNpub(pk)}</span><span style="margin-left:auto">${pill}</span></div>`
+      return `<div class="row" style="gap:10px">${avatarHtml(pk, isMe, true)}<span class="who" style="font-size:14px">${isMe ? 'You' : esc(nameFor(pk))}</span><span style="margin-left:auto">${pill}</span></div>`
     }).join('')
     const modes = (['walk', 'cycle', 'drive', 'transit'] as const)
       .map((m) => `<button class="btn small${travelMode === m ? ' primary' : ''}" data-action="rzv-mode" data-mode="${m}">${m}</button>`).join('')
@@ -1034,6 +1265,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'tab': tab = (node.dataset.tab as typeof tab); render(); break
     case 'switch-circle': switchCircle(node.dataset.id as string); break
     case 'add-circle': adding = true; onboardStep = 'intro'; render(); break
+    case 'go-invite': tab = 'circle'; render(); break
     case 'mode': setMode(node.dataset.mode as Mode); break
     case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'pickup': void emit('pickup'); break
@@ -1050,6 +1282,21 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'rzv-dur': rzvDurationMin = Number(node.dataset.min); render(); break
     case 'rzv-mode': travelMode = node.dataset.mode as TravelMode; render(); break
     case 'copy-rzv': copyRzvForTaxi(); break
+    case 'ask-dark': goingDark = true; render(); break
+    case 'cancel-dark': goingDark = false; render(); break
+    case 'dark-dur': {
+      darkDurSec = Number(node.dataset.sec)
+      root.querySelectorAll<HTMLElement>('[data-action="dark-dur"]').forEach((b) => b.classList.toggle('primary', Number(b.dataset.sec) === darkDurSec))
+      const cust = document.getElementById('dark-custom')
+      if (cust) (cust as HTMLElement).hidden = darkDurSec !== -1
+      break
+    }
+    case 'do-dark': goDark(); break
+    case 'come-back': comeBack(); break
+    case 'edit-petname': editingPetname = node.dataset.pk ?? null; render(); break
+    case 'save-petname': savePetname(node.dataset.pk as string); break
+    case 'cancel-petname': editingPetname = null; render(); break
+    case 'toggle-profiles': toggleProfiles(); break
     case 'arm-menu': armingCheckin = true; render(); break
     case 'cancel-arm': armingCheckin = false; render(); break
     case 'arm': armCheckin(Number(node.dataset.interval)); break
@@ -1060,10 +1307,13 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'cancel-disband': disbandConfirm = false; render(); break
     case 'disband': void disbandCircle(); break
     case 'reset-device': resetDevice(); break
-    case 'add-zone': addMode = true; renderMapPanel(); updatePreview(); break
-    case 'cancel-zone': addMode = false; mapView?.setPreview(null); renderMapPanel(); break
+    case 'add-zone': addMode = true; addZoneKind = (node.dataset.kind as 'safe' | 'noreport') ?? 'safe'; newZonePolicy = 'withhold'; renderMapPanel(); updatePreview(); break
+    case 'zone-kind': addZoneKind = node.dataset.kind as 'safe' | 'noreport'; renderMapPanel(); updatePreview(); break
+    case 'zone-policy': newZonePolicy = node.dataset.policy as 'withhold' | 'coarse'; renderMapPanel(); updatePreview(); break
+    case 'cancel-zone': addMode = false; addZoneKind = 'safe'; mapView?.setPreview(null); renderMapPanel(); break
     case 'save-zone': saveZone(); break
     case 'del-zone': delZone(Number(node.dataset.i)); break
+    case 'del-noreport': delNoReport(Number(node.dataset.i)); break
     default: break
   }
 }
@@ -1099,13 +1349,21 @@ function doCreate(): void {
   const name = (document.getElementById('cname') as HTMLInputElement | null)?.value ?? ''
   persisted.identity ??= store.createIdentity()
   persisted.circleRootHex ??= store.newSeed()
-  const expiresAt = newCircleTtl ? nowSec() + newCircleTtl : undefined
+  let expiresAt: number | undefined
+  if (ttlMode === 'today') {
+    expiresAt = nowSec() + todayWindowSec()
+  } else if (ttlMode === 'custom') {
+    const n = Number((document.getElementById('ttl-num') as HTMLInputElement | null)?.value) || 0
+    const unit = (document.getElementById('ttl-unit') as HTMLSelectElement | null)?.value
+    const sec = unit === 'hours' ? n * 3600 : n * 86_400
+    expiresAt = sec > 0 ? nowSec() + sec : undefined
+  }
   upsertCircle(store.createCircle(name, onboardMode, persisted.identity.pk, persisted.circleRootHex, expiresAt), true)
   onboardStep = 'intro'
   awaitingInvite = false
   adding = false
-  newCircleTtl = 0
-  tab = 'home'
+  ttlMode = 'ongoing'
+  tab = 'circle' // land where inviting people is front-and-centre
   render()
 }
 
@@ -1159,6 +1417,7 @@ function stopSharing(): void {
 
 function onFix(f: svc.Fix): void {
   fix = f
+  if (isDark()) { refresh(); return } // on a break — emit nothing at all
   broadcastRzvStatus()
   const c = activeCircle()
   if (sharing && c?.mode === 'family' && persisted.geofences.length) {
@@ -1182,6 +1441,8 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
     position,
     trigger,
     geofences: c.mode === 'family' ? persisted.geofences : undefined,
+    offGrid: isDark(),
+    noReportZones: persisted.noReportZones,
   })
   if (plan.reason === 'breach') breachActive = true
   const type = signalTypeForReason(plan.reason)
@@ -1192,7 +1453,8 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
   try {
     let template
     if (type === 'help') {
-      const location = position
+      // A no-report zone can cap even an SOS — send help without coordinates, or coarse.
+      const location = position && plan.action !== 'withhold'
         ? { geohash: encode(position.lat, position.lon, plan.precision), precision: plan.precision, locationSource: 'beacon' as const }
         : null
       template = await buildHelpSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, location })
@@ -1227,6 +1489,33 @@ function copyNpub(): void {
   let npub = id.pk
   try { npub = npubEncode(id.pk) } catch { /* keep hex */ }
   navigator.clipboard?.writeText(npub).then(() => toast('Your key copied'), () => toast('Copy failed'))
+}
+
+// ── Profiles & petnames ───────────────────────────────────────────────────────
+function savePetname(pk: string): void {
+  const v = (document.getElementById(`pet-${pk}`) as HTMLInputElement | null)?.value?.trim() ?? ''
+  if (v) persisted.petnames = { ...persisted.petnames, [pk]: v }
+  else { const next = { ...persisted.petnames }; delete next[pk]; persisted.petnames = next }
+  store.save(persisted)
+  editingPetname = null
+  toast(v ? 'Nickname saved' : 'Nickname cleared')
+  render()
+}
+
+function toggleProfiles(): void {
+  persisted.showProfiles = !persisted.showProfiles
+  store.save(persisted)
+  if (persisted.showProfiles) ensureProfiles()
+  toast(persisted.showProfiles ? 'Showing public names & photos' : 'Public profiles off')
+  render()
+}
+
+/** When opted-in, fetch public kind:0 profiles for everyone across our circles. */
+function ensureProfiles(): void {
+  if (!persisted.showProfiles) return
+  const pks = new Set<string>()
+  for (const c of persisted.circles) for (const pk of c.members ?? []) pks.add(pk)
+  fetchProfiles([...pks], () => { if (!isEditing()) refresh() })
 }
 
 function saveRelay(): void {
@@ -1360,14 +1649,25 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       const status = await decryptRendezvousStatus(c.seedHex, e.content)
       st.rzvStatuses.set(status.member, status)
       if (status.status === 'at-risk' && st.rendezvous?.setBy === me?.pk && status.member !== me?.pk) {
-        toast(`⚠ ${shortNpub(status.member)} may miss the rendezvous`)
+        toast(`⚠ ${nameFor(status.member)} may miss the rendezvous`)
       }
+    } else if (t === OFFGRID_SIGNAL_TYPE) {
+      const o = await decryptOffGrid(c.seedHex, e.content)
+      const prev = st.offgrid.get(o.from)
+      const wasDark = !!prev && isOffGrid(prev, nowSec())
+      st.offgrid.set(o.from, o)
+      const nowDark = isOffGrid(o, nowSec())
+      if (!me || o.from !== me.pk) {
+        if (nowDark && !wasDark) toast(`${nameFor(o.from)} is taking a break${o.reason ? ` · ${esc(o.reason)}` : ''}`)
+        else if (!nowDark && wasDark) toast(`${nameFor(o.from)} is back`)
+      }
+      evaluateCheckinAlarm() // a planned break clears any false missed-check-in alarm
     } else if (t === DISBAND_SIGNAL_TYPE) {
       const d = await decryptDisband(c.seedHex, e.content)
       const name = c.name
       removeCircle(c.id) // the owner ended it for everyone — drop it and wipe its seed
       if (!activeCircle()) tab = 'home'
-      toast(`${d.by === me?.pk ? 'You' : shortNpub(d.by)} disbanded ${name}`)
+      toast(`${d.by === me?.pk ? 'You' : nameFor(d.by)} disbanded ${name}`)
       render()
       return
     } else {

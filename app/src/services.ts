@@ -53,6 +53,26 @@ export function subscribeSignals(
   return () => sub.close()
 }
 
+/**
+ * Fetch public kind:0 profiles for a set of pubkeys from the public profile
+ * relays. One-shot-ish: stays open briefly to collect replies, then the caller
+ * closes it. Returns an unsubscribe fn. (Privacy: this is the ONE place flock
+ * touches public relays — opt-in only; see relays.ts / store.showProfiles.)
+ */
+export function subscribeProfiles(
+  relays: readonly string[],
+  pubkeys: string[],
+  onEvent: (e: { pubkey: string; content: string; created_at: number }) => void,
+): () => void {
+  if (!pubkeys.length) return () => { /* noop */ }
+  const sub = getPool().subscribeMany(
+    [...relays],
+    { kinds: [0], authors: pubkeys },
+    { onevent: onEvent },
+  )
+  return () => sub.close()
+}
+
 /** Watch foreground location. Returns a stop fn. */
 export function watchLocation(
   onFix: (f: Fix) => void,

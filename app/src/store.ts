@@ -3,7 +3,7 @@
 
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { decode as nip19decode } from 'nostr-tools/nip19'
-import type { Geofence } from '@forgesworn/flock'
+import type { Geofence, NoReportZone } from '@forgesworn/flock'
 import { PRIVATE_RELAYS } from './relays'
 import { deriveCircleSeed } from './keys'
 
@@ -33,6 +33,14 @@ export interface Persisted {
   activeCircleId: string | null
   relayUrl: string
   geofences: Geofence[]
+  /** Inverse geofences — inside one, disclosure is capped even on a trigger. On-device only. */
+  noReportZones: NoReportZone[]
+  /** Unix sec my deliberate darkness ends; undefined/elapsed = on grid. */
+  offGridUntil?: number
+  /** Local, private nicknames for members (pubkey → name). Never leaves the device. */
+  petnames: Record<string, string>
+  /** Opt-in: fetch public kind:0 profiles (names/avatars) from public relays. Default off. */
+  showProfiles?: boolean
   /** How the identity authenticates: a local key, or a Signet/bunker signer. */
   authMethod?: AuthMethod
   /** Local secret from which circle seeds are deterministically derived (nsec-tree). */
@@ -50,12 +58,12 @@ export const fromHex = (h: string): Uint8Array =>
 const randHex = (n: number): string => toHex(crypto.getRandomValues(new Uint8Array(n)))
 
 export function load(): Persisted {
-  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrl: DEFAULT_RELAY, geofences: [] }
+  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrl: DEFAULT_RELAY, geofences: [], noReportZones: [], petnames: {} }
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return fresh
     const o = JSON.parse(raw) as Partial<Persisted> & { circle?: Circle | null }
-    const state: Persisted = { ...fresh, ...o, circles: o.circles ?? [] }
+    const state: Persisted = { ...fresh, ...o, circles: o.circles ?? [], noReportZones: o.noReportZones ?? [], petnames: o.petnames ?? {} }
     // Migrate the legacy single-circle shape.
     if (o.circle && !state.circles.length) {
       state.circles = [o.circle]

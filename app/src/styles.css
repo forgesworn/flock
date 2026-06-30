@@ -454,3 +454,48 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .buzz-banner .bz-x { opacity: 0.6; font-size: 13px; }
 @keyframes buzzdrop { from { transform: translateX(-50%) translateY(-100%); } to { transform: translateX(-50%) translateY(0); } }
 @keyframes ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-16deg); } 60% { transform: rotate(16deg); } }
+
+/* `.row { display:flex }` outranks the UA `[hidden]` rule — make hidden win. */
+[hidden] { display: none !important; }
+
+/* ── Sharing-behaviour picker (onboarding) ─────────────────────────────── */
+.share-pick { display: grid; gap: 10px; }
+.share-pick .pick {
+  text-align: left; width: 100%; padding: 13px 16px; border-radius: var(--radius);
+  background: var(--bg-2); border: 1px solid var(--line); color: var(--text);
+  display: grid; gap: 3px; cursor: pointer; transition: border-color .15s, background .15s;
+}
+.share-pick .pick strong { font-size: 15px; }
+.share-pick .pick span { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.share-pick .pick.on { border-color: var(--safe); background: var(--safe-dim); }
+.share-pick .pick.on span { color: var(--text); }
+
+/* ── Invite call-to-action ─────────────────────────────────────────────── */
+.invite-cta, .invite-lead { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+.invite-cta { cursor: pointer; border-color: var(--line-strong); }
+.cta-emoji { font-size: 26px; line-height: 1; }
+.cta-text { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.cta-text strong { font-size: 15px; }
+.cta-text span { font-size: 12.5px; color: var(--muted); }
+.cta-go { color: var(--safe); font-weight: 700; font-size: 14px; white-space: nowrap; }
+
+/* ── Off-grid / "take a break" ─────────────────────────────────────────── */
+:root { --dark: #9aa6c2; --dark-dim: rgba(154, 166, 194, 0.16); }
+.state-dark { --ring: var(--dark); }
+.pill.dark { color: var(--dark); border-color: var(--dark-dim); background: var(--dark-dim); }
+.break-on { border-color: var(--dark-dim); background: var(--dark-dim); }
+
+/* ── No-report ("private") places ──────────────────────────────────────── */
+.zone-row .dot-private { width: 10px; height: 10px; border-radius: 50%; background: #f0a93b; box-shadow: 0 0 8px #f0a93b; }
+
+/* ── Member avatar photo + nickname edit ───────────────────────────────── */
+.avatar { overflow: hidden; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.icon-btn { background: transparent; border: 1px solid var(--line); color: var(--muted); width: 30px; height: 30px; border-radius: 9px; font-size: 13px; flex: none; cursor: pointer; }
+.member.editing .input { padding: 9px 12px; font-size: 14px; }
+
+/* ── Settings switch ───────────────────────────────────────────────────── */
+.switch { width: 46px; height: 28px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); position: relative; flex: none; cursor: pointer; transition: background .15s; }
+.switch .knob { position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+.switch.on { background: var(--safe-dim); border-color: var(--safe); }
+.switch.on .knob { transform: translateX(18px); background: var(--safe); }
