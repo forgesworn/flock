@@ -34,7 +34,8 @@ export const RENDEZVOUS_STATUS_TYPE = 'rzv-status'
 /** A rendezvous: be at `place` by `deadline`. */
 export interface Rendezvous {
   id: string
-  place: LatLng & { label?: string }
+  /** Coordinates + optional human label, full address (taxi-friendly), and precise geohash. */
+  place: LatLng & { label?: string; address?: string; geohash?: string }
   /** Unix seconds. */
   deadline: number
   mode: RendezvousMode
@@ -120,7 +121,13 @@ function validateRendezvous(o: Record<string, unknown>): Rendezvous {
   if (typeof o.createdAt !== 'number') throw new Error('Invalid rendezvous: createdAt')
   return {
     id: o.id,
-    place: { lat: place.lat, lon: place.lon, ...(typeof place.label === 'string' && { label: place.label }) },
+    place: {
+      lat: place.lat,
+      lon: place.lon,
+      ...(typeof place.label === 'string' && { label: place.label }),
+      ...(typeof place.address === 'string' && { address: place.address }),
+      ...(typeof place.geohash === 'string' && { geohash: place.geohash }),
+    },
     deadline: o.deadline,
     mode: o.mode,
     setBy: o.setBy,

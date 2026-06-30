@@ -9,6 +9,7 @@ import { login as signetLogin, restoreSession as signetRestore, logout as signet
 import { PRIVATE_RELAYS } from './relays'
 import { deriveCircleSeed, deriveInbox } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
+import { geocode } from './geo'
 import { encode, decode } from 'geohash-kit'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -802,10 +803,21 @@ async function setRendezvous(): Promise<void> {
   const c = persisted.circle
   const id = persisted.identity
   if (!c || !id) return
-  if (!fix) { toast('Start sharing first — the meeting point is set at your location'); return }
+  const q = (document.getElementById('rzv-place') as HTMLInputElement | null)?.value?.trim() ?? ''
+  let place: Rendezvous['place']
+  if (q) {
+    toast('Finding the place…')
+    const g = await geocode(q)
+    if (!g) { toast("Couldn't find that — try a fuller address"); return }
+    place = { lat: g.lat, lon: g.lon, label: q, address: g.address, geohash: encode(g.lat, g.lon, 10) }
+  } else if (fix) {
+    place = { lat: fix.lat, lon: fix.lon, geohash: encode(fix.lat, fix.lon, 10) }
+  } else {
+    toast('Type a place/address, or start sharing to use your spot'); return
+  }
   const r: Rendezvous = {
     id: `rzv-${nowSec().toString(36)}`,
-    place: { lat: fix.lat, lon: fix.lon },
+    place,
     deadline: nowSec() + rzvDurationMin * 60,
     mode: c.mode === 'family' ? 'be-back' : 'meet-at',
     setBy: id.pk,
@@ -824,6 +836,13 @@ function clearRendezvous(): void {
   activeRendezvous = null
   rzvStatuses.clear()
   render()
+}
+
+function copyRzvForTaxi(): void {
+  const r = activeRendezvous
+  if (!r) return
+  const parts = [r.place.label, r.place.address, `${r.place.lat.toFixed(5)}, ${r.place.lon.toFixed(5)}`].filter(Boolean)
+  navigator.clipboard?.writeText(parts.join(' — ')).then(() => toast('Copied — paste into your taxi app'), () => toast('Copy failed'))
 }
 
 function rzvCard(): string {
@@ -846,6 +865,8 @@ function rzvCard(): string {
     return `<div class="section-title" style="margin-top:22px">Rendezvous</div>
       <div class="card stack">
         <div class="row" style="justify-content:space-between"><strong>${r.mode === 'be-back' ? 'Be back' : 'Meet'}${dueIn > 0 ? ` in ${fmtMins(dueIn)}` : ' now'}</strong><span class="muted">by ${at}</span></div>
+        <div class="note" style="margin-top:-2px">📍 ${esc(r.place.label || r.place.address || 'a set spot')}</div>
+        <button class="btn small ghost" data-action="copy-rzv">Copy address for a taxi</button>
         <div class="list">${rows}</div>
         <div class="note">How you're getting there</div>
         <div class="chip-row">${modes}</div>
@@ -854,13 +875,14 @@ function rzvCard(): string {
   }
   return `<div class="section-title" style="margin-top:22px">Rendezvous</div>
     <div class="card stack">
-      <div class="note">Set a meeting point at your spot and a time — everyone sees who's on track to make it.</div>
+      <div class="field"><input class="input" id="rzv-place" placeholder="The Crown, or an address — blank for here" autocapitalize="words" autocorrect="off" /></div>
+      <div class="note">A place or address (taxi-friendly), or leave blank to use your spot. ETAs are as-the-crow-flies.</div>
       <div class="chip-row">
         <button class="btn small${rzvDurationMin === 30 ? ' primary' : ''}" data-action="rzv-dur" data-min="30">30 min</button>
         <button class="btn small${rzvDurationMin === 60 ? ' primary' : ''}" data-action="rzv-dur" data-min="60">1 hour</button>
         <button class="btn small${rzvDurationMin === 120 ? ' primary' : ''}" data-action="rzv-dur" data-min="120">2 hours</button>
       </div>
-      <button class="btn small primary" data-action="set-rzv">Set rendezvous here</button>
+      <button class="btn small primary" data-action="set-rzv">Set rendezvous</button>
     </div>`
 }
 
@@ -882,6 +904,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'clear-rzv': clearRendezvous(); break
     case 'rzv-dur': rzvDurationMin = Number(node.dataset.min); render(); break
     case 'rzv-mode': travelMode = node.dataset.mode as TravelMode; render(); break
+    case 'copy-rzv': copyRzvForTaxi(); break
     case 'arm-menu': armingCheckin = true; render(); break
     case 'cancel-arm': armingCheckin = false; render(); break
     case 'arm': armCheckin(Number(node.dataset.interval)); break
