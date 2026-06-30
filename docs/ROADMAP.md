@@ -48,9 +48,27 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 - [ ] **mesh-kit** / **mesh-webrtc-lan** — off-relay LAN transport (no internet).
 - [ ] **LoRa mesh transport** — phone ↔ a pocket LoRa device over **BLE**, via **Meshtastic** or **MeshCore**. flock signals ride as opaque **E2E-encrypted bytes** (already true post gift-wrap-everything) over the LoRa mesh → works **fully off-grid** (no relay, no cell, no internet) — the ultimate "the relay can't track you". Web Bluetooth (Android/GrapheneOS Chromium) for the PWA; **Capacitor BLE** for iOS. **Rides on the `intermesh-plans` Meshtastic↔MeshCore/MQTT substrate** (active spike). Slots behind the same transport seam (`services.ts`).
 
-## Phase F — Meeting
+## Phase F — Meeting & rendezvous ("be at a place by a time")
 
-- [ ] **rendezvous-kit** — fair pick-up / regroup point for N people.
+Two halves that compose into one feature:
+
+- [ ] **Set rendezvous** (flock-native, `rendezvous.ts`) — anyone sets a
+  `{ place, deadline, mode: 'be-back' | 'meet-at', setBy }`. Parent: "home by 6"
+  for kids on bikes/foot; organiser: "The Crown at 8". Distributed as a
+  gift-wrapped signal. Each device computes **ETA** (distance ÷ travel speed for
+  walk/cycle/drive/transit), shows a **countdown + "leave by X to make it"**,
+  detects **arrival** (reuse `geofence.isInside`), and broadcasts **status**
+  (en-route / arrived / **at-risk**). The setter is **alerted if someone won't
+  make it** — exactly the "are the kids going to be back in time" need.
+- [ ] **Find a fair meeting point** — **rendezvous-kit** `findRendezvous()`:
+  members' coarse locations + each one's transport mode → isochrone intersection
+  → **Overpass venue search** (pub/café/park, OSM, no key) → **fairness scoring**
+  (`min_max` / `min_total` / `min_variance`) → ranked suggestions. "Some in bar A,
+  some in bar B → where do we all go?" The pick becomes a set rendezvous.
+  Engine-agnostic — start with a no-engine radius isochrone (distance/speed),
+  plug a routing engine (Valhalla/ORS/OSRM) later for road-accurate times.
+  rendezvous-kit deps only on `geohash-kit` (already in flock) — clean fit, and
+  flock becomes its real-world driver.
 
 ## Phase G — Platform & release
 
