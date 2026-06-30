@@ -38,6 +38,10 @@
     "./buzz": {
       "types": "./dist/buzz.d.ts",
       "import": "./dist/buzz.js"
+    },
+    "./rendezvous": {
+      "types": "./dist/rendezvous.d.ts",
+      "import": "./dist/rendezvous.js"
     }
   },
   "files": [
