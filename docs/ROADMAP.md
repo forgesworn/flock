@@ -13,7 +13,8 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 
 ## Phase A — Privacy-by-architecture foundation
 
-- [ ] **Signer abstraction** (`FlockSigner`: `signEvent` + `nip44`) → **signet-login** (`SignetSigner`); LocalSigner fallback. Key out of the app.
+- [x] **Signer abstraction** (`FlockSigner`) — all event signing, NIP-44, and NIP-59 gift-wrap routed through it (signer-based gift-wrap is unit-tested).
+- [x] **Sign in with Signet** (`signet-login` `SignetSigner` adapter) — key in a bunker/Signet/Amber, **never in flock**; dual local/Signet identity + session restore. *(Live login needs a real Signet signer to verify end-to-end.)*
 - [ ] **nsec-tree** personas + epochs — unlinkable per-circle identities; reseed = epoch+1.
 - [ ] **Gift-wrap everything** via a rotating **group-inbox** key — relay sees only `kind:1059` from random keys (no real pubkeys, types, or roster).
 - [~] **Relay strategy** (adopted from `pallasite/src/credits.ts` → `app/src/relays.ts`): sensitive flock traffic → our **no-log relay only** (`relay.trotters.cc`); the broad public set (`PROFILE_RELAYS`) is reserved for reading **kind:0 profiles**. Full multi-relay fan-out of sensitive traffic waits for gift-wrap-everything (spraying before then would leak metadata to public relays).
