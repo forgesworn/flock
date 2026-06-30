@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+.vitest/
+test-results/
+playwright-report/
+
+# Capacitor / native
+android/
+ios/
+.gradle/
+*.keystore
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Claude Code / MCP / tooling artefacts
+.claude/
+CLAUDE.local.md
