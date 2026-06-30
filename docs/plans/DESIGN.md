@@ -72,6 +72,7 @@ the family/coercion case; possibly overkill for consensual night-out. Decide per
 ## 5. Phased build
 
 ### Phase 0 — de-risk (do before committing the architecture)
+Spike protocol written: [`2026-06-30-phase0-graphene-spike.md`](2026-06-30-phase0-graphene-spike.md).
 - [ ] Spike: background GPS + on-device geofence wake-ups on **GrapheneOS** (no Google APIs)
       and **iOS** via Capacitor. **This is the single biggest unknown** (research refuted the
       one claim that pinned the GrapheneOS mechanism down).
@@ -89,8 +90,8 @@ the family/coercion case; possibly overkill for consensual night-out. Decide per
 
 ### Phase 2 — geofencing
 - [x] On-device geofence engine (point-in-polygon + circular), breach → emission policy *(library; landed early in Phase 1)*.
-- [ ] Capacitor shell; background location via community plugin.
-- [ ] Wire background fixes → `decideEmission` → `buildLocationSignal` → publish.
+- [x] Capacitor config + background bridge **scaffolded** (`capacitor.config.ts`, `native/background.ts`) — reuses `decideEmission` → `buildLocationSignal` → publish. *(Not yet built/tested on device — gated on the Phase 0 spike.)*
+- [ ] Generate native projects, run the Phase 0 spike, then build for real.
 - [ ] UnifiedPush + persistent-relay alert delivery.
 
 ### Phase 3 — coercion hardening

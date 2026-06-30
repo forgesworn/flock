@@ -69,7 +69,7 @@ encryption stay at the edge.
 | `signals` | `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078 events | ✅ tested |
 | `nightout` | Ephemeral groups (NIP-40), presence ("still out / gone home"), separation ("lost") | ✅ tested |
 | `app/` (PWA) | Foreground UI — onboarding, status orb, SOS/pick-me-up, circle invites + presence; real Nostr publish/subscribe + geolocation | ✅ MVP |
-| `native/` (Capacitor) | Background geofencing + UnifiedPush | ⬜ not started |
+| `native/` (Capacitor) | Background geofencing + UnifiedPush — config + bridge scaffolded, reuses the same policy/transport | 🧱 scaffold |
 
 **Library:** `npm run build` · `npm test` · `npm run typecheck` · `npm run lint`
 **PWA:** `npm run dev` (localhost) · `npm run build:app` (→ `dist-app/`) · `npm run preview:app`
