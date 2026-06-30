@@ -13,6 +13,13 @@ test.describe('map — safe & private places', () => {
     await expect(A.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
     await A.waitForTimeout(1_500)
 
+    // Regression guard: the map silently rendered blank because maplibre tags
+    // #map with `.maplibregl-map { position: relative }`, which (equal specificity,
+    // loaded later) beat our `.map-canvas { position: absolute; inset: 0 }` and
+    // collapsed the container to height 0. Tiles still loaded and the canvas stayed
+    // "visible", so only an explicit height check catches it.
+    expect(await A.locator('#map').evaluate((el) => (el as HTMLElement).clientHeight)).toBeGreaterThan(100)
+
     // Safe place — saved at the current map centre.
     await A.click('[data-action="add-zone"][data-kind="safe"]')
     await A.click('[data-action="save-zone"]')

@@ -391,7 +391,12 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .map-screen { padding-bottom: calc(var(--nav-h) + 16px); }
 .map-shell { flex: 1; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .map-stage { position: relative; flex: 1; min-height: 320px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); }
-.map-canvas { position: absolute; inset: 0; }
+/* maplibre-gl tags this same #map element with `.maplibregl-map { position: relative }`,
+   which loads after this file at equal specificity and was overriding the rule below —
+   collapsing the map to height:0 (insets don't size a relative box, and maplibre's inner
+   layers are absolute, so nothing held the height open). The child combinator outranks
+   maplibre's single class, so `absolute` wins and `inset:0` fills the .map-stage again. */
+.map-stage > .map-canvas { position: absolute; inset: 0; }
 .map-canvas .maplibregl-ctrl-group { background: var(--surface-2); border: 1px solid var(--line); }
 .map-canvas .maplibregl-ctrl-group button + button { border-top: 1px solid var(--line); }
 .map-canvas .maplibregl-ctrl-attrib { background: rgba(14,17,22,0.7); color: var(--faint); }
