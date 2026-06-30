@@ -57,8 +57,7 @@ let sharing = false
 let alertActive = false
 let breachActive = false
 let stopWatch: (() => void) | null = null
-let stopSub: (() => void) | null = null
-let subKey = ''
+const subs = new Map<string, () => void>() // circleId@relay@inboxPk → unsubscribe (one per circle)
 let lastSelfBeacon = 0
 let root: HTMLElement
 let toastTimer = 0
@@ -73,19 +72,83 @@ let awaitingInvite = false
 let armingCheckin = false
 let checkinAlert = false
 let monitorTimer = 0
-let activeBuzz: { from: string; reason: string; mine: boolean } | null = null
-let activeRendezvous: Rendezvous | null = null
+let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string } | null = null
 let travelMode: TravelMode = 'walk'
 let rzvDurationMin = 60
 let lastRzvStatus = 0
-const rzvStatuses = new Map<string, RendezvousStatus>()
 
 let onboardStep: 'intro' | 'create' | 'join' | 'await' = 'intro'
 let onboardMode: Mode = 'family'
+let adding = false // adding another circle from within the app (not first-run onboarding)
+let newCircleTtl = 0 // chosen transient lifetime (sec) for a new circle; 0 = long-lived
 
-const beacons = new Map<string, MemberBeacon>()
-const alerts = new Map<string, number>()
-const checkins = new Map<string, CheckIn>()
+// Per-circle live state — signals are circle-scoped, so beacons/alerts/etc. from
+// one circle must never bleed into another. Keyed by circle id.
+interface CircleState {
+  beacons: Map<string, MemberBeacon>
+  alerts: Map<string, number>
+  checkins: Map<string, CheckIn>
+  rzvStatuses: Map<string, RendezvousStatus>
+  rendezvous: Rendezvous | null
+}
+const circleStates = new Map<string, CircleState>()
+function cstate(id: string): CircleState {
+  let s = circleStates.get(id)
+  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null }; circleStates.set(id, s) }
+  return s
+}
+
+// ── Active circle + writers ──────────────────────────────────────────────────
+function activeCircle(): store.Circle | null {
+  return persisted.circles.find((c) => c.id === persisted.activeCircleId) ?? persisted.circles[0] ?? null
+}
+/** Live state of the active circle (the one in focus). */
+function active(): CircleState | null {
+  const c = activeCircle()
+  return c ? cstate(c.id) : null
+}
+function patchActive(patch: Partial<store.Circle>): void {
+  const c = activeCircle()
+  if (!c) return
+  persisted.circles = persisted.circles.map((x) => (x.id === c.id ? { ...x, ...patch } : x))
+  store.save(persisted)
+}
+function patchCircleById(id: string, patch: Partial<store.Circle>): void {
+  persisted.circles = persisted.circles.map((x) => (x.id === id ? { ...x, ...patch } : x))
+  store.save(persisted)
+}
+function upsertCircle(c: store.Circle, makeActive = true): void {
+  const exists = persisted.circles.some((x) => x.id === c.id)
+  persisted.circles = exists ? persisted.circles.map((x) => (x.id === c.id ? c : x)) : [...persisted.circles, c]
+  if (makeActive) persisted.activeCircleId = c.id
+  store.save(persisted)
+}
+function removeCircle(id: string): void {
+  persisted.circles = persisted.circles.filter((c) => c.id !== id)
+  circleStates.delete(id)
+  if (persisted.activeCircleId === id) persisted.activeCircleId = persisted.circles[0]?.id ?? null
+  store.save(persisted)
+}
+/** Drop transient circles whose lifetime has elapsed. Returns true if any were removed. */
+function sweepExpired(): boolean {
+  const now = nowSec()
+  const live = persisted.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
+  if (live.length === persisted.circles.length) return false
+  for (const c of persisted.circles) if (!live.includes(c)) circleStates.delete(c.id)
+  persisted.circles = live
+  if (!live.some((c) => c.id === persisted.activeCircleId)) persisted.activeCircleId = live[0]?.id ?? null
+  store.save(persisted)
+  return true
+}
+function switchCircle(id: string): void {
+  if (!persisted.circles.some((c) => c.id === id)) return
+  persisted.activeCircleId = id
+  store.save(persisted)
+  breachActive = false
+  alertActive = false
+  tab = 'home'
+  render()
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const nowSec = (): number => Math.floor(Date.now() / 1000)
@@ -127,6 +190,7 @@ const ICON = {
 // ── Mount / render ──────────────────────────────────────────────────────────
 export function mount(el: HTMLElement): void {
   root = el
+  store.save(persisted) // persist any legacy→multi-circle migration / pruning straight away
   render()
   void restoreSignet()
 }
@@ -134,13 +198,13 @@ export function mount(el: HTMLElement): void {
 function render(): void {
   if (tab !== 'map' && mapView) { mapView.destroy(); mapView = null; addMode = false }
   if (persisted.identity) ensureInviteSub()
-  if (!persisted.identity || !persisted.circle) {
+  if (!persisted.identity || !activeCircle() || adding) {
     root.innerHTML = onboardingView()
     wireOnboard()
     return
   }
-  ensureMember(persisted.identity.pk)
-  ensureSubscription()
+  ensureMember(activeCircle() as store.Circle, persisted.identity.pk)
+  ensureSubscriptions()
   startMonitor()
   const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
   root.innerHTML = `${buzzBanner()}<main class="screen fade-in ${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
@@ -149,7 +213,7 @@ function render(): void {
 
 // ── Views: app ───────────────────────────────────────────────────────────────
 function topbar(showModeToggle: boolean): string {
-  const c = persisted.circle as store.Circle
+  const c = activeCircle() as store.Circle
   const toggle = showModeToggle ? `
     <div class="mode-toggle" role="group" aria-label="Mode">
       <button data-action="mode" data-mode="family" aria-pressed="${c.mode === 'family'}">Family</button>
@@ -158,11 +222,33 @@ function topbar(showModeToggle: boolean): string {
   return `<div class="topbar">
     <div class="brand"><img class="logo" src="./icon.svg" alt=""/><span class="name wordmark">flock</span></div>
     ${toggle}
-  </div>`
+  </div>
+  ${circleSwitcher()}`
+}
+
+/** Compact remaining-lifetime label for a transient circle ('' for long-lived). */
+function fmtTtl(expiresAt?: number): string {
+  if (!expiresAt) return ''
+  const left = expiresAt - nowSec()
+  if (left <= 0) return 'ending'
+  if (left < 3600) return `${Math.round(left / 60)}m`
+  if (left < 86_400) return `${Math.round(left / 3600)}h`
+  return `${Math.round(left / 86_400)}d`
+}
+
+/** Horizontal chip row to switch between circles + add a new one. */
+function circleSwitcher(): string {
+  if (persisted.circles.length < 1) return ''
+  const active = activeCircle()?.id
+  const chips = persisted.circles.map((c) => {
+    const ttl = fmtTtl(c.expiresAt)
+    return `<button class="circle-chip${c.id === active ? ' on' : ''}" data-action="switch-circle" data-id="${c.id}">${esc(c.name)}${ttl ? `<span class="ttl">${ttl}</span>` : ''}</button>`
+  }).join('')
+  return `<div class="circle-switch">${chips}<button class="circle-chip add" data-action="add-circle" aria-label="Add a circle">＋</button></div>`
 }
 
 function orbState(): { cls: string; label: string; sub: string } {
-  const c = persisted.circle as store.Circle
+  const c = activeCircle() as store.Circle
   if (alertActive) return { cls: 'state-alert', label: 'Help sent', sub: 'Your circle has been alerted' }
   if (checkinAlert) return { cls: 'state-alert', label: 'Check-in missed', sub: "Someone hasn't checked in" }
   if (breachActive) return { cls: 'state-alert', label: 'Outside safe zone', sub: 'Location shared with your circle' }
@@ -176,7 +262,7 @@ function orbState(): { cls: string; label: string; sub: string } {
 }
 
 function homeView(): string {
-  const c = persisted.circle as store.Circle
+  const c = activeCircle() as store.Circle
   const s = orbState()
   return `
     ${topbar(true)}
@@ -206,7 +292,7 @@ function fmtMins(sec: number): string {
 }
 
 function checkinCard(): string {
-  const c = persisted.circle as store.Circle
+  const c = activeCircle() as store.Circle
   const interval = c.checkinInterval ?? 0
   if (armingCheckin) {
     return `<div class="card stack">
@@ -221,7 +307,7 @@ function checkinCard(): string {
   }
   if (interval > 0) {
     const me = persisted.identity?.pk
-    const mine = me ? checkins.get(me) : undefined
+    const mine = me ? cstate(c.id).checkins.get(me) : undefined
     const dueIn = mine ? (mine.timestamp + interval) - nowSec() : 0
     const overdue = dueIn <= 0
     return `<div class="card stack checkin-armed${overdue ? ' overdue' : ''}">
@@ -236,14 +322,15 @@ function checkinCard(): string {
 }
 
 function circleMemberRow(pk: string, mePk: string): string {
+  const st = active()
   const isMe = pk === mePk
-  const beacon = beacons.get(pk)
+  const beacon = st?.beacons.get(pk)
   const presence = beacon ? classifyPresence([beacon], nowSec(), { staleAfterSeconds: 600 })[0] : null
-  const ci = checkins.get(pk)
+  const ci = st?.checkins.get(pk)
   const ciState = ci ? classifyCheckins([ci], nowSec())[0] : null
 
   let pill: string
-  if (alerts.has(pk)) pill = '<span class="pill alert">help</span>'
+  if (st?.alerts.has(pk)) pill = '<span class="pill alert">help</span>'
   else if (ciState?.status === 'missed') pill = '<span class="pill alert">missed</span>'
   else if (ciState?.status === 'overdue') pill = '<span class="pill warn">overdue</span>'
   else if (ciState) pill = '<span class="pill active">checked in</span>'
@@ -261,7 +348,7 @@ function circleMemberRow(pk: string, mePk: string): string {
 }
 
 function circleView(): string {
-  const c = persisted.circle as store.Circle
+  const c = activeCircle() as store.Circle
   const me = persisted.identity as store.Identity
   const mem = members()
   const rows = mem.length
@@ -304,7 +391,7 @@ function circleView(): string {
 
 function youView(): string {
   const me = persisted.identity as store.Identity
-  const c = persisted.circle as store.Circle
+  const c = activeCircle() as store.Circle
   return `
     ${topbar(false)}
     <h2 style="margin-bottom:14px">You &amp; settings</h2>
@@ -328,11 +415,17 @@ function youView(): string {
       <div class="note">Generates a new seed and sends it encrypted to current members. Do this if an invite code may have leaked.</div>
       ${members().filter((pk) => pk !== me.pk).map((pk) => `<div class="row"><span class="avatar small">${initials(pk)}</span><span class="who" style="font-size:14px">${shortNpub(pk)}</span><button class="btn small ghost" style="margin-left:auto" data-action="remove-member" data-pk="${pk}">Remove</button></div>`).join('') || '<div class="note">No other members yet.</div>'}
     </div>
-    <div class="section-title" style="margin-top:18px">Circle</div>
+    <div class="section-title" style="margin-top:18px">This circle</div>
     <div class="card stack">
       <div class="kv"><span class="k">Name</span><span>${esc(c.name)}</span></div>
       <div class="kv"><span class="k">Mode</span><span>${c.mode === 'nightout' ? 'Night out' : 'Family'}</span></div>
-      <button class="btn ghost" data-action="leave">Leave circle &amp; reset</button>
+      <div class="kv"><span class="k">Lifetime</span><span>${c.expiresAt ? `transient · ends in ${fmtTtl(c.expiresAt)}` : 'long-lived'}</span></div>
+      <button class="btn ghost" data-action="leave">Leave this circle</button>
+      <div class="note">Leaving removes it from this device only. Your other circles and your key stay put.</div>
+    </div>
+    <div class="card stack" style="margin-top:14px">
+      <button class="btn small ghost" data-action="reset-device">Sign out &amp; reset this device</button>
+      <div class="note">Wipes your key and every circle from this browser.</div>
     </div>
     <div class="note" style="margin-top:16px;text-align:center">flock · disclosure-on-event location · built on canary-kit</div>`
 }
@@ -386,13 +479,19 @@ function mapPanelInner(): string {
 function onboardingView(): string {
   let inner: string
   if (onboardStep === 'create') {
+    const ttlBtn = (sec: number, label: string): string =>
+      `<button class="btn small${newCircleTtl === sec ? ' primary' : ''}" data-action="ob-ttl" data-ttl="${sec}">${label}</button>`
     inner = `
       <h1>New circle</h1>
-      <p class="tagline">Give it a name. You can switch between family and night-out mode any time.</p>
+      <p class="tagline">Name it, pick a mode, and choose how long it lasts — ongoing for family, or time-boxed for a trip or a night out.</p>
       <div class="field" style="text-align:left;margin-bottom:14px"><label for="cname">Circle name</label><input class="input" id="cname" placeholder="The Smiths" /></div>
-      <div class="mode-toggle" role="group" aria-label="Mode" style="margin-bottom:22px">
+      <div class="mode-toggle" role="group" aria-label="Mode" style="margin-bottom:16px">
         <button data-action="ob-mode" data-mode="family" aria-pressed="${onboardMode === 'family'}">Family</button>
         <button data-action="ob-mode" data-mode="nightout" aria-pressed="${onboardMode === 'nightout'}">Night out</button>
+      </div>
+      <div class="field" style="text-align:left;margin-bottom:6px"><label>Lifetime</label></div>
+      <div class="chip-row" role="group" aria-label="Lifetime" style="margin-bottom:22px;justify-content:center">
+        ${ttlBtn(0, 'Ongoing')}${ttlBtn(28_800, 'Tonight')}${ttlBtn(432_000, '5 days')}${ttlBtn(604_800, 'A week')}
       </div>
       <div class="actions">
         <button class="btn primary" data-action="do-create">Create circle</button>
@@ -420,6 +519,16 @@ function onboardingView(): string {
         <button class="btn ghost" data-action="back">Cancel</button>
       </div>
       <div class="note" style="margin-top:12px">⟳ Waiting for a secure invite…</div>`
+  } else if (adding) {
+    inner = `
+      <h1>Add a circle</h1>
+      <p class="tagline">Create another circle or join one — you can be in many at once: family, a trip, a night out.</p>
+      <div class="actions">
+        <button class="btn primary" data-action="create">Create a circle</button>
+        <button class="btn" data-action="join">Join with a code</button>
+        <button class="btn ghost" data-action="join-remote">Join remotely (share my key)</button>
+        <button class="btn ghost" data-action="cancel-add">Cancel</button>
+      </div>`
   } else {
     const signedInSignet = persisted.authMethod === 'signet' && persisted.identity
     const signetRow = signedInSignet
@@ -463,6 +572,12 @@ function wireOnboard(): void {
         onboardMode = (node as HTMLElement).dataset.mode as Mode
         root.querySelectorAll<HTMLElement>('[data-action="ob-mode"]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === onboardMode)))
       }
+      else if (a === 'ob-ttl') {
+        // Update in place too, for the same reason as ob-mode.
+        newCircleTtl = Number((node as HTMLElement).dataset.ttl)
+        root.querySelectorAll<HTMLElement>('[data-action="ob-ttl"]').forEach((b) => b.classList.toggle('primary', Number(b.dataset.ttl) === newCircleTtl))
+      }
+      else if (a === 'cancel-add') { adding = false; onboardStep = 'intro'; render() }
       else if (a === 'do-create') doCreate()
       else if (a === 'do-join') doJoin()
       else if (a === 'join-remote') doJoinRemote()
@@ -475,10 +590,11 @@ function rerenderOnboard(): void { root.innerHTML = onboardingView(); wireOnboar
 
 function wireApp(): void {
   const qrEl = document.getElementById('qr')
-  if (qrEl && persisted.circle) {
+  const ac = activeCircle()
+  if (qrEl && ac) {
     try {
       const qr = qrcode(0, 'M')
-      qr.addData(store.encodeInvite(persisted.circle))
+      qr.addData(store.encodeInvite(ac))
       qr.make()
       qrEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true })
     } catch { qrEl.remove() }
@@ -537,14 +653,16 @@ function updatePreview(): void {
 
 function memberPoints(): MapPoint[] {
   const me = persisted.identity?.pk
-  return classifyPresence([...beacons.values()], nowSec(), { staleAfterSeconds: 600 }).map((e) => {
+  const st = active()
+  if (!st) return []
+  return classifyPresence([...st.beacons.values()], nowSec(), { staleAfterSeconds: 600 }).map((e) => {
     const d = decode(e.geohash)
     return {
       member: e.member,
       lat: d.lat,
       lon: d.lon,
       label: e.member === me ? 'You' : initials(e.member),
-      status: alerts.has(e.member) ? 'alert' as const : e.status,
+      status: st.alerts.has(e.member) ? 'alert' as const : e.status,
     }
   })
 }
@@ -571,6 +689,9 @@ function delZone(i: number): void {
 
 /** Re-render without tearing down a live map. */
 function refresh(): void {
+  // Never rebuild while an onboarding / add-circle form is on screen — a background
+  // refresh would discard a half-typed circle name (the inputs are uncontrolled).
+  if (adding || !persisted.identity || !activeCircle()) return
   if (tab === 'map' && mapView) { updateMapData(); renderMapPanel() }
   else render()
 }
@@ -614,23 +735,20 @@ async function restoreSignet(): Promise<void> {
 }
 
 /** Publish a flock signal as a gift-wrap to the circle's shared inbox (relay sees only kind:1059). */
-async function publishSignal(unsigned: { kind: number; content: string; tags: string[][]; created_at?: number }): Promise<void> {
-  const c = persisted.circle
+async function publishSignal(unsigned: { kind: number; content: string; tags: string[][]; created_at?: number }, circle: store.Circle | null = activeCircle()): Promise<void> {
   const signer = getSigner()
-  if (!c || !signer) return
-  const inbox = deriveInbox(c.seedHex)
+  if (!circle || !signer) return
+  const inbox = deriveInbox(circle.seedHex)
   const wrap = await giftWrap(signer, inbox.pk, unsigned)
   await svc.publishSigned(persisted.relayUrl, wrap as never)
 }
 
 // ── Members, invites & reseed ────────────────────────────────────────────────
-function members(): string[] { return persisted.circle?.members ?? [] }
+function members(): string[] { return activeCircle()?.members ?? [] }
 
-function ensureMember(pk: string): void {
-  const c = persisted.circle
-  if (!c) return
-  const m = c.members ?? []
-  if (!m.includes(pk)) { c.members = [...m, pk]; store.save(persisted) }
+function ensureMember(circle: store.Circle, pk: string): void {
+  const m = circle.members ?? []
+  if (!m.includes(pk)) patchCircleById(circle.id, { members: [...m, pk] })
 }
 
 function ensureInviteSub(): void {
@@ -649,26 +767,30 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
   const payload = await readInvite(signer, e)
   if (!payload) return
   if (payload.t === 'invite') {
-    if (persisted.circle && persisted.circle.id === payload.id) return
-    persisted.circle = { id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m, members: [signer.pubkey], checkinInterval: 0 }
-    store.save(persisted)
-    beacons.clear(); alerts.clear(); checkins.clear()
+    if (persisted.circles.some((c) => c.id === payload.id)) return // already a member
+    upsertCircle({
+      id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m,
+      members: [signer.pubkey], checkinInterval: 0, ...(payload.x ? { expiresAt: payload.x } : {}),
+    }, true)
     awaitingInvite = false
     onboardStep = 'intro'
+    adding = false
     tab = 'home'
     toast(`You've joined ${payload.n}`)
     render()
-  } else if (payload.t === 'reseed' && persisted.circle && payload.id === persisted.circle.id) {
-    persisted.circle = { ...persisted.circle, seedHex: payload.s }
-    store.save(persisted)
-    beacons.clear(); alerts.clear(); checkins.clear()
+  } else if (payload.t === 'reseed') {
+    const existing = persisted.circles.find((c) => c.id === payload.id)
+    if (!existing) return
+    patchCircleById(existing.id, { seedHex: payload.s })
+    const st = cstate(existing.id)
+    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null
     toast('Circle key was rotated')
     refresh()
   }
 }
 
 async function sendInvite(): Promise<void> {
-  const c = persisted.circle
+  const c = activeCircle()
   const signer = getSigner()
   if (!c || !signer) return
   const raw = (document.getElementById('invite-npub') as HTMLInputElement | null)?.value?.trim()
@@ -678,16 +800,16 @@ async function sendInvite(): Promise<void> {
   if (!/^[0-9a-f]{64}$/.test(pk)) { toast('Invalid key'); return }
   if (pk === signer.pubkey) { toast("That's your own key"); return }
   try {
-    const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode })
+    const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
     await svc.publishSigned(persisted.relayUrl, wrap as never)
-    ensureMember(pk)
+    ensureMember(c, pk)
     toast('Secure invite sent')
     render()
   } catch { toast('Could not send invite') }
 }
 
 async function reseedCircle(removePk?: string): Promise<void> {
-  const c = persisted.circle
+  const c = activeCircle()
   const signer = getSigner()
   if (!c || !signer) return
   persisted.circleRootHex ??= store.newSeed()
@@ -696,12 +818,12 @@ async function reseedCircle(removePk?: string): Promise<void> {
   const recipients = (c.members ?? []).filter((pk) => pk !== signer.pubkey && pk !== removePk)
   try {
     if (recipients.length) {
-      const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode })
+      const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
       for (const w of wraps) await svc.publishSigned(persisted.relayUrl, w as never)
     }
-    persisted.circle = { ...c, seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) }
-    store.save(persisted)
-    beacons.clear(); alerts.clear(); checkins.clear()
+    patchCircleById(c.id, { seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) })
+    const st = cstate(c.id)
+    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null
     toast(removePk ? 'Member removed & key rotated' : 'Circle key rotated')
     render()
   } catch { toast('Reseed failed') }
@@ -709,42 +831,44 @@ async function reseedCircle(removePk?: string): Promise<void> {
 
 // ── Check-in / dead-man's-switch ─────────────────────────────────────────────
 async function sendCheckIn(): Promise<void> {
-  const c = persisted.circle
+  const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
   const interval = c.checkinInterval ?? 0
   try {
     const tmpl = await buildCheckInSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, intervalSeconds: interval })
-    await publishSignal(tmpl)
-    if (interval > 0) checkins.set(id.pk, { member: id.pk, timestamp: nowSec(), intervalSeconds: interval })
-    else checkins.delete(id.pk)
+    await publishSignal(tmpl, c)
+    const ck = cstate(c.id).checkins
+    if (interval > 0) ck.set(id.pk, { member: id.pk, timestamp: nowSec(), intervalSeconds: interval })
+    else ck.delete(id.pk)
     toast(interval > 0 ? "Checked in — you're OK" : 'Checked out')
   } catch { toast('Check-in failed') }
   refresh()
 }
 
 function armCheckin(intervalSeconds: number): void {
-  if (!persisted.circle) return
-  persisted.circle = { ...persisted.circle, checkinInterval: intervalSeconds }
-  store.save(persisted)
+  if (!activeCircle()) return
+  patchActive({ checkinInterval: intervalSeconds })
   armingCheckin = false
   startMonitor()
   void sendCheckIn()
 }
 
 function disarmCheckin(): void {
-  if (!persisted.circle) return
-  persisted.circle = { ...persisted.circle, checkinInterval: 0 }
-  store.save(persisted)
+  if (!activeCircle()) return
+  patchActive({ checkinInterval: 0 })
   void sendCheckIn() // broadcasts a stand-down (interval 0)
 }
 
 function evaluateCheckinAlarm(): void {
   const me = persisted.identity?.pk
-  const missed = missedCheckins(classifyCheckins([...checkins.values()], nowSec())).filter((s) => s.member !== me)
+  let missed = 0
+  for (const c of persisted.circles) {
+    missed += missedCheckins(classifyCheckins([...cstate(c.id).checkins.values()], nowSec())).filter((s) => s.member !== me).length
+  }
   const was = checkinAlert
-  checkinAlert = missed.length > 0
-  if (checkinAlert && !was) toast(`⚠ ${missed.length === 1 ? 'A member' : `${missed.length} members`} missed a check-in`)
+  checkinAlert = missed > 0
+  if (checkinAlert && !was) toast(`⚠ ${missed === 1 ? 'A member' : `${missed} members`} missed a check-in`)
 }
 
 function isEditing(): boolean {
@@ -755,21 +879,23 @@ function isEditing(): boolean {
 function startMonitor(): void {
   if (monitorTimer) return
   monitorTimer = window.setInterval(() => {
+    const expired = sweepExpired()
     evaluateCheckinAlarm()
+    if (expired && !adding) { toast('A transient circle ended'); render(); return }
     if (!isEditing()) refresh()
   }, 30_000)
 }
 
 // ── Buzz ─────────────────────────────────────────────────────────────────────
 async function sendBuzz(reason: string, target?: string): Promise<void> {
-  const c = persisted.circle
+  const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
   const r = reason.trim()
   if (!r) { toast('Pick or type a reason'); return }
   try {
     const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: r, ...(target ? { target } : {}) })
-    await publishSignal(tmpl)
+    await publishSignal(tmpl, c)
     toast(target ? 'Buzzed' : 'Buzzed everyone')
   } catch { toast('Buzz failed') }
 }
@@ -777,30 +903,33 @@ async function sendBuzz(reason: string, target?: string): Promise<void> {
 function buzzBanner(): string {
   if (!activeBuzz) return ''
   const who = activeBuzz.from === persisted.identity?.pk ? 'You' : shortNpub(activeBuzz.from)
+  const where = activeBuzz.circle ? ` · ${esc(activeBuzz.circle)}` : ''
   return `<div class="buzz-banner${activeBuzz.mine ? ' for-me' : ''}" data-action="dismiss-buzz" role="alert">
     <span class="bz-icon">🔔</span>
-    <span class="bz-text"><strong>${esc(who)}</strong> · ${esc(activeBuzz.reason)}</span>
+    <span class="bz-text"><strong>${esc(who)}</strong> · ${esc(activeBuzz.reason)}${where}</span>
     <span class="bz-x">✕</span>
   </div>`
 }
 
 // ── Rendezvous ───────────────────────────────────────────────────────────────
 function broadcastRzvStatus(): void {
-  const c = persisted.circle
+  const c = activeCircle()
   const id = persisted.identity
-  if (!c || !id || !activeRendezvous || !fix) return
-  const p = assessArrival(activeRendezvous, id.pk, { lat: fix.lat, lon: fix.lon }, travelMode, nowSec())
-  rzvStatuses.set(id.pk, { rendezvousId: activeRendezvous.id, member: id.pk, status: p.status, etaSeconds: p.etaSeconds, timestamp: nowSec() })
+  if (!c || !id || !fix) return
+  const st = cstate(c.id)
+  if (!st.rendezvous) return
+  const p = assessArrival(st.rendezvous, id.pk, { lat: fix.lat, lon: fix.lon }, travelMode, nowSec())
+  st.rzvStatuses.set(id.pk, { rendezvousId: st.rendezvous.id, member: id.pk, status: p.status, etaSeconds: p.etaSeconds, timestamp: nowSec() })
   if (nowSec() - lastRzvStatus < 30) return
   lastRzvStatus = nowSec()
-  const status = rzvStatuses.get(id.pk) as RendezvousStatus
+  const status = st.rzvStatuses.get(id.pk) as RendezvousStatus
   void (async () => {
-    try { await publishSignal(await buildRendezvousStatusSignal({ groupId: c.id, seedHex: c.seedHex, status })) } catch { /* best effort */ }
+    try { await publishSignal(await buildRendezvousStatusSignal({ groupId: c.id, seedHex: c.seedHex, status }), c) } catch { /* best effort */ }
   })()
 }
 
 async function setRendezvous(): Promise<void> {
-  const c = persisted.circle
+  const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
   const q = (document.getElementById('rzv-place') as HTMLInputElement | null)?.value?.trim() ?? ''
@@ -824,22 +953,23 @@ async function setRendezvous(): Promise<void> {
     createdAt: nowSec(),
   }
   try {
-    await publishSignal(await buildRendezvousSignal({ groupId: c.id, seedHex: c.seedHex, rendezvous: r }))
-    activeRendezvous = r
-    rzvStatuses.clear()
+    await publishSignal(await buildRendezvousSignal({ groupId: c.id, seedHex: c.seedHex, rendezvous: r }), c)
+    const cs = cstate(c.id)
+    cs.rendezvous = r
+    cs.rzvStatuses.clear()
     toast('Rendezvous set')
     render()
   } catch { toast('Could not set rendezvous') }
 }
 
 function clearRendezvous(): void {
-  activeRendezvous = null
-  rzvStatuses.clear()
+  const st = active()
+  if (st) { st.rendezvous = null; st.rzvStatuses.clear() }
   render()
 }
 
 function copyRzvForTaxi(): void {
-  const r = activeRendezvous
+  const r = active()?.rendezvous
   if (!r) return
   const parts = [r.place.label, r.place.address, `${r.place.lat.toFixed(5)}, ${r.place.lon.toFixed(5)}`].filter(Boolean)
   navigator.clipboard?.writeText(parts.join(' — ')).then(() => toast('Copied — paste into your taxi app'), () => toast('Copy failed'))
@@ -847,12 +977,13 @@ function copyRzvForTaxi(): void {
 
 function rzvCard(): string {
   const me = persisted.identity?.pk
-  if (activeRendezvous) {
-    const r = activeRendezvous
+  const cs = active()
+  if (cs?.rendezvous) {
+    const r = cs.rendezvous
     const dueIn = r.deadline - nowSec()
     const at = new Date(r.deadline * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const rows = members().map((pk) => {
-      const st = rzvStatuses.get(pk)
+      const st = cs.rzvStatuses.get(pk)
       const isMe = pk === me
       const pill = !st ? '<span class="pill">no signal</span>'
         : st.status === 'arrived' ? '<span class="pill active">arrived</span>'
@@ -889,6 +1020,8 @@ function rzvCard(): string {
 function handleAction(action: string, node: HTMLElement): void {
   switch (action) {
     case 'tab': tab = (node.dataset.tab as typeof tab); render(); break
+    case 'switch-circle': switchCircle(node.dataset.id as string); break
+    case 'add-circle': adding = true; onboardStep = 'intro'; render(); break
     case 'mode': setMode(node.dataset.mode as Mode); break
     case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'pickup': void emit('pickup'); break
@@ -911,6 +1044,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'disarm-checkin': disarmCheckin(); break
     case 'save-relay': saveRelay(); break
     case 'leave': leave(); break
+    case 'reset-device': resetDevice(); break
     case 'add-zone': addMode = true; renderMapPanel(); updatePreview(); break
     case 'cancel-zone': addMode = false; mapView?.setPreview(null); renderMapPanel(); break
     case 'save-zone': saveZone(); break
@@ -950,10 +1084,12 @@ function doCreate(): void {
   const name = (document.getElementById('cname') as HTMLInputElement | null)?.value ?? ''
   persisted.identity ??= store.createIdentity()
   persisted.circleRootHex ??= store.newSeed()
-  persisted.circle = store.createCircle(name, onboardMode, persisted.identity.pk, persisted.circleRootHex)
-  store.save(persisted)
+  const expiresAt = newCircleTtl ? nowSec() + newCircleTtl : undefined
+  upsertCircle(store.createCircle(name, onboardMode, persisted.identity.pk, persisted.circleRootHex, expiresAt), true)
   onboardStep = 'intro'
   awaitingInvite = false
+  adding = false
+  newCircleTtl = 0
   tab = 'home'
   render()
 }
@@ -972,9 +1108,11 @@ function doJoin(): void {
   try {
     const circle = store.decodeInvite(code)
     persisted.identity ??= store.createIdentity()
-    persisted.circle = circle
-    store.save(persisted)
+    if (persisted.circles.some((c) => c.id === circle.id)) { switchCircle(circle.id); adding = false; return }
+    circle.members = [persisted.identity.pk]
+    upsertCircle(circle, true)
     onboardStep = 'intro'
+    adding = false
     tab = 'home'
     render()
   } catch (err) {
@@ -983,9 +1121,8 @@ function doJoin(): void {
 }
 
 function setMode(mode: Mode): void {
-  if (!persisted.circle) return
-  persisted.circle = { ...persisted.circle, mode }
-  store.save(persisted)
+  if (!activeCircle()) return
+  patchActive({ mode })
   breachActive = false
   render()
 }
@@ -1008,7 +1145,7 @@ function stopSharing(): void {
 function onFix(f: svc.Fix): void {
   fix = f
   broadcastRzvStatus()
-  const c = persisted.circle
+  const c = activeCircle()
   if (sharing && c?.mode === 'family' && persisted.geofences.length) {
     breachActive = !isWithinAnyFence({ lat: f.lat, lon: f.lon }, persisted.geofences)
     if (breachActive && nowSec() - lastSelfBeacon > 30) { lastSelfBeacon = nowSec(); void emit('none'); return }
@@ -1021,7 +1158,7 @@ function onFix(f: svc.Fix): void {
 }
 
 async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
-  const c = persisted.circle
+  const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
   const position = fix ? { lat: fix.lat, lon: fix.lon } : null
@@ -1052,9 +1189,9 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
       }
       const geohash = encode(position.lat, position.lon, plan.precision)
       template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision })
-      beacons.set(id.pk, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
+      cstate(c.id).beacons.set(id.pk, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
     }
-    await publishSignal(template)
+    await publishSignal(template, c)
     toast(trigger === 'help' ? 'Help sent to your circle' : trigger === 'pickup' ? 'Pick-up request sent' : 'Location shared')
   } catch {
     toast('Could not send — check your relay and connection.')
@@ -1063,8 +1200,9 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
 }
 
 function copyInvite(): void {
-  if (!persisted.circle) return
-  const code = store.encodeInvite(persisted.circle)
+  const c = activeCircle()
+  if (!c) return
+  const code = store.encodeInvite(c)
   navigator.clipboard?.writeText(code).then(() => toast('Invite code copied'), () => toast('Copy failed — select it manually'))
 }
 
@@ -1081,18 +1219,30 @@ function saveRelay(): void {
   if (!url || !url.startsWith('ws')) { toast('Enter a ws:// or wss:// relay URL'); return }
   persisted.relayUrl = url
   store.save(persisted)
-  ensureSubscription()
+  ensureSubscriptions()
   toast('Relay saved')
 }
 
+/** Leave just the active circle (local removal). Identity and other circles stay. */
 function leave(): void {
+  const c = activeCircle()
+  if (!c) return
+  removeCircle(c.id)
+  breachActive = false
+  alertActive = false
+  tab = 'home'
+  toast(`Left ${c.name}`)
+  render()
+}
+
+/** Full reset: sign out, wipe local state and every circle on this device. */
+function resetDevice(): void {
   if (persisted.authMethod === 'signet') { try { void signetLogout() } catch { /* ignore */ } }
   signetSigner = null
   store.reset()
   stopWatch?.(); stopWatch = null
-  stopSub?.(); stopSub = null
+  stopAllSubs()
   stopInviteSub?.(); stopInviteSub = null
-  subKey = ''
   inviteSubKey = ''
   if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = 0 }
   sharing = false
@@ -1101,15 +1251,12 @@ function leave(): void {
   checkinAlert = false
   awaitingInvite = false
   armingCheckin = false
+  adding = false
   addMode = false
   mapView?.destroy()
   mapView = null
   fix = null
-  beacons.clear()
-  alerts.clear()
-  checkins.clear()
-  rzvStatuses.clear()
-  activeRendezvous = null
+  circleStates.clear()
   persisted = store.load()
   onboardStep = 'intro'
   tab = 'home'
@@ -1117,63 +1264,74 @@ function leave(): void {
 }
 
 // ── Inbound ──────────────────────────────────────────────────────────────────
-function ensureSubscription(): void {
-  const c = persisted.circle
-  if (!c) { stopSub?.(); stopSub = null; subKey = ''; return }
-  const inbox = deriveInbox(c.seedHex)
-  // Keyed by the inbox so a reseed (new seed → new inbox) re-subscribes.
-  const key = `${c.id}@${persisted.relayUrl}@${inbox.pk}`
-  if (key === subKey && stopSub) return
-  stopSub?.()
-  subKey = key
-  stopSub = svc.subscribeGiftWraps(persisted.relayUrl, inbox.pk, (wrap) => { void onSignalWrap(wrap, inbox.sk) })
+function ensureSubscriptions(): void {
+  const relay = persisted.relayUrl
+  // Desired subs: one per circle, keyed by inbox (a reseed → new inbox → re-subscribe).
+  const wanted = new Map<string, store.Circle>()
+  for (const c of persisted.circles) {
+    const inbox = deriveInbox(c.seedHex)
+    wanted.set(`${c.id}@${relay}@${inbox.pk}`, c)
+  }
+  for (const [key, stop] of subs) if (!wanted.has(key)) { stop(); subs.delete(key) }
+  for (const [key, c] of wanted) {
+    if (subs.has(key)) continue
+    const inbox = deriveInbox(c.seedHex)
+    const circleId = c.id
+    subs.set(key, svc.subscribeGiftWraps(relay, inbox.pk, (wrap) => { void onSignalWrap(circleId, wrap, inbox.sk) }))
+  }
 }
 
-async function onSignalWrap(wrap: { pubkey: string; content: string }, inboxSk: Uint8Array): Promise<void> {
+function stopAllSubs(): void {
+  for (const stop of subs.values()) stop()
+  subs.clear()
+}
+
+async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: string }, inboxSk: Uint8Array): Promise<void> {
   const rumor = await giftUnwrap(rawNip44Decrypt(inboxSk), wrap)
-  if (rumor) await onIncoming(rumor)
+  if (rumor) await onIncoming(circleId, rumor)
 }
 
-async function onIncoming(e: { pubkey: string; content: string; tags: string[][]; created_at: number }): Promise<void> {
-  const c = persisted.circle
+async function onIncoming(circleId: string, e: { pubkey: string; content: string; tags: string[][]; created_at: number }): Promise<void> {
+  const c = persisted.circles.find((x) => x.id === circleId)
   const me = persisted.identity
   if (!c) return
+  const st = cstate(c.id)
   const t = e.tags.find((x) => x[0] === 't')?.[1]
   try {
     if (t === 'help') {
       const a = await decryptDuressAlert(deriveDuressKey(c.seedHex), e.content)
       const who = a.member || e.pubkey
-      alerts.set(who, e.created_at)
-      if (!me || e.pubkey !== me.pk) { alertActive = true; toast('🚨 Help raised in your circle') }
-      if (a.geohash) beacons.set(who, { member: who, geohash: a.geohash, precision: a.precision, timestamp: a.timestamp || e.created_at })
+      st.alerts.set(who, e.created_at)
+      if (!me || e.pubkey !== me.pk) { alertActive = true; toast(`🚨 Help raised in ${c.name}`) }
+      if (a.geohash) st.beacons.set(who, { member: who, geohash: a.geohash, precision: a.precision, timestamp: a.timestamp || e.created_at })
     } else if (t === 'beacon' || t === 'breach' || t === 'pickup') {
       const p = await decryptBeacon(deriveBeaconKey(c.seedHex), e.content)
-      beacons.set(e.pubkey, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
-      if (t === 'pickup' && (!me || e.pubkey !== me.pk)) toast('Pick-up request from your circle')
+      st.beacons.set(e.pubkey, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
+      if (t === 'pickup' && (!me || e.pubkey !== me.pk)) toast(`Pick-up request in ${c.name}`)
     } else if (t === CHECKIN_SIGNAL_TYPE) {
       const ci = await decryptCheckIn(c.seedHex, e.content)
-      checkins.set(ci.member, ci)
+      st.checkins.set(ci.member, ci)
       evaluateCheckinAlarm()
     } else if (t === 'buzz') {
       const bz = await decryptBuzz(c.seedHex, e.content)
       if (!me || bz.from !== me.pk) {
         const mine = !!me && bz.target === me.pk
-        activeBuzz = { from: bz.from, reason: bz.reason, mine }
+        activeBuzz = { from: bz.from, reason: bz.reason, mine, circle: c.name }
         try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
       }
     } else if (t === RENDEZVOUS_SIGNAL_TYPE) {
-      activeRendezvous = await decryptRendezvous(c.seedHex, e.content)
-      rzvStatuses.clear()
+      st.rendezvous = await decryptRendezvous(c.seedHex, e.content)
+      st.rzvStatuses.clear()
     } else if (t === RENDEZVOUS_STATUS_TYPE) {
-      const st = await decryptRendezvousStatus(c.seedHex, e.content)
-      rzvStatuses.set(st.member, st)
-      if (st.status === 'at-risk' && activeRendezvous?.setBy === me?.pk && st.member !== me?.pk) {
-        toast(`⚠ ${shortNpub(st.member)} may miss the rendezvous`)
+      const status = await decryptRendezvousStatus(c.seedHex, e.content)
+      st.rzvStatuses.set(status.member, status)
+      if (status.status === 'at-risk' && st.rendezvous?.setBy === me?.pk && status.member !== me?.pk) {
+        toast(`⚠ ${shortNpub(status.member)} may miss the rendezvous`)
       }
     } else {
       return
     }
-    ensureMember(e.pubkey)
+    ensureMember(c, e.pubkey)
     refresh()
   } catch {
     /* not for us, or undecryptable */

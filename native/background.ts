@@ -66,14 +66,16 @@ export function stopBackgroundWatch(id: string): Promise<void> {
 
 async function onBackgroundFix(loc: BgLocation): Promise<void> {
   const s = store.load()
-  if (!s.circle || !s.identity?.skHex) return // background path assumes a local key
+  // The background watcher emits for the circle currently in focus.
+  const circle = s.circles.find((c) => c.id === s.activeCircleId) ?? s.circles[0]
+  if (!circle || !s.identity?.skHex) return // background path assumes a local key
   const position = { lat: loc.latitude, lon: loc.longitude }
 
   const plan = decideEmission({
-    mode: s.circle.mode,
+    mode: circle.mode,
     position,
     trigger: 'none',
-    geofences: s.circle.mode === 'family' ? s.geofences : undefined,
+    geofences: circle.mode === 'family' ? s.geofences : undefined,
   })
   const type = signalTypeForReason(plan.reason)
   if (!type || type === 'help' || plan.action === 'withhold') return // withheld: emit nothing
@@ -84,8 +86,8 @@ async function onBackgroundFix(loc: BgLocation): Promise<void> {
 
   const geohash = encode(position.lat, position.lon, plan.precision)
   const template = await buildLocationSignal({
-    groupId: s.circle.id,
-    seedHex: s.circle.seedHex,
+    groupId: circle.id,
+    seedHex: circle.seedHex,
     signalType: type,
     geohash,
     precision: plan.precision,

@@ -21,8 +21,17 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 
 ## Phase B — Group lifecycle
 
-- [ ] **Multi-circle state** — a person in many circles at once.
-- [ ] **Transient vs long-lived** — "just tonight" (NIP-40 auto-expiry) vs family (ongoing).
+- [x] **Multi-circle state** — a person in many circles at once. Per-circle live
+  state (`circleStates` — beacons/alerts/check-ins/rendezvous never bleed between
+  circles), a chip **switcher** in the topbar, add/leave a circle in-app, and a
+  multi-inbox subscription so **alerts (SOS / buzz / missed check-in) surface from
+  *any* circle** while you're focused on another. Legacy single-circle state
+  auto-migrates. Tested in-browser (create×3, switch, distinct seeds, migration).
+- [x] **Transient vs long-lived** — at creation pick **ongoing / tonight / 5 days /
+  a week**; transient circles carry an `expiresAt`, show a **TTL chip** (`5d`,
+  `8h`…), and are **auto-swept** on expiry. Invites carry the expiry too. *(This is
+  exactly the "5-day trip with a mate, plus a night out with another group, all at
+  once" case.)*
 - [x] Create / join (in-person QR + remote gift-wrap) — *done, to be re-based on Phase A.*
 - [x] Reseed / remove member — *done (hand-rolled); migrate to **dominion**.*
 - [x] **Buzz** — one-tap encrypted ping to the circle with a chosen reason (preset or custom; adults can assign their own); receiver's phone **vibrates + shows a banner**; optional **targeted** buzz (parent → child). `buzz.ts` lib + Circle UI.

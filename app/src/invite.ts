@@ -12,6 +12,7 @@ export interface InvitePayload {
   s: string // seed hex
   n: string // circle name
   m: Mode
+  x?: number // transient expiry (unix sec), if any
 }
 
 const RUMOR_KIND = 14
@@ -40,6 +41,7 @@ export async function readInvite(signer: FlockSigner, wrap: { pubkey: string; co
         s: o.s,
         n: typeof o.n === 'string' ? o.n : 'Circle',
         m: o.m === 'nightout' ? 'nightout' : 'family',
+        ...(typeof o.x === 'number' ? { x: o.x } : {}),
       }
     }
   } catch { /* malformed */ }

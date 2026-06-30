@@ -22,10 +22,15 @@ export interface Circle {
   checkinInterval?: number
   /** nsec-tree derivation epoch; reseed = epoch + 1 (creator-side). */
   epoch?: number
+  /** Transient lifetime (unix sec, NIP-40 style). Undefined = long-lived (e.g. family). */
+  expiresAt?: number
 }
 export interface Persisted {
   identity: Identity | null
-  circle: Circle | null
+  /** All circles this person belongs to (family, a trip, a night out…) — many at once. */
+  circles: Circle[]
+  /** Which circle is in focus. */
+  activeCircleId: string | null
   relayUrl: string
   geofences: Geofence[]
   /** How the identity authenticates: a local key, or a Signet/bunker signer. */
@@ -45,11 +50,27 @@ export const fromHex = (h: string): Uint8Array =>
 const randHex = (n: number): string => toHex(crypto.getRandomValues(new Uint8Array(n)))
 
 export function load(): Persisted {
+  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrl: DEFAULT_RELAY, geofences: [] }
   try {
     const raw = localStorage.getItem(KEY)
-    if (raw) return { identity: null, circle: null, relayUrl: DEFAULT_RELAY, geofences: [], ...JSON.parse(raw) }
+    if (!raw) return fresh
+    const o = JSON.parse(raw) as Partial<Persisted> & { circle?: Circle | null }
+    const state: Persisted = { ...fresh, ...o, circles: o.circles ?? [] }
+    // Migrate the legacy single-circle shape.
+    if (o.circle && !state.circles.length) {
+      state.circles = [o.circle]
+      state.activeCircleId = o.circle.id
+    }
+    delete (state as unknown as Record<string, unknown>).circle
+    // Drop expired transient circles, then keep the active id valid.
+    const now = Math.floor(Date.now() / 1000)
+    state.circles = state.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
+    if (!state.circles.some((c) => c.id === state.activeCircleId)) {
+      state.activeCircleId = state.circles[0]?.id ?? null
+    }
+    return state
   } catch { /* ignore corrupt state */ }
-  return { identity: null, circle: null, relayUrl: DEFAULT_RELAY, geofences: [] }
+  return fresh
 }
 
 export function save(state: Persisted): void {
@@ -65,7 +86,7 @@ export function createIdentity(): Identity {
   return { skHex: toHex(sk), pk: getPublicKey(sk) }
 }
 
-export function createCircle(name: string, mode: Mode, ownerPk: string, circleRootHex: string): Circle {
+export function createCircle(name: string, mode: Mode, ownerPk: string, circleRootHex: string, expiresAt?: number): Circle {
   const id = randHex(8)
   return {
     id,
@@ -75,6 +96,7 @@ export function createCircle(name: string, mode: Mode, ownerPk: string, circleRo
     members: [ownerPk],
     checkinInterval: 0,
     epoch: 0,
+    ...(expiresAt ? { expiresAt } : {}),
   }
 }
 
@@ -94,7 +116,7 @@ const b64encode = (s: string): string => btoa(String.fromCharCode(...new TextEnc
 const b64decode = (s: string): string => new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)))
 
 export function encodeInvite(c: Circle): string {
-  return b64encode(JSON.stringify({ v: 1, id: c.id, s: c.seedHex, n: c.name, m: c.mode }))
+  return b64encode(JSON.stringify({ v: 1, id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) }))
 }
 
 export function decodeInvite(code: string): Circle {
@@ -102,5 +124,11 @@ export function decodeInvite(code: string): Circle {
   if (o.v !== 1 || typeof o.s !== 'string' || o.s.length !== 64 || typeof o.id !== 'string') {
     throw new Error('That invite code is not valid.')
   }
-  return { id: o.id, seedHex: o.s, name: o.n || 'Circle', mode: o.m === 'nightout' ? 'nightout' : 'family' }
+  return {
+    id: o.id,
+    seedHex: o.s,
+    name: o.n || 'Circle',
+    mode: o.m === 'nightout' ? 'nightout' : 'family',
+    ...(typeof o.x === 'number' ? { expiresAt: o.x } : {}),
+  }
 }
