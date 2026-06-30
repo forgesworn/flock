@@ -568,17 +568,17 @@ function ensureInviteSub(): void {
   if (key === inviteSubKey && stopInviteSub) return
   stopInviteSub?.()
   inviteSubKey = key
-  stopInviteSub = svc.subscribeGiftWraps(persisted.relayUrl, id.pk, (e) => onInviteWrap(e))
+  stopInviteSub = svc.subscribeGiftWraps(persisted.relayUrl, id.pk, (e) => { void onInviteWrap(e) })
 }
 
-function onInviteWrap(e: { content: string; tags: string[][] }): void {
-  const id = persisted.identity
-  if (!id) return
-  const payload = readInvite(e, id.skHex)
+async function onInviteWrap(e: { pubkey: string; content: string; tags: string[][] }): Promise<void> {
+  const signer = getSigner()
+  if (!signer) return
+  const payload = await readInvite(signer, e)
   if (!payload) return
   if (payload.t === 'invite') {
     if (persisted.circle && persisted.circle.id === payload.id) return
-    persisted.circle = { id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m, members: [id.pk], checkinInterval: 0 }
+    persisted.circle = { id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m, members: [signer.pubkey], checkinInterval: 0 }
     store.save(persisted)
     beacons.clear(); alerts.clear(); checkins.clear()
     awaitingInvite = false
@@ -595,36 +595,35 @@ function onInviteWrap(e: { content: string; tags: string[][] }): void {
   }
 }
 
-function sendInvite(): void {
+async function sendInvite(): Promise<void> {
   const c = persisted.circle
-  const id = persisted.identity
-  if (!c || !id) return
+  const signer = getSigner()
+  if (!c || !signer) return
   const raw = (document.getElementById('invite-npub') as HTMLInputElement | null)?.value?.trim()
   if (!raw) { toast('Paste an npub to invite'); return }
   let pk: string
   try { pk = raw.startsWith('npub') ? store.npubToHex(raw) : raw } catch { toast('Invalid npub'); return }
   if (!/^[0-9a-f]{64}$/.test(pk)) { toast('Invalid key'); return }
-  if (pk === id.pk) { toast("That's your own key"); return }
+  if (pk === signer.pubkey) { toast("That's your own key"); return }
   try {
-    const wrap = buildInviteWrap(id.skHex, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode })
-    void svc.publishSigned(persisted.relayUrl, wrap as never)
+    const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode })
+    await svc.publishSigned(persisted.relayUrl, wrap as never)
     ensureMember(pk)
     toast('Secure invite sent')
     render()
   } catch { toast('Could not send invite') }
 }
 
-function reseedCircle(removePk?: string): void {
+async function reseedCircle(removePk?: string): Promise<void> {
   const c = persisted.circle
-  const id = persisted.identity
-  if (!c || !id) return
+  const signer = getSigner()
+  if (!c || !signer) return
   const seed = store.newSeed()
-  const recipients = (c.members ?? []).filter((pk) => pk !== id.pk && pk !== removePk)
+  const recipients = (c.members ?? []).filter((pk) => pk !== signer.pubkey && pk !== removePk)
   try {
     if (recipients.length) {
-      for (const w of buildReseedWraps(id.skHex, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode })) {
-        void svc.publishSigned(persisted.relayUrl, w as never)
-      }
+      const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode })
+      for (const w of wraps) await svc.publishSigned(persisted.relayUrl, w as never)
     }
     persisted.circle = { ...c, seedHex: seed, members: (c.members ?? []).filter((pk) => pk !== removePk) }
     store.save(persisted)
@@ -719,9 +718,9 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'pickup': void emit('pickup'); break
     case 'copy-invite': copyInvite(); break
     case 'copy-npub': copyNpub(); break
-    case 'send-invite': sendInvite(); break
-    case 'reseed': reseedCircle(); break
-    case 'remove-member': reseedCircle(node.dataset.pk); break
+    case 'send-invite': void sendInvite(); break
+    case 'reseed': void reseedCircle(); break
+    case 'remove-member': void reseedCircle(node.dataset.pk); break
     case 'checkin': void sendCheckIn(); break
     case 'buzz': void sendBuzz(node.dataset.reason ?? (document.getElementById('buzz-custom') as HTMLInputElement | null)?.value ?? ''); break
     case 'dismiss-buzz': activeBuzz = null; render(); break
