@@ -1,0 +1,42 @@
+# flock — Caddy site config for flock.forgesworn.dev
+#
+# Caddy fetches and renews a Let's Encrypt certificate automatically. Access
+# logging is explicitly discarded — the host captures no request logs or data,
+# in keeping with flock's privacy promise. The only network calls the app makes
+# are to the user-configured Nostr relay and (optionally) a map tile server.
+#
+# Install on the host (95.217.39.110):
+#   sudo mkdir -p /var/www/flock
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile     # or import it
+#   sudo systemctl reload caddy
+
+flock.forgesworn.dev {
+	root * /var/www/flock
+	encode zstd gzip
+	file_server
+
+	# Privacy: no access logs.
+	log {
+		output discard
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		Permissions-Policy "geolocation=(self)"
+		Cross-Origin-Opener-Policy same-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# Allows: self; OSM/self tiles (img/connect https); any Nostr relay (wss);
+		# maplibre web workers (blob); inline styles the app sets.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; base-uri 'self'; form-action 'self'"
+	}
+
+	# Service worker must never be stale (so app updates land); hashed assets are immutable.
+	@sw path /sw.js
+	header @sw Cache-Control "no-cache"
+
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+}

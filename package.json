@@ -45,7 +45,8 @@
     "smoke": "npm run build && node scripts/smoke.mjs",
     "dev": "vite",
     "build:app": "vite build",
-    "preview:app": "vite preview"
+    "preview:app": "vite preview",
+    "deploy": "sh deploy/deploy.sh"
   },
   "keywords": [
     "flock",

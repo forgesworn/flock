@@ -95,6 +95,14 @@ native shell (Phase 2).
 
 See [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md) for the full mapping and phased build.
 
+## Deploy
+
+Static PWA, HTTPS required, **self-hostable**, captures **no logs/data**. Canonical
+host is `flock.forgesworn.dev` (Hetzner + Caddy, access logs off). The relay and
+map tiles are build-time configurable (`VITE_DEFAULT_RELAY`, `VITE_TILE_URL`) so a
+self-hoster points at their own. `npm run deploy` builds + rsyncs. See
+[`docs/DEPLOY.md`](docs/DEPLOY.md).
+
 ## Conventions
 
 - **British English** — colour, initialise, behaviour, licence.

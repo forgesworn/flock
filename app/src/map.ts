@@ -16,14 +16,19 @@ export interface MapPoint {
   status: 'active' | 'stale' | 'alert'
 }
 
+// Tile source is overridable at build time so self-hosters can point at their
+// own tile server and avoid leaking the viewport to a third party.
+const TILE_URL = import.meta.env.VITE_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+const TILE_ATTRIBUTION = import.meta.env.VITE_TILE_ATTRIBUTION || '© OpenStreetMap contributors'
+
 const STYLE: maplibregl.StyleSpecification = {
   version: 8,
   sources: {
     osm: {
       type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tiles: [TILE_URL],
       tileSize: 256,
-      attribution: '© OpenStreetMap contributors',
+      attribution: TILE_ATTRIBUTION,
     },
   },
   layers: [

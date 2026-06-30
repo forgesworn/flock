@@ -15,7 +15,8 @@ export interface Persisted {
 }
 
 const KEY = 'flock:v1'
-const DEFAULT_RELAY = 'wss://relay.trotters.cc'
+// Overridable at build time so self-hosters default to their own relay.
+const DEFAULT_RELAY = import.meta.env.VITE_DEFAULT_RELAY || 'wss://relay.trotters.cc'
 
 const toHex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
