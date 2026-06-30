@@ -945,7 +945,13 @@ async function publishSignal(unsigned: { kind: number; content: string; tags: st
 function members(): string[] { return activeCircle()?.members ?? [] }
 
 function ensureMember(circle: store.Circle, pk: string): void {
-  const m = circle.members ?? []
+  // Re-read the live roster rather than trusting the captured `circle`: two
+  // first-contact signals arriving together each `await` decryption, and a stale
+  // members snapshot would let the later write clobber the earlier one — silently
+  // dropping a member (who would then be skipped by reseeds and lists).
+  const current = persisted.circles.find((c) => c.id === circle.id)
+  if (!current) return
+  const m = current.members ?? []
   if (!m.includes(pk)) patchCircleById(circle.id, { members: [...m, pk] })
 }
 
