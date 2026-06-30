@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, gotoTab } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, memberPill } from './fixtures'
 
 // Single-person map UI: the two zone kinds the privacy model rests on.
 // "Safe places" (you're told if I leave) and "Private places" (I stay hidden,
@@ -22,5 +22,24 @@ test.describe('map — safe & private places', () => {
     await A.click('[data-action="add-zone"][data-kind="noreport"]')
     await A.click('[data-action="save-zone"]')
     await expect(A.locator('.dot-private')).toBeVisible()
+  })
+
+  // The point of the map: when someone discloses a location, you SEE them on it.
+  test('B sees A as a pin on the map once A shares a location', async ({ browser }) => {
+    const A = await newPerson(browser)
+    const B = await newPerson(browser)
+    await createCircle(A, { name: 'Sat night', mode: 'nightout' })
+    const code = await inviteCode(A)
+    await joinByCode(B, code)
+
+    await startSharing(A) // night-out: a coarse beacon auto-emits on the first fix.
+
+    // B receives the beacon (row pill), then opens the map and sees A's pin.
+    await gotoTab(B, 'circle')
+    await expect(memberPill(B, /out/)).toBeVisible()
+
+    await gotoTab(B, 'map')
+    await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
+    await expect(B.locator('.map-pin')).toBeVisible()
   })
 })
