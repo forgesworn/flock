@@ -30,6 +30,10 @@
     "./nightout": {
       "types": "./dist/nightout.d.ts",
       "import": "./dist/nightout.js"
+    },
+    "./checkin": {
+      "types": "./dist/checkin.d.ts",
+      "import": "./dist/checkin.js"
     }
   },
   "files": [
