@@ -130,11 +130,14 @@ Two halves that compose into one feature:
   UnifiedPush + bridge (Option B). De-Googled; gated on the Phase 0 result. See
   `docs/plans/2026-06-30-background-inbound.md`.
 - [ ] **Go-live hardening (foreground PWA — needs no devices):**
-  - [x] **Proxy map tiles + geocoding (Stage 0)** — tiles (`/tiles/*`) and Nominatim
-    (`/nominatim/*`) are now **reverse-proxied same-origin** (Caddy `handle_path` blocks
-    in prod, Vite dev proxy in dev). OSM sees only the host, never a user's IP +
-    viewport. Defaults flipped in `map.ts`/`geo.ts`; client-identifying headers stripped
-    upstream; CSP unchanged (opt-in kind:0 avatars still need `img-src https:`).
+  - [x] **Proxy map tiles + geocoding (Stage 0) — DEPLOYED & LIVE** on
+    flock.forgesworn.dev. Tiles (`/tiles/*`) and Nominatim (`/nominatim/*`) are
+    **reverse-proxied same-origin** (Caddy `handle_path` blocks in prod, Vite dev proxy
+    in dev). OSM sees only the host, never a user's IP + viewport. Defaults flipped in
+    `map.ts`/`geo.ts`; client-identifying headers stripped upstream; CSP unchanged (opt-in
+    kind:0 avatars still need `img-src https:`). Verified at the edge: `/tiles` + `/nominatim`
+    200 same-origin, and the built app no longer references `tile.openstreetmap.org`. **The
+    original launch-blocker (the map viewport leak) is closed in production.**
   - [~] **Local / offline vector basemap (Stage 1) — spiked & proven.** A vector PMTiles
     basemap (`app/src/basemap.ts`, behind `VITE_PMTILES=1` / `localStorage flock.pmtiles`)
     renders flock's **dusk palette** from a **single same-origin file** — a whole ~11 km
