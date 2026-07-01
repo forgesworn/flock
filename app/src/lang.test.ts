@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { preferredMapLang } from './lang'
+import { preferredMapLang, mapLabelLang } from './lang'
 
 describe('preferredMapLang', () => {
   it('gives each launch market its own language', () => {
@@ -29,5 +29,18 @@ describe('preferredMapLang', () => {
   it('defaults to English when the locale is absent or empty', () => {
     expect(preferredMapLang({})).toBe('en')
     expect(preferredMapLang({ language: '' })).toBe('en')
+  })
+})
+
+describe('mapLabelLang', () => {
+  it('returns null in local mode — native names, no translation (matches the signs)', () => {
+    expect(mapLabelLang('local', { language: 'en-GB' })).toBeNull()
+    expect(mapLabelLang('local', { language: 'de-DE' })).toBeNull()
+  })
+
+  it('returns the glyph-safe device language in device mode', () => {
+    expect(mapLabelLang('device', { language: 'de-DE' })).toBe('de')
+    expect(mapLabelLang('device', { language: 'cs' })).toBe('cs')
+    expect(mapLabelLang('device', { language: 'ja-JP' })).toBe('en') // unsupported script → English
   })
 })

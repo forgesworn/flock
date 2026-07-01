@@ -16,6 +16,7 @@ import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
+import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
 import { buildInviteWrap, buildReseedWraps, readInvite } from './invite'
 import {
   decideEmission,
@@ -668,10 +669,24 @@ function offlineMapControl(): string {
   const help = hasZones
     ? 'Downloads the map around your places once — then it works with no signal, and privately (nobody sees when or where you look).'
     : 'Add a safe or private place first, then save its map for offline.'
+  // Label language only bites on the offline vector map (raster tiles carry their own
+  // labels), so only offer it once an area is saved. Default is each person's own
+  // language; "Local names" shows what's on the street signs — handy when you're abroad.
+  const labelMode = mapLabelMode()
+  const labelToggle = saved ? `
+    <div class="row" style="justify-content:space-between;margin:16px 0 6px"><strong>Map labels</strong></div>
+    <div class="mode-toggle" role="group" aria-label="Map label language">
+      <button data-action="map-labels" data-mode="device" aria-pressed="${labelMode === 'device'}">My language</button>
+      <button data-action="map-labels" data-mode="local" aria-pressed="${labelMode === 'local'}">Local names</button>
+    </div>
+    <div class="note">${labelMode === 'local'
+      ? 'Place names match the street signs — the same on everyone’s map.'
+      : 'Place names in your device’s language where the map has them.'}</div>` : ''
   return `
     <div class="row" style="justify-content:space-between;margin:16px 0 8px"><strong>Offline map</strong>${status}</div>
     <div class="row" style="gap:10px">${buttons}</div>
-    <div class="note">${help}</div>`
+    <div class="note">${help}</div>
+    ${labelToggle}`
 }
 
 // ── Views: onboarding ────────────────────────────────────────────────────────
@@ -875,6 +890,16 @@ async function removeOfflineMap(): Promise<void> {
   if (!id) return
   await (await import('./offlineArea')).removeSavedArea(id)
   offlineSavedBytes = null
+  await initMap()
+}
+
+// Switch the offline map's labels between the device language and local/native names.
+// Re-init so the vector style rebuilds with the new language (same pattern as save/remove).
+async function setMapLabels(mode: MapLabelMode): Promise<void> {
+  if (mode !== 'device' && mode !== 'local') return
+  if (mapLabelMode() === mode) return
+  setMapLabelMode(mode)
+  renderMapPanel()
   await initMap()
 }
 
@@ -1407,6 +1432,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'del-noreport': delNoReport(Number(node.dataset.i)); break
     case 'save-offline-map': void saveOfflineMap(); break
     case 'remove-offline-map': void removeOfflineMap(); break
+    case 'map-labels': void setMapLabels(node.dataset.mode as MapLabelMode); break
     default: break
   }
 }

@@ -29,3 +29,34 @@ export function preferredMapLang(nav?: { language?: string } | null): string {
   const base = (source?.language ?? 'en').split('-')[0].toLowerCase()
   return LABEL_LANGS.has(base) ? base : 'en'
 }
+
+// A group abroad is mixed-nationality, and each map renders per-device — so by default
+// everyone sees labels in their own language (`device`). But someone physically in a
+// foreign town may prefer the **local** names that match the street signs (and that are
+// identical on every member's map), so we let them switch. `local` renders the tiles'
+// native `name` with no translation.
+export type MapLabelMode = 'device' | 'local'
+
+/** The label language for a mode: `null` = local/native names (Protomaps renders the
+ *  tiles' `name` when no lang is applied); otherwise the glyph-safe device language. */
+export function mapLabelLang(mode: MapLabelMode, nav?: { language?: string } | null): string | null {
+  return mode === 'local' ? null : preferredMapLang(nav)
+}
+
+const LABEL_MODE_KEY = 'flock.maplabels'
+
+/** The user's persisted label mode (default `device`). Browser-only; safe elsewhere. */
+export function mapLabelMode(): MapLabelMode {
+  try { return localStorage.getItem(LABEL_MODE_KEY) === 'local' ? 'local' : 'device' } catch { return 'device' }
+}
+
+/** Persist the user's label mode. */
+export function setMapLabelMode(mode: MapLabelMode): void {
+  try { localStorage.setItem(LABEL_MODE_KEY, mode) } catch { /* ignore — pref is best-effort */ }
+}
+
+/** The label language to apply right now: the persisted mode over the device locale.
+ *  `null` = local/native names. Used as `pmtilesStyle`'s default. */
+export function activeMapLabelLang(nav?: { language?: string } | null): string | null {
+  return mapLabelLang(mapLabelMode(), nav)
+}

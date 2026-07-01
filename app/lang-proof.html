@@ -3,8 +3,9 @@
      Renders a bundled town PMTiles with the offline dusk style to confirm each
      launch market's diacritics render — no tofu boxes, no font 404s. Served by Vite:
        /lang-proof.html?src=<town>&c=<lon>,<lat>&z=15[&lang=de]
-     Labels follow the device locale by default (src/lang.ts); add &lang=<code> to
-     preview a market's local names (e.g. &lang=de → München, &lang=cs → Praha).
+     Labels follow the user's map-label setting over the device locale by default
+     (src/lang.ts); add &lang=<code> to force a language (e.g. &lang=de → München,
+     &lang=cs → Praha) or &lang=local for the tiles' native names (matches the signs).
 
      Initial launch markets — all Latin-script, fully covered by the shipped glyph
      ranges (0–2047 + 8192–8703; see scripts/fetch-basemap-assets.mjs). Verified:
@@ -37,7 +38,9 @@
       const src = q.get('src') || 'harrogate'
       const [lon, lat] = (q.get('c') || '-1.54,53.99').split(',').map(Number)
       const zoom = Number(q.get('z') || 14)
-      const lang = q.get('lang') || undefined // undefined → device-locale default
+      const langParam = q.get('lang')
+      // 'local' → null (native names); a code → that language; absent → app default.
+      const lang = langParam === 'local' ? null : (langParam || undefined)
 
       window.__errs = []
       registerPmtilesProtocol()

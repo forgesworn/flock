@@ -15,7 +15,7 @@
 import maplibregl from 'maplibre-gl'
 import { Protocol } from 'pmtiles'
 import { DARK, layers, type Flavor } from '@protomaps/basemaps'
-import { preferredMapLang } from './lang'
+import { activeMapLabelLang } from './lang'
 
 // A same-origin PMTiles basemap. For this proof it is a bundled town extract; the
 // real feature downloads a per-circle area (bbox of the safe zones + buffer) to
@@ -57,10 +57,12 @@ export function registerPmtilesProtocol(): Protocol {
 }
 
 /** A maplibre style backed by a same-origin PMTiles vector source + local fonts/sprite.
- *  Labels default to the device-locale language (see `preferredMapLang` — München on a
- *  German phone, Munich on a British one), constrained to scripts we ship glyphs for;
- *  pass `lang` to override (e.g. the market-proof harness). */
-export function pmtilesStyle(pmtilesUrl: string, lang: string = preferredMapLang()): maplibregl.StyleSpecification {
+ *  Labels follow the user's map-label setting over the device locale (see
+ *  `activeMapLabelLang`): a language code translates where the tiles have it (München on
+ *  a German phone, Munich on a British one), while `null` renders the tiles' native
+ *  `name` — the local names that match the street signs. Pass `lang` to override
+ *  (e.g. the market-proof harness). */
+export function pmtilesStyle(pmtilesUrl: string, lang: string | null = activeMapLabelLang()): maplibregl.StyleSpecification {
   return {
     version: 8,
     glyphs: `${location.origin}/basemap/fonts/{fontstack}/{range}.pbf`,
@@ -72,6 +74,8 @@ export function pmtilesStyle(pmtilesUrl: string, lang: string = preferredMapLang
         attribution: '© OpenStreetMap',
       },
     },
-    layers: layers('protomaps', DUSK, { lang }) as maplibregl.StyleSpecification['layers'],
+    // A lang applies name:<lang> with native fallback; omit it (local mode) for the
+    // tiles' native `name` only — see docs on `layers()` in @protomaps/basemaps.
+    layers: (lang ? layers('protomaps', DUSK, { lang }) : layers('protomaps', DUSK)) as maplibregl.StyleSpecification['layers'],
   }
 }
