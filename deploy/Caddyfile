@@ -66,6 +66,22 @@ flock.forgesworn.dev {
 		}
 	}
 
+	# Overpass venue search (fair meeting point) — same treatment as Nominatim. Only
+	# the search-area bounding box reaches Overpass, and from this server, never the
+	# user's IP. `no-store` keeps the bbox POST body out of any shared cache. Venue
+	# search is occasional (only when someone finds a meeting point), never continuous.
+	handle_path /overpass/* {
+		reverse_proxy https://overpass-api.de {
+			header_up Host overpass-api.de
+			header_up -Referer
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Proto
+			header_up -X-Forwarded-Host
+			header_up User-Agent "flock/1.0 (+https://flock.forgesworn.dev)"
+			header_down Cache-Control "private, no-store"
+		}
+	}
+
 	# Offline-basemap extract service (server/extract.mjs via flock-extract.service).
 	# Clips a bbox from the Protomaps build server-side so the browser only ever talks
 	# to this origin. `handle` (not handle_path) preserves the /api/extract path.

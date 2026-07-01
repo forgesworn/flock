@@ -11,7 +11,9 @@ import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { geocode, reverseGeocode } from './geo'
 import { formatCountdown } from './countdown'
-import { suggestMeetingPoint } from './meetingPoint'
+import { suggestMeetingPoint, rankVenues } from './meetingPoint'
+import { searchMeetingVenues } from './venues'
+import { circleToPolygon } from 'rendezvous-kit'
 import type { RendezvousSuggestion, TransportMode } from 'rendezvous-kit'
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, precisionToRadius } from 'geohash-kit'
@@ -155,11 +157,12 @@ interface CircleState {
   meeting: MeetingRequest | null
   meetingShares: Map<string, MeetingShare>
   meetingSuggestion: RendezvousSuggestion | null
+  meetingGen: number // bumped per suggestion refresh so a stale venue fetch can't clobber a newer one
 }
 const circleStates = new Map<string, CircleState>()
 function cstate(id: string): CircleState {
   let s = circleStates.get(id)
-  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null }; circleStates.set(id, s) }
+  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null, meetingGen: 0 }; circleStates.set(id, s) }
   return s
 }
 // Meeting-point requests I've declined to contribute to (by requestId). Declining
@@ -1580,6 +1583,7 @@ function syncRzvTicker(): void {
 // cell, and only from those who actively tap "share" (withhold-by-default holds).
 const MEETING_PRECISION = 6 // geohash chars ≈ neighbourhood; exactly policy's `coarse`
 const MEETING_TIME_BUDGET_MIN = 30 // reachability budget for the on-device isochrones
+const VENUE_SEARCH_RADIUS_M = 1500 // hunt for real venues within ~18 min walk of the fair point
 const kitMode = (m: TravelMode): TransportMode => (m === 'transit' ? 'public_transit' : m)
 
 async function proposeMeeting(): Promise<void> {
@@ -1638,14 +1642,29 @@ async function refreshMeetingSuggestion(circleId: string): Promise<void> {
   const st = cstate(circleId)
   const me = persisted.identity?.pk
   if (!st.meeting || st.meeting.setBy !== me || st.meetingShares.size < 2) return
+  const reqId = st.meeting.id
+  const gen = ++st.meetingGen // newest refresh wins; a slow venue fetch must not clobber it
+  const opts = { mode: kitMode(st.meeting.mode), maxTimeMinutes: st.meeting.maxTimeMinutes }
   const participants = [...st.meetingShares.values()].map((s) => {
     const d = decode(s.geohash)
     return { lat: d.lat, lon: d.lon, label: nameFor(s.member) }
   })
+  const live = () => st.meetingGen === gen && st.meeting?.id === reqId // not superseded/cancelled
   try {
-    const [suggestion] = await suggestMeetingPoint(participants, { mode: kitMode(st.meeting.mode), maxTimeMinutes: st.meeting.maxTimeMinutes })
-    st.meetingSuggestion = suggestion ?? null
+    // 1) The on-device fair point — instant, no network. Show it straight away.
+    const [centroid] = await suggestMeetingPoint(participants, opts)
+    if (!live()) return
+    st.meetingSuggestion = centroid ?? null
     render()
+    // 2) Best-effort upgrade to a real, named venue everyone can reach. Only a
+    // bounding box around the fair point leaves the device (venues.ts); on any
+    // failure — proxy down, rate-limited, no matches — we keep the centroid.
+    if (!centroid) return
+    const region = circleToPolygon([centroid.venue.lon, centroid.venue.lat], VENUE_SEARCH_RADIUS_M)
+    const venues = await searchMeetingVenues(region)
+    if (!live()) return
+    const [best] = rankVenues(participants, venues, opts)
+    if (best) { st.meetingSuggestion = best; render() }
   } catch { /* best effort — keep the last good suggestion on screen */ }
 }
 
@@ -1656,16 +1675,19 @@ async function setMeetingAsRendezvous(): Promise<void> {
   const s = cs?.meetingSuggestion
   if (!cs || !s) return
   const { lat, lon } = s.venue
+  const isVenue = s.venue.venueType !== 'centroid'
   cs.meeting = null
   cs.meetingShares.clear()
   cs.meetingSuggestion = null
   toast('Setting the meeting point…')
-  const g = await reverseGeocode(lat, lon) // bounded, best-effort; a fair midpoint is often a road
+  const g = await reverseGeocode(lat, lon) // bounded, best-effort; fills the taxi address
+  // A real venue names itself; a bare centroid borrows the geocoded street/road.
+  const label = isVenue ? s.venue.name : (g ? g.address.split(',')[0] : 'Meeting point')
   await shareRendezvous({
     lat,
     lon,
     geohash: encode(lat, lon, 10),
-    label: g ? g.address.split(',')[0] : 'Meeting point',
+    label,
     ...(g ? { address: g.address } : {}),
   })
 }
@@ -1700,10 +1722,15 @@ function meetingCard(): string {
   let suggestion = ''
   if (iProposed && cs.meetingSuggestion) {
     const s = cs.meetingSuggestion
+    const isVenue = s.venue.venueType !== 'centroid'
     const etas = Object.entries(s.travelTimes)
       .map(([who, mins]) => `<div class="row" style="gap:10px"><span class="who" style="font-size:14px">${esc(who)}</span><span class="pill warn" style="margin-left:auto">${Math.round(mins)} min</span></div>`)
       .join('')
-    suggestion = `<div class="note" style="margin-top:6px">📍 A fair spot for everyone (as-the-crow-flies):</div>
+    // A real venue names itself ("The Coach & Horses"); a bare centroid is a fair road-point.
+    const heading = isVenue
+      ? `📍 <strong>${esc(s.venue.name)}</strong> — a fair spot everyone can reach:`
+      : '📍 A fair spot for everyone (as-the-crow-flies):'
+    suggestion = `<div class="note" style="margin-top:6px">${heading}</div>
       <div class="list">${etas}</div>
       <button class="btn small primary" data-action="set-meeting-rzv">Set this as the rendezvous</button>`
   } else if (iProposed) {

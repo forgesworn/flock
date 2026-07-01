@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { suggestMeetingPoint, onDeviceEngine } from './meetingPoint'
+import { suggestMeetingPoint, onDeviceEngine, rankVenues } from './meetingPoint'
 
 // Three points around central London (all within a ~1.5 km walk of each other).
 const A = { lat: 51.5074, lon: -0.1278, label: 'Alice' }
@@ -50,5 +50,24 @@ describe('suggestMeetingPoint (on-device, centroid-first)', () => {
     const reach = (poly: { coordinates: number[][][] }) =>
       Math.max(...poly.coordinates[0].map(([lon, lat]) => Math.hypot(lon - origin.lon, lat - origin.lat)))
     expect(reach(drive60.polygon)).toBeGreaterThan(reach(walk60.polygon))
+  })
+})
+
+describe('rankVenues (on-device fairness over real venues)', () => {
+  const near = { name: 'The Local', lat: 51.5088, lon: -0.1290, venueType: 'pub' as const }
+  const far = { name: 'Far Bar', lat: 51.46, lon: -0.30, venueType: 'bar' as const }
+
+  it('scores each venue by everyone’s ETA and sorts fairest-first', () => {
+    const ranked = rankVenues([A, B, C], [far, near], { mode: 'walk', fairness: 'min_max' })
+    // The venue near the group beats the distant one (lower worst-case travel).
+    expect(ranked.map((r) => r.venue.name)).toEqual(['The Local', 'Far Bar'])
+    expect(Object.keys(ranked[0].travelTimes)).toEqual(['Alice', 'Bob', 'Carol'])
+    expect(ranked[0].fairnessScore).toBeCloseTo(Math.max(...Object.values(ranked[0].travelTimes)), 5)
+    // The venue is passed through untouched (name + coords the caller can set as a rendezvous).
+    expect(ranked[0].venue).toMatchObject({ name: 'The Local', lat: 51.5088, lon: -0.1290 })
+  })
+
+  it('returns [] when there are no venues (caller falls back to the centroid)', () => {
+    expect(rankVenues([A, B, C], [])).toEqual([])
   })
 })

@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, gotoTab, startSharing, LONDON, SOHO } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, gotoTab, startSharing, mockOverpass, LONDON, SOHO } from './fixtures'
 
 // Fair meeting point (Phase F "where") — "some of us are here, some there, where
 // do we all go?" A proposes; each person OPTS IN and contributes a COARSE spot
@@ -10,6 +10,9 @@ test.describe('meeting point — propose, opt-in contribute, compute, set', () =
   test('A proposes; B opts in; A gets a fair point and turns it into a rendezvous B receives', async ({ browser }) => {
     const A = await newPerson(browser, LONDON)
     const B = await newPerson(browser, SOHO)
+    // No venues from Overpass → the flow keeps the on-device fair point (centroid).
+    // This is the baseline path; the venue-enriched path is meeting-venue.spec.ts.
+    await mockOverpass(A, [])
     await createCircle(A, { name: 'Sat night', mode: 'nightout' })
     const code = await inviteCode(A)
     await joinByCode(B, code)

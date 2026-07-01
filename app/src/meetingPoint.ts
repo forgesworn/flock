@@ -16,7 +16,7 @@ import { distanceFromCoords } from 'geohash-kit'
 import {
   circleToPolygon, intersectPolygons, centroid,
   type LatLon, type TransportMode, type FairnessStrategy,
-  type RoutingEngine, type Isochrone, type RouteMatrix, type RendezvousSuggestion,
+  type RoutingEngine, type Isochrone, type RouteMatrix, type RendezvousSuggestion, type Venue,
 } from 'rendezvous-kit'
 
 // Straight-line speeds mirror src/rendezvous.ts's SPEED_KMH (flock's 'transit' is
@@ -108,4 +108,25 @@ export async function suggestMeetingPoint(
     travelTimes,
     fairnessScore: fairnessScore(times, fairness),
   }]
+}
+
+/**
+ * Rank real venues by fairness for a group — computed entirely on-device. For each
+ * venue we compute every person's as-the-crow-flies ETA (the same maths as the
+ * centroid) and a fairness score, then sort fairest-first, so `[0]` is the best
+ * place everyone can reach. The venue *search* (the only network call) happens at
+ * the caller; this stays pure/offline. Returns [] when there are no venues, so the
+ * caller falls back to the centroid suggestion.
+ */
+export function rankVenues(participants: LatLon[], venues: Venue[], opts: MeetingOptions = {}): RendezvousSuggestion[] {
+  const mode = opts.mode ?? 'walk'
+  const fairness = opts.fairness ?? 'min_max'
+  return venues
+    .map((v) => {
+      const times = participants.map((p) => etaMinutes({ lat: v.lat, lon: v.lon }, p, mode))
+      const travelTimes: Record<string, number> = {}
+      participants.forEach((p, i) => { travelTimes[p.label ?? `p${i}`] = times[i] })
+      return { venue: v, travelTimes, fairnessScore: fairnessScore(times, fairness) }
+    })
+    .sort((a, b) => a.fairnessScore - b.fairnessScore)
 }

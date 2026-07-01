@@ -234,6 +234,26 @@ export async function reseed(page: Page): Promise<void> {
   await page.click('[data-action="reseed"]')
 }
 
+/**
+ * Intercept the same-origin Overpass proxy (`/overpass/*`) on this device so the
+ * fair-meeting-point venue search is deterministic and never touches the network.
+ * Pass venues to return (each becomes a named Overpass `node`); pass [] to simulate
+ * "no venues found", so the flow keeps the on-device centroid. Only the proposer's
+ * device queries Overpass, so route it on that page.
+ */
+export async function mockOverpass(
+  page: Page,
+  venues: Array<{ name: string; lat: number; lon: number; amenity?: string }> = [],
+): Promise<void> {
+  const elements = venues.map((v, i) => ({
+    type: 'node', id: i + 1, lat: v.lat, lon: v.lon,
+    tags: { name: v.name, amenity: v.amenity ?? 'pub' },
+  }))
+  await page.route('**/overpass/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ elements }) }),
+  )
+}
+
 /** This device's own public key (hex), read from local state. */
 export async function myPubkey(page: Page): Promise<string> {
   const pk = await page.evaluate(() => {
