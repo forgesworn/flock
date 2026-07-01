@@ -120,4 +120,4 @@ self-hoster points at their own. `npm run deploy` builds + rsyncs. See
 
 ## Licence
 
-TBD.
+[MIT](https://github.com/forgesworn/flock/blob/main/LICENSE) — consistent with the rest of the ForgeSworn toolkit.

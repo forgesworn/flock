@@ -135,7 +135,7 @@ Two halves that compose into one feature:
     `VITE_TILE_URL` already makes it swappable — point at a self-hosted/proxied server.
   - **Multi-relay fan-out** — now unblocked by gift-wrap-everything (Phase A `[~]`);
     single relay = single point of failure.
-  - **Licence** — README says TBD, `package.json` says MIT; resolve before launch.
+  - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".
   - **Key-at-rest** — localStorage isn't secure key storage (the in-app "preview"
     caveat is shown); harden via **keystore-kit** (Phase E) or lean on Sign-in-with-Signet.
 - [ ] **anvil** — release CI (like canary-kit).
