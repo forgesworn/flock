@@ -113,46 +113,63 @@ export function subscribeProfiles(
   return () => sub.close()
 }
 
-/** Watch foreground location. Returns a stop fn. */
+const toFix = (pos: GeolocationPosition): Fix => ({
+  lat: pos.coords.latitude,
+  lon: pos.coords.longitude,
+  accuracy: pos.coords.accuracy,
+  at: Math.floor(pos.timestamp / 1000),
+})
+
+/**
+ * Watch foreground location. Returns a stop fn.
+ *
+ * `highAccuracy` picks the hardware tier: `true` (GPS) for family breach detection
+ * and full disclosures, `false` (network/cell — far less battery, and coarser by
+ * construction) for a night-out coarse share, where ±hundreds of metres is ample.
+ * A low-power fix reports a larger `accuracy`, which the breach logic reads to stay
+ * fail-safe. (Minimal-footprint north star — Phase H.)
+ */
 export function watchLocation(
   onFix: (f: Fix) => void,
   onError: (message: string) => void,
+  opts: { highAccuracy?: boolean } = {},
 ): () => void {
   if (!('geolocation' in navigator)) {
     onError('Location is not available on this device.')
     return () => { /* noop */ }
   }
+  const highAccuracy = opts.highAccuracy ?? true
   const id = navigator.geolocation.watchPosition(
-    (pos) => onFix({
-      lat: pos.coords.latitude,
-      lon: pos.coords.longitude,
-      accuracy: pos.coords.accuracy,
-      at: Math.floor(pos.timestamp / 1000),
-    }),
+    (pos) => onFix(toFix(pos)),
     (err) => onError(err.message || 'Could not get your location.'),
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20_000 },
+    // A low-power watch may also lean on slightly staler cached fixes.
+    { enableHighAccuracy: highAccuracy, maximumAge: highAccuracy ? 5000 : 15_000, timeout: 20_000 },
   )
   return () => navigator.geolocation.clearWatch(id)
 }
 
 /**
  * One-shot foreground location — resolves to a Fix, or `null` if geolocation is
- * unavailable, denied, or times out. Used to centre the map on the user without
- * starting a continuous share; purely local, nothing is broadcast. Never rejects,
- * so callers can simply skip centring on a null.
+ * unavailable, denied, or times out. Never rejects, so callers can simply skip on
+ * a null. Used for three things: centring the map (default, lenient), a **fresh fix
+ * on an explicit SOS/pick-up** (short `timeoutMs`, so an alert is never delayed more
+ * than a beat but carries the freshest location possible), and **escalating an
+ * uncertain family fix** to a sharper GPS one (`maximumAge: 0`). Purely local —
+ * nothing is broadcast.
  */
-export function currentPosition(): Promise<Fix | null> {
+export function currentPosition(
+  opts: { enableHighAccuracy?: boolean; maximumAge?: number; timeoutMs?: number } = {},
+): Promise<Fix | null> {
   if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return Promise.resolve(null)
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({
-        lat: pos.coords.latitude,
-        lon: pos.coords.longitude,
-        accuracy: pos.coords.accuracy,
-        at: Math.floor(pos.timestamp / 1000),
-      }),
+      (pos) => resolve(toFix(pos)),
       () => resolve(null),
-      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 20_000 },
+      {
+        enableHighAccuracy: opts.enableHighAccuracy ?? true,
+        maximumAge: opts.maximumAge ?? 30_000,
+        timeout: opts.timeoutMs ?? 20_000,
+      },
     )
   })
 }

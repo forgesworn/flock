@@ -220,14 +220,19 @@ movement-gated cadence (Phase C) throttles relay **publishes** — but *not* GPS
 battery drain, and it runs the whole time you're sharing. Close that gap, matching the
 hardware cost to what we actually disclose. (Ordered biggest-win-first.)
 
-- [ ] **Accuracy matched to disclosure precision** *(security-critical — touches the
-  shared location watch; design + buy-in before coding)*. A coarse night-out share
-  (geohash-6, ±~600 m) does **not** need GPS — `enableHighAccuracy: false` (network/cell,
-  ±100s m) is ample, saves the most power, and is **coarser by construction → more
-  private**. Family / breach / pick-up / SOS keep **high** accuracy (must catch a fence
-  crossing or pin precisely). The watch is shared across triggers, so accuracy is derived
-  from the circle's mode + proximity to a fence; the guard that matters is that a
-  low-accuracy fix must never cause a **false** breach or **miss** a real one.
+- [x] **Accuracy matched to disclosure precision — shipped.** Night-out shares now sample
+  at **low power** (`enableHighAccuracy: false`, network/cell) — ample for a ~600 m cloak,
+  the biggest battery saving, and coarser-by-construction = **more private**. Family keeps
+  GPS and is **adaptive**: a cheap fix that lands *uncertain* near a safe-zone edge escalates
+  to **one sharp one-shot** before deciding, so we neither miss a breach nor cry wolf. Breach
+  is now **accuracy-aware** in the security-critical core — `classifyContainment` (lib)
+  returns inside / outside / **uncertain** from the fix's `accuracy` radius, and
+  `decideEmission` fires a breach **only on a confident `outside`** (accuracy defaults to
+  exact, so the 216-permutation truth-table is unchanged). Explicit **SOS / pick-up take a
+  fresh one-shot fix** (~2.5 s cap, last-known fallback), decoupling emergency accuracy from
+  the ambient (suspended / low-power) watch. TDD: +22 unit tests (`geofence.accuracy`,
+  `policy.accuracy` incl. a no-false-breach sweep); a new e2e proves an imprecise near-edge
+  fix never false-discloses while a confident one still breaches.
 - [~] **Back off sampling when it can't matter.** **Shipped:** the GPS watch is now
   centralised behind `syncWatch()` = `sharing && !isDark() && !hidden`, so it suspends
   **entirely during an off-grid break** (it used to keep burning while `onFix`
@@ -235,9 +240,9 @@ hardware cost to what we actually disclose. (Ordered biggest-win-first.)
   PWA can't sample in the background regardless), and resumes on come-back / auto-resume /
   return-to-foreground. A safe subset — **no change to accuracy, the emission decision, or
   the SOS path**; full e2e green plus a new "sampling suspends during a break, resumes on
-  return" test. **Deferred:** lengthen the interval when **stationary** — that trades off
-  breach-detection latency, so it folds into the accuracy-matched-to-precision design
-  (item above) rather than shipping blind.
+  return" test. **Still to do:** lengthen the interval when **stationary** (a self-scheduled
+  adaptive poll rather than a continuous watch) — now unblocked by the accuracy work above;
+  the poll's max interval just needs bounding so family breach-detection latency stays tight.
 - [ ] **Battery-aware** *(nice-to-have)*: the Battery Status API — widen intervals / drop
   accuracy when the phone is low, **except** during an active alert (safety wins over
   battery).

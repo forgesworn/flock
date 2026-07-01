@@ -21,6 +21,7 @@ import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
 import { buildInviteWrap, buildReseedWraps, readInvite } from './invite'
 import {
   decideEmission,
+  classifyContainment,
   signalTypeForReason,
   buildLocationSignal,
   buildHelpSignal,
@@ -204,6 +205,7 @@ function switchCircle(id: string): void {
   alertActive = false
   disbandConfirm = false
   tab = 'home'
+  syncWatch() // re-tier accuracy for the newly-focused circle's mode
   render()
 }
 
@@ -1588,6 +1590,7 @@ function setMode(mode: Mode): void {
   if (!activeCircle()) return
   patchActive({ mode })
   breachActive = false
+  syncWatch() // Private↔Share-live changes the accuracy tier
   render()
 }
 
@@ -1599,12 +1602,24 @@ function shouldSample(): boolean {
   return sharing && !isDark() && !hidden
 }
 
-/** Start or stop the location watch so it matches shouldSample(). Idempotent — the
+// A night-out share is coarse (geohash-6, ~600 m), so low-power network/cell
+// location is ample — and coarser hardware is a privacy win too. Family breach
+// detection needs GPS. (Minimal-footprint north star — Phase H.)
+function desiredHighAccuracy(): boolean {
+  return activeCircle()?.mode !== 'nightout'
+}
+let watchHighAccuracy = true // accuracy tier the running watch was armed at
+
+/** Start or stop the location watch so it matches shouldSample() — and re-arm it if
+ *  the accuracy tier changed (e.g. switching to a night-out circle). Idempotent; the
  *  single place the GPS watch is turned on or off. */
 function syncWatch(): void {
   const want = shouldSample()
-  if (want && !stopWatch) {
-    stopWatch = svc.watchLocation(onFix, (msg) => { toast(msg); sharing = false; syncWatch(); render() })
+  const hi = desiredHighAccuracy()
+  if (want && (!stopWatch || hi !== watchHighAccuracy)) {
+    stopWatch?.()
+    watchHighAccuracy = hi
+    stopWatch = svc.watchLocation(onFix, (msg) => { toast(msg); sharing = false; syncWatch(); render() }, { highAccuracy: hi })
   } else if (!want && stopWatch) {
     stopWatch()
     stopWatch = null
@@ -1643,20 +1658,30 @@ async function autoEmit(): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id || !fix) { refresh(); return }
+  let f = fix
+  // Family: if a cheap (low-power) fix can't tell which side of a safe-zone edge
+  // we're on, take one sharp GPS fix before deciding — so we neither miss a breach
+  // nor cry wolf on one. Only escalates near an edge, so it stays cheap elsewhere.
+  if (c.mode === 'family' && persisted.geofences.length > 0
+      && classifyContainment({ lat: f.lat, lon: f.lon }, f.accuracy, persisted.geofences) === 'uncertain') {
+    const sharp = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 0, timeoutMs: 4000 })
+    if (sharp) { f = sharp; fix = sharp }
+  }
   const plan = decideEmission({
     mode: c.mode,
-    position: { lat: fix.lat, lon: fix.lon },
+    position: { lat: f.lat, lon: f.lon },
     trigger: 'none',
     geofences: c.mode === 'family' ? persisted.geofences : undefined,
     offGrid: isDark(),
     noReportZones: persisted.noReportZones,
+    accuracyMetres: f.accuracy,
   })
   breachActive = plan.reason === 'breach'
   const type = signalTypeForReason(plan.reason)
   // Automatic path never carries 'help' (that's an explicit trigger); the guard
   // also narrows `type` to a LocationSignalType for buildLocationSignal.
   if (!type || type === 'help' || plan.action === 'withhold') { refresh(); return }
-  const geohash = encode(fix.lat, fix.lon, plan.precision)
+  const geohash = encode(f.lat, f.lon, plan.precision)
   const breach = plan.reason === 'breach'
   const prev = beaconCadence.get(c.id) ?? { lastGeohash: null, lastSentAt: 0 }
   if (!shouldEmitBeacon(geohash, prev, nowSec(), {
@@ -1678,7 +1703,14 @@ async function emit(trigger: 'pickup' | 'help'): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
-  const position = fix ? { lat: fix.lat, lon: fix.lon } : null
+  // Freshest possible location for an explicit trigger: a one-shot GPS fix on a
+  // short deadline (~2.5 s), falling back to the last watched fix so an alert is
+  // never delayed. Decouples emergency accuracy from the ambient watch (which may be
+  // suspended on a break, or low-power for a night-out circle). (Phase H.)
+  const fresh = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 5000, timeoutMs: 2500 })
+  if (fresh) fix = fresh
+  const use = fresh ?? fix
+  const position = use ? { lat: use.lat, lon: use.lon } : null
   const plan = decideEmission({
     mode: c.mode,
     position,
@@ -1686,6 +1718,7 @@ async function emit(trigger: 'pickup' | 'help'): Promise<void> {
     geofences: c.mode === 'family' ? persisted.geofences : undefined,
     offGrid: isDark(),
     noReportZones: persisted.noReportZones,
+    accuracyMetres: use?.accuracy,
   })
   const type = signalTypeForReason(plan.reason)
   if (!type) {

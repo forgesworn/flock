@@ -18,7 +18,7 @@
  * maths (one tested, benchmarked implementation instead of a second copy).
  */
 
-import { distanceFromCoords, pointInPolygon } from 'geohash-kit'
+import { distanceFromCoords, pointInPolygon, boundsFullyInsidePolygon, boundsOverlapsPolygon, type GeohashBounds } from 'geohash-kit'
 
 /** A WGS-84 coordinate in decimal degrees. */
 export interface LatLng {
@@ -138,4 +138,75 @@ export function isInside(point: LatLng, fence: Geofence): boolean {
  */
 export function isBreach(point: LatLng, fence: Geofence): boolean {
   return !isInside(point, fence)
+}
+
+/** How a fix sits relative to the safe zones once its positional uncertainty is
+ *  taken into account. Only a confident `outside` should fire a breach. */
+export type Containment = 'inside' | 'outside' | 'uncertain'
+
+function validateAccuracy(accuracyMetres: number): void {
+  if (!Number.isFinite(accuracyMetres) || accuracyMetres < 0) {
+    throw new Error(`Invalid accuracyMetres: must be a finite number >= 0, got ${accuracyMetres}`)
+  }
+}
+
+/** Axis-aligned box circumscribing the uncertainty disc (point ± accuracy), as a
+ *  `GeohashBounds` so the polygon predicates can be reused. A box slightly
+ *  over-approximates the disc — erring toward `uncertain`, the fail-safe side. */
+function uncertaintyBounds(point: LatLng, accuracyMetres: number): GeohashBounds {
+  const dLat = accuracyMetres / 111_320
+  const dLon = accuracyMetres / (111_320 * Math.cos((point.lat * Math.PI) / 180))
+  return { minLat: point.lat - dLat, maxLat: point.lat + dLat, minLon: point.lon - dLon, maxLon: point.lon + dLon }
+}
+
+/** Whether the uncertainty disc lies wholly inside / wholly outside a single fence. */
+function fenceContainment(point: LatLng, accuracyMetres: number, fence: Geofence): { fullyInside: boolean; fullyOutside: boolean } {
+  if (fence.kind === 'circle') {
+    if (!Number.isFinite(fence.radiusMetres) || fence.radiusMetres <= 0) {
+      throw new Error('Invalid circle geofence: radiusMetres must be a positive number')
+    }
+    validateLatLng(fence.centre, 'circle centre')
+    const d = haversineMetres(point, fence.centre)
+    return { fullyInside: d + accuracyMetres <= fence.radiusMetres, fullyOutside: d - accuracyMetres >= fence.radiusMetres }
+  }
+  const v = fence.vertices
+  if (!Array.isArray(v) || v.length < 3) throw new Error('Invalid polygon geofence: need at least 3 vertices')
+  validateLatLng(point, 'point')
+  for (const vertex of v) validateLatLng(vertex, 'polygon vertex')
+  const ring = v.map((vertex): [number, number] => [vertex.lon, vertex.lat])
+  // A zero-radius disc is a crisp point — avoid a degenerate (zero-area) box.
+  if (accuracyMetres <= 0) {
+    const inside = pointInPolygon([point.lon, point.lat], ring)
+    return { fullyInside: inside, fullyOutside: !inside }
+  }
+  const box = uncertaintyBounds(point, accuracyMetres)
+  return { fullyInside: boundsFullyInsidePolygon(box, ring), fullyOutside: !boundsOverlapsPolygon(box, ring) }
+}
+
+/**
+ * Classify a fix — with its positional uncertainty radius (e.g. the browser's
+ * `GeolocationCoordinates.accuracy`) — against the **union** of safe zones:
+ *
+ *  - `inside`    — the uncertainty disc lies wholly within some fence (confidently safe)
+ *  - `outside`   — it lies wholly beyond *every* fence (a confident breach)
+ *  - `uncertain` — it straddles a boundary; neither can yet be asserted
+ *
+ * This is the fail-safe wrapper around the boolean `isBreach`: only `outside`
+ * should fire a breach, so an imprecise fix near a fence edge never cries wolf —
+ * and, escalated to a sharper fix by the caller, never silently misses one. With
+ * `accuracyMetres` 0 it collapses to a crisp inside/outside. With no fences there
+ * is nothing to be inside → `outside` (mirrors `isWithinAnyFence` = false).
+ *
+ * @throws {Error} If accuracy is negative/non-finite, or a fence/coordinate is invalid.
+ */
+export function classifyContainment(point: LatLng, accuracyMetres: number, fences: Geofence[]): Containment {
+  validateLatLng(point, 'point')
+  validateAccuracy(accuracyMetres)
+  let allFullyOutside = true
+  for (const fence of fences) {
+    const { fullyInside, fullyOutside } = fenceContainment(point, accuracyMetres, fence)
+    if (fullyInside) return 'inside'
+    if (!fullyOutside) allFullyOutside = false
+  }
+  return allFullyOutside ? 'outside' : 'uncertain'
 }

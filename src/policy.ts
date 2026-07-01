@@ -15,7 +15,7 @@
  *   help  >  pickup  >  geofence breach  >  night-out coarse  >  withhold
  */
 
-import { isInside } from './geofence.js'
+import { isInside, classifyContainment } from './geofence.js'
 import type { LatLng, Geofence } from './geofence.js'
 import { noReportPolicyAt, type NoReportZone, type NoReportPolicy } from './noreport.js'
 
@@ -53,6 +53,14 @@ export interface EmissionContext {
   geofences?: Geofence[]
   /** Explicit user trigger; defaults to 'none'. */
   trigger?: EmissionTrigger
+  /**
+   * Positional uncertainty of `position`, in metres (the fix's accuracy radius).
+   * A geofence breach fires only when the fix is *confidently* outside every safe
+   * zone (`classifyContainment` → 'outside'), so an imprecise fix near a fence edge
+   * never triggers a **false** breach. Defaults to 0 (treat the fix as exact),
+   * which preserves the crisp inside/outside behaviour.
+   */
+  accuracyMetres?: number
   /**
    * Off-grid (deliberately dark). Suppresses *automatic* emission (night-out
    * beacons, breach disclosure) but NOT an explicit help/pickup trigger.
@@ -146,10 +154,12 @@ function decideBase(ctx: EmissionContext, p: EmissionPrecisions, position: LatLn
     return { action: 'withhold', precision: 0, reason: 'none' }
   }
 
-  // 4. Family mode — disclose only on a geofence breach (outside every safe zone).
+  // 4. Family mode — disclose only on a geofence breach. Breach requires being
+  //    *confidently* outside every safe zone; an uncertain fix near an edge never
+  //    fires (the caller should escalate to a sharper fix and re-decide).
   if (ctx.mode === 'family') {
     const fences = ctx.geofences ?? []
-    if (fences.length > 0 && !isWithinAnyFence(position, fences)) {
+    if (fences.length > 0 && classifyContainment(position, ctx.accuracyMetres ?? 0, fences) === 'outside') {
       return { action: 'full', precision: p.full, reason: 'breach' }
     }
     return { action: 'withhold', precision: 0, reason: 'none' }
