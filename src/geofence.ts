@@ -11,7 +11,14 @@
  * Two fence shapes are supported:
  * - **circle**  — a centre point + radius in metres (cheap; the common "safe zone").
  * - **polygon** — an ordered ring of vertices (arbitrary areas; ray-casting test).
+ *
+ * Geo maths (haversine distance, point-in-polygon) is delegated to `geohash-kit`
+ * — our single home for geohash/geo primitives. This module owns the fence
+ * types, coordinate validation, and the breach decision; the library owns the
+ * maths (one tested, benchmarked implementation instead of a second copy).
  */
+
+import { distanceFromCoords, pointInPolygon } from 'geohash-kit'
 
 /** A WGS-84 coordinate in decimal degrees. */
 export interface LatLng {
@@ -38,13 +45,6 @@ export interface PolygonGeofence {
 /** Any supported geofence shape. */
 export type Geofence = CircleGeofence | PolygonGeofence
 
-/** IUGG mean Earth radius, in metres. */
-const EARTH_RADIUS_METRES = 6_371_008.8
-
-function toRadians(degrees: number): number {
-  return (degrees * Math.PI) / 180
-}
-
 function validateLatLng(p: LatLng, label: string): void {
   if (!p || typeof p.lat !== 'number' || typeof p.lon !== 'number' ||
       Number.isNaN(p.lat) || Number.isNaN(p.lon)) {
@@ -61,19 +61,16 @@ function validateLatLng(p: LatLng, label: string): void {
 /**
  * Great-circle distance between two coordinates, in metres (haversine).
  *
+ * The haversine maths is delegated to geohash-kit's `distanceFromCoords`; this
+ * wrapper keeps the WGS-84 range validation, since the library only guards
+ * against non-finite inputs, not out-of-range latitude/longitude.
+ *
  * @throws {Error} If either coordinate is out of range.
  */
 export function haversineMetres(a: LatLng, b: LatLng): number {
   validateLatLng(a, 'point a')
   validateLatLng(b, 'point b')
-  const dLat = toRadians(b.lat - a.lat)
-  const dLon = toRadians(b.lon - a.lon)
-  const lat1 = toRadians(a.lat)
-  const lat2 = toRadians(b.lat)
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
-  return 2 * EARTH_RADIUS_METRES * Math.asin(Math.min(1, Math.sqrt(h)))
+  return distanceFromCoords(a.lat, a.lon, b.lat, b.lon)
 }
 
 /**
@@ -92,8 +89,10 @@ export function isInsideCircle(point: LatLng, fence: CircleGeofence): boolean {
 /**
  * True if `point` lies inside the polygon (ray-casting / even-odd rule).
  *
- * Uses planar lon/lat coordinates — accurate for the neighbourhood-scale fences
- * this is built for. Not intended for polygons that span the antimeridian or a pole.
+ * The ray-casting is delegated to geohash-kit's `pointInPolygon` (planar lon/lat,
+ * `[lon, lat]` order); this wrapper keeps the shape and coordinate validation.
+ * Accurate for the neighbourhood-scale fences this is built for — not intended
+ * for polygons that span the antimeridian or a pole.
  *
  * @throws {Error} If the polygon has fewer than 3 vertices or any coordinate is invalid.
  */
@@ -105,16 +104,10 @@ export function isInsidePolygon(point: LatLng, fence: PolygonGeofence): boolean 
   validateLatLng(point, 'point')
   for (const vertex of v) validateLatLng(vertex, 'polygon vertex')
 
-  let inside = false
-  for (let i = 0, j = v.length - 1; i < v.length; j = i++) {
-    const xi = v[i].lon, yi = v[i].lat
-    const xj = v[j].lon, yj = v[j].lat
-    const intersects =
-      (yi > point.lat) !== (yj > point.lat) &&
-      point.lon < ((xj - xi) * (point.lat - yi)) / (yj - yi) + xi
-    if (intersects) inside = !inside
-  }
-  return inside
+  return pointInPolygon(
+    [point.lon, point.lat],
+    v.map((vertex): [number, number] => [vertex.lon, vertex.lat]),
+  )
 }
 
 /**
