@@ -5,10 +5,10 @@
 # in keeping with flock's privacy promise. The only network calls the app makes
 # are to the user-configured Nostr relay and (optionally) a map tile server.
 #
-# Install on the host (95.217.39.110):
-#   sudo mkdir -p /var/www/flock
-#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile     # or import it
-#   sudo systemctl reload caddy
+# Install on the host (95.217.39.110) — additive conf.d drop-in; never touches the
+# shared /etc/caddy/Caddyfile (which `import`s conf.d/*.Caddyfile). See docs/DEPLOY.md:
+#   cat deploy/Caddyfile | ssh deploy@95.217.39.110 'sudo tee /etc/caddy/conf.d/flock.forgesworn.dev.Caddyfile'
+#   ssh deploy@95.217.39.110 'sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && sudo systemctl reload caddy'
 
 flock.forgesworn.dev {
 	root * /var/www/flock
@@ -36,6 +36,12 @@ flock.forgesworn.dev {
 	# Service worker must never be stale (so app updates land); hashed assets are immutable.
 	@sw path /sw.js
 	header @sw Cache-Control "no-cache"
+
+	# Navigations (index.html) carry no content hash, so they must revalidate too —
+	# otherwise the browser/SW can serve a stale HTML that pins old hashed assets
+	# (this is what kept a broken map build live). Belt-and-braces with the SW.
+	@html path / /index.html
+	header @html Cache-Control "no-cache"
 
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
