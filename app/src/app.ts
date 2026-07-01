@@ -14,7 +14,7 @@ import { formatCountdown } from './countdown'
 import { suggestMeetingPoint, rankVenues } from './meetingPoint'
 import { searchMeetingVenues } from './venues'
 import { circleToPolygon } from 'rendezvous-kit'
-import type { RendezvousSuggestion, TransportMode } from 'rendezvous-kit'
+import type { RendezvousSuggestion, TransportMode, FairnessStrategy, Venue } from 'rendezvous-kit'
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
@@ -124,6 +124,16 @@ let checkinAlert = false
 let monitorTimer = 0
 let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string } | null = null
 let travelMode: TravelMode = 'walk'
+// How the meeting-point search balances travel across the group. Persisted per
+// device; only ever changes which candidate venue is picked (see rankVenues).
+function loadMeetingFairness(): FairnessStrategy {
+  try {
+    const v = localStorage.getItem('flock.fairness')
+    if (v === 'min_max' || v === 'min_total' || v === 'min_variance') return v
+  } catch { /* localStorage may be unavailable */ }
+  return 'min_max'
+}
+let meetingFairness: FairnessStrategy = loadMeetingFairness()
 let rzvDurationMin = 60
 let lastRzvStatus = 0
 let rzvPick = false // picking a rendezvous spot on the map (crosshair mode)
@@ -158,11 +168,12 @@ interface CircleState {
   meetingShares: Map<string, MeetingShare>
   meetingSuggestion: RendezvousSuggestion | null
   meetingGen: number // bumped per suggestion refresh so a stale venue fetch can't clobber a newer one
+  meetingVenues: Venue[] // venues fetched for the current suggestion; the fairness toggle re-ranks these without re-fetching
 }
 const circleStates = new Map<string, CircleState>()
 function cstate(id: string): CircleState {
   let s = circleStates.get(id)
-  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null, meetingGen: 0 }; circleStates.set(id, s) }
+  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null, meetingGen: 0, meetingVenues: [] }; circleStates.set(id, s) }
   return s
 }
 // Meeting-point requests I've declined to contribute to (by requestId). Declining
@@ -1584,6 +1595,13 @@ function syncRzvTicker(): void {
 const MEETING_PRECISION = 6 // geohash chars ≈ neighbourhood; exactly policy's `coarse`
 const MEETING_TIME_BUDGET_MIN = 30 // reachability budget for the on-device isochrones
 const VENUE_SEARCH_RADIUS_M = 1500 // hunt for real venues within ~18 min walk of the fair point
+// Human labels for the fairness strategies (design doc). Only offered when there
+// are ≥2 candidate venues to balance between — with one spot, there's no choice.
+const FAIRNESS_OPTIONS: ReadonlyArray<readonly [FairnessStrategy, string]> = [
+  ['min_max', 'Fairest'],
+  ['min_total', 'Least total'],
+  ['min_variance', 'Most equal'],
+]
 const kitMode = (m: TravelMode): TransportMode => (m === 'transit' ? 'public_transit' : m)
 
 async function proposeMeeting(): Promise<void> {
@@ -1644,28 +1662,64 @@ async function refreshMeetingSuggestion(circleId: string): Promise<void> {
   if (!st.meeting || st.meeting.setBy !== me || st.meetingShares.size < 2) return
   const reqId = st.meeting.id
   const gen = ++st.meetingGen // newest refresh wins; a slow venue fetch must not clobber it
-  const opts = { mode: kitMode(st.meeting.mode), maxTimeMinutes: st.meeting.maxTimeMinutes }
-  const participants = [...st.meetingShares.values()].map((s) => {
-    const d = decode(s.geohash)
-    return { lat: d.lat, lon: d.lon, label: nameFor(s.member) }
-  })
+  st.meetingVenues = [] // re-fetched below; empty meanwhile so the fairness toggle stays hidden
+  const opts = { mode: kitMode(st.meeting.mode), maxTimeMinutes: st.meeting.maxTimeMinutes, fairness: meetingFairness }
+  const participants = meetingParticipants(st)
   const live = () => st.meetingGen === gen && st.meeting?.id === reqId // not superseded/cancelled
   try {
-    // 1) The on-device fair point — instant, no network. Show it straight away.
+    // 1) The on-device fair point — instant, no network. Show it if nothing's up
+    //    yet (don't downgrade a venue already on screen while we re-fetch).
     const [centroid] = await suggestMeetingPoint(participants, opts)
     if (!live()) return
-    st.meetingSuggestion = centroid ?? null
-    render()
-    // 2) Best-effort upgrade to a real, named venue everyone can reach. Only a
-    // bounding box around the fair point leaves the device (venues.ts); on any
-    // failure — proxy down, rate-limited, no matches — we keep the centroid.
+    if (!st.meetingSuggestion) { st.meetingSuggestion = centroid ?? null; render() }
     if (!centroid) return
+    // 2) Best-effort upgrade to real, named venues everyone can reach. Only a
+    // bounding box around the fair point leaves the device (venues.ts); on any
+    // failure — proxy down, rate-limited, no matches — we keep the centroid. Cache
+    // the venues so the fairness toggle can re-rank them without another fetch.
     const region = circleToPolygon([centroid.venue.lon, centroid.venue.lat], VENUE_SEARCH_RADIUS_M)
     const venues = await searchMeetingVenues(region)
     if (!live()) return
+    st.meetingVenues = venues
     const [best] = rankVenues(participants, venues, opts)
-    if (best) { st.meetingSuggestion = best; render() }
+    st.meetingSuggestion = best ?? centroid
+    render()
   } catch { /* best effort — keep the last good suggestion on screen */ }
+}
+
+// The decoded coarse cells of everyone who's shared, as reachability inputs. Each
+// geohash-6 cell is decoded to its centre — the coarse spot, never a raw fix.
+function meetingParticipants(st: CircleState): Array<{ lat: number; lon: number; label: string }> {
+  return [...st.meetingShares.values()].map((s) => {
+    const d = decode(s.geohash)
+    return { lat: d.lat, lon: d.lon, label: nameFor(s.member) }
+  })
+}
+
+// Re-rank the already-fetched venues under the current fairness strategy — NO
+// network (the toggle only reorders what we already hold). Falls back to the
+// on-device centroid when no venues were found.
+async function applyMeetingRanking(circleId: string): Promise<void> {
+  const st = cstate(circleId)
+  const me = persisted.identity?.pk
+  if (!st.meeting || st.meeting.setBy !== me || st.meetingShares.size < 2) return
+  const opts = { mode: kitMode(st.meeting.mode), maxTimeMinutes: st.meeting.maxTimeMinutes, fairness: meetingFairness }
+  const participants = meetingParticipants(st)
+  const [best] = rankVenues(participants, st.meetingVenues, opts)
+  if (best) { st.meetingSuggestion = best; render(); return }
+  const [centroid] = await suggestMeetingPoint(participants, opts) // on-device only, no network
+  st.meetingSuggestion = centroid ?? null
+  render()
+}
+
+// The proposer picks how to balance travel across the group. Persisted; re-ranks
+// the venues already on screen in place (see applyMeetingRanking) — no re-fetch.
+function setMeetingFairness(fair: FairnessStrategy): void {
+  meetingFairness = fair
+  try { localStorage.setItem('flock.fairness', fair) } catch { /* localStorage may be unavailable */ }
+  const c = activeCircle()
+  if (c) void applyMeetingRanking(c.id)
+  render()
 }
 
 // Pick the fair point → it becomes an ordinary rendezvous (everyone gets the pin +
@@ -1730,8 +1784,16 @@ function meetingCard(): string {
     const heading = isVenue
       ? `📍 <strong>${esc(s.venue.name)}</strong> — a fair spot everyone can reach:`
       : '📍 A fair spot for everyone (as-the-crow-flies):'
+    // Only worth offering when there's more than one candidate venue to balance between.
+    const fairness = cs.meetingVenues.length >= 2
+      ? `<div class="note" style="margin-top:8px">Balance travel</div>
+         <div class="row" style="gap:8px;flex-wrap:wrap">${FAIRNESS_OPTIONS
+        .map(([f, label]) => `<button class="btn small${meetingFairness === f ? ' primary' : ''}" data-action="mtg-fairness" data-fair="${f}">${label}</button>`)
+        .join('')}</div>`
+      : ''
     suggestion = `<div class="note" style="margin-top:6px">${heading}</div>
       <div class="list">${etas}</div>
+      ${fairness}
       <button class="btn small primary" data-action="set-meeting-rzv">Set this as the rendezvous</button>`
   } else if (iProposed) {
     suggestion = `<div class="note">Waiting for a second spot to work out a fair place…</div>`
@@ -1828,6 +1890,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'share-meeting': void contributeMeetingShare(); break
     case 'dismiss-meeting': dismissMeeting(); break
     case 'set-meeting-rzv': void setMeetingAsRendezvous(); break
+    case 'mtg-fairness': setMeetingFairness(node.dataset.fair as FairnessStrategy); break
     case 'cancel-meeting': cancelMeeting(); break
     case 'ask-dark': goingDark = true; render(); break
     case 'cancel-dark': goingDark = false; render(); break

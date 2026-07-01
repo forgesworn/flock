@@ -70,4 +70,16 @@ describe('rankVenues (on-device fairness over real venues)', () => {
   it('returns [] when there are no venues (caller falls back to the centroid)', () => {
     expect(rankVenues([A, B, C], [])).toEqual([])
   })
+
+  it('a different fairness strategy can pick a different venue', () => {
+    // Two people ~7 km apart; one venue sits near P1, the other is balanced between.
+    const P1 = { lat: 51.50, lon: -0.10, label: 'P1' }
+    const P2 = { lat: 51.50, lon: -0.20, label: 'P2' }
+    const nearOne = { name: 'NearOne', lat: 51.50, lon: -0.11, venueType: 'pub' as const }
+    const even = { name: 'Even', lat: 51.52, lon: -0.15, venueType: 'cafe' as const }
+    // min_max minimises the worst-off person's travel → the balanced venue.
+    expect(rankVenues([P1, P2], [nearOne, even], { fairness: 'min_max' })[0].venue.name).toBe('Even')
+    // min_total minimises combined travel → the venue nearer one person (lower sum).
+    expect(rankVenues([P1, P2], [nearOne, even], { fairness: 'min_total' })[0].venue.name).toBe('NearOne')
+  })
 })
