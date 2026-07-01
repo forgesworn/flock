@@ -173,8 +173,21 @@ Two halves that compose into one feature:
     prebuilt `*.pmtiles` from prod. **Follow-ups:** preserve the map camera on label switch
     (currently re-centres); missing POI sprite icons (e.g. `townhall`) need a custom sprite;
     whole-island saves exceed the 60 km extract cap (Mallorca ~90 km).
-  - **Multi-relay fan-out** — now unblocked by gift-wrap-everything (Phase A `[~]`);
-    single relay = single point of failure.
+  - [~] **Multi-relay fan-out — machinery shipped (`73ee7d7`).** Signals publish to
+    every relay in the no-log private set and succeed if any accepts; subscriptions
+    read across the set (the pool dedupes a wrap arriving from several relays), so a
+    relay outage no longer drops inbound alerts. Also **fails loud** — nostr-tools'
+    pool RESOLVES a `"connection failure"` string when a relay is unreachable, so the
+    old `Promise.any` read an all-relays-down send as success (**an SOS could look
+    sent when it never left the device**); publishes now throw if NO relay accepted,
+    which every caller surfaces as "couldn't send". Fan-out stays on `PRIVATE_RELAYS`
+    (no-log) — **never** the public profile set, which would leak traffic timing + IP
+    to an untrusted operator even though content is an opaque `kind:1059`. Persisted
+    `relayUrl → relayUrls[]` (migrated); settings is now an **editable relay list**.
+    TDD +16 unit tests; full two-person e2e green. **Redundancy is opt-in until the
+    private set has >1 relay** (add a trusted one in settings) — the real out-of-box
+    fix is to **stand up a second no-log relay we control** (infra: host + domain,
+    mirror the trotters setup) and add it to `PRIVATE_RELAYS`, no code change.
   - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".
   - **Key-at-rest** — localStorage isn't secure key storage (the in-app "preview"
     caveat is shown); harden via **keystore-kit** (Phase E) or lean on Sign-in-with-Signet.
