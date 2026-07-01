@@ -3,6 +3,10 @@
 // needing to know Vite's hashed filenames at build time.
 
 const CACHE = 'flock-runtime-v3'
+// Offline basemap assets (glyphs/sprite under /basemap/*) live in their own cache so
+// they survive a runtime-cache version bump — a saved offline map keeps its labels
+// across deploys. OPFS holds the tiles themselves and the SW never touches it.
+const BASEMAP_CACHE = 'flock-basemap-v1'
 
 self.addEventListener('install', () => self.skipWaiting())
 
@@ -10,7 +14,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys()
-      await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      await Promise.all(keys.filter((k) => k !== CACHE && k !== BASEMAP_CACHE).map((k) => caches.delete(k)))
       await self.clients.claim()
     })(),
   )
@@ -47,9 +51,10 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Cache-first for hashed assets (immutable), revalidating in the background.
+  // Basemap glyphs/sprite go to the deploy-surviving cache; everything else runtime.
   event.respondWith(
     (async () => {
-      const cache = await caches.open(CACHE)
+      const cache = await caches.open(url.pathname.startsWith('/basemap/') ? BASEMAP_CACHE : CACHE)
       const cached = await cache.match(request)
       const network = fetch(request)
         .then((res) => {
