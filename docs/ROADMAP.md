@@ -1,7 +1,10 @@
 # flock — roadmap & feature backlog
 
 Single source of truth so we ship **full features with no bugs**. Live preview:
-**https://flock.forgesworn.dev/**. Foundation rework is next (see `PRIVACY.md`).
+**https://flock.forgesworn.dev/**. The privacy-by-architecture foundation (Phase A;
+see `PRIVACY.md`) is largely in place — **go-live hardening** (Phase G) and the
+**native background-geofencing gate** (Phase 0 spike) are what stand between here
+and a real launch.
 
 ## Cross-cutting (apply to everything)
 
@@ -11,6 +14,7 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
   - ✅ **Covered** (`e2e/`, `npm run test:e2e` — 22 specs, green with one occasional live-relay retry): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, and the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map). Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
   - ✅ **Regression backbone** — the security-critical `decideEmission` core has an **exhaustive truth-table** (`src/policy.matrix.test.ts`): every one of the 216 permutations of mode × trigger × off-grid × position × geofence × no-report, checked against a differential oracle **and** standalone safety invariants (an SOS always fires; nothing emits without a position; off-grid never silences a trigger; a no-report zone never pins a sensitive address). 344 unit tests total.
   - 🐛 **Bug the e2e caught & fixed**: the 3-party test surfaced a roster-update race — `ensureMember` trusted a circle snapshot captured before an `await`, so two first-contact signals arriving together would let the later write clobber the earlier one, silently dropping a member (who'd then be skipped by reseeds and lists). Fixed to re-read the live roster.
+  - 🐛 **Bug the e2e *missed* — and the guard that now catches it**: the map rendered **blank** on the live site. maplibre tags `#map` with `.maplibregl-map{position:relative}`, which (equal specificity, loaded later) beat the app's `.map-canvas{position:absolute;inset:0}` and collapsed the container to **height 0** — yet tiles still loaded and the canvas stayed "visible", so the e2e's visibility check passed while the map showed nothing. Fixed with a higher-specificity selector; `map.spec.ts` now asserts `#map` has real height. **And a release bug it exposed:** the service worker was serving returning users a **stale cached `index.html`** (pinning old hashed assets), so deploys silently didn't land — fixed by cache-busting the SW (`{ cache: 'reload' }` navigations + cache-name bump) and `Cache-Control: no-cache` on `index.html`. *Lesson: "canvas visible" ≠ "content rendered" — assert real dimensions.*
 - **ForgeSworn toolset** — use the real tools, don't hand-roll (see `FORGESWORN-TOOLKIT.md`).
 - **geohash-kit for all geo maths** — beacons + map (✅), and migrate `geofence.ts` off hand-rolled haversine onto geohash-kit `distance` / `coverage` / `precisionToRadius`.
 
@@ -20,7 +24,7 @@ Single source of truth so we ship **full features with no bugs**. Live preview:
 - [x] **Sign in with Signet** (`signet-login` `SignetSigner` adapter) — key in a bunker/Signet/Amber, **never in flock**; dual local/Signet identity + session restore. *(Live login needs a real Signet signer to verify end-to-end.)*
 - [x] **nsec-tree circle keys** — circle seeds derived `circleRoot → circleId → epoch` (`keys.ts`); reseed = epoch+1 (deterministic, recoverable from one root, per-circle/per-root unlinkable). Tested. Per-circle *publishing* personas still to come with gift-wrap-everything.
 - [x] **Gift-wrap everything** (`giftwrap.ts`) — every signal is NIP-59 wrapped to a rotating nsec-tree group-inbox key (`deriveInbox`); the relay sees only `kind:1059` from random keys to an opaque inbox — no real pubkeys, types, or roster. Tested in-process + live (`#p` round-trip on relay.trotters.cc). **Bonus:** a wrap is self-contained opaque bytes → flock is now **transport-agnostic** (ready for the LoRa path below).
-- [~] **Relay strategy** (adopted from `pallasite/src/credits.ts` → `app/src/relays.ts`): sensitive flock traffic → our **no-log relay only** (`relay.trotters.cc`); the broad public set (`PROFILE_RELAYS`) is reserved for reading **kind:0 profiles**. Full multi-relay fan-out of sensitive traffic waits for gift-wrap-everything (spraying before then would leak metadata to public relays).
+- [~] **Relay strategy** (adopted from `pallasite/src/credits.ts` → `app/src/relays.ts`): sensitive flock traffic → our **no-log relay only** (`relay.trotters.cc`); the broad public set (`PROFILE_RELAYS`) is reserved for reading **kind:0 profiles**. Full multi-relay fan-out of sensitive traffic waits for gift-wrap-everything (spraying before then would leak metadata to public relays). **Gift-wrap-everything is now done → fan-out is unblocked** (a go-live hardening step; see Phase G).
 
 ## Phase B — Group lifecycle
 
@@ -113,11 +117,24 @@ Two halves that compose into one feature:
 
 ## Phase G — Platform & release
 
-- [ ] **Capacitor native shell** — background geofencing (scaffolded; Phase 0 spike harness ready — `native/spike/`).
+- [ ] **Capacitor native shell** — background geofencing. Phase 0 spike harness
+  scaffolded (`native/spike/`) with Tier 0/1/2 validation tiers
+  (`docs/plans/2026-06-30-phase0-graphene-spike.md`). **No test devices yet**, so the
+  reliability gate stays **open** — the Tier 0 emulator only validates the functional
+  path (route → fix → breach), not cadence / Doze / battery on real GrapheneOS.
 - [ ] **Inbound alerts (app closed)** — receive SOS/breach with flock closed.
   Persistent foreground-service relay socket (Option A, recommended) →
   UnifiedPush + bridge (Option B). De-Googled; gated on the Phase 0 result. See
   `docs/plans/2026-06-30-background-inbound.md`.
+- [ ] **Go-live hardening (foreground PWA — needs no devices):**
+  - **Self-host / proxy map tiles** — today OSM (`tile.openstreetmap.org`) sees the
+    map viewport = roughly where the circle is: a real leak for a privacy product.
+    `VITE_TILE_URL` already makes it swappable — point at a self-hosted/proxied server.
+  - **Multi-relay fan-out** — now unblocked by gift-wrap-everything (Phase A `[~]`);
+    single relay = single point of failure.
+  - **Licence** — README says TBD, `package.json` says MIT; resolve before launch.
+  - **Key-at-rest** — localStorage isn't secure key storage (the in-app "preview"
+    caveat is shown); harden via **keystore-kit** (Phase E) or lean on Sign-in-with-Signet.
 - [ ] **anvil** — release CI (like canary-kit).
 
 ## Resolved inputs
