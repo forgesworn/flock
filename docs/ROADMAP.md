@@ -130,9 +130,22 @@ Two halves that compose into one feature:
   UnifiedPush + bridge (Option B). De-Googled; gated on the Phase 0 result. See
   `docs/plans/2026-06-30-background-inbound.md`.
 - [ ] **Go-live hardening (foreground PWA — needs no devices):**
-  - **Self-host / proxy map tiles** — today OSM (`tile.openstreetmap.org`) sees the
-    map viewport = roughly where the circle is: a real leak for a privacy product.
-    `VITE_TILE_URL` already makes it swappable — point at a self-hosted/proxied server.
+  - [x] **Proxy map tiles + geocoding (Stage 0)** — tiles (`/tiles/*`) and Nominatim
+    (`/nominatim/*`) are now **reverse-proxied same-origin** (Caddy `handle_path` blocks
+    in prod, Vite dev proxy in dev). OSM sees only the host, never a user's IP +
+    viewport. Defaults flipped in `map.ts`/`geo.ts`; client-identifying headers stripped
+    upstream; CSP unchanged (opt-in kind:0 avatars still need `img-src https:`).
+  - [~] **Local / offline vector basemap (Stage 1) — spiked & proven.** A vector PMTiles
+    basemap (`app/src/basemap.ts`, behind `VITE_PMTILES=1` / `localStorage flock.pmtiles`)
+    renders flock's **dusk palette** from a **single same-origin file** — a whole ~11 km
+    town, z0–15, is **3.3 MB** (verified: `go-pmtiles extract` from the Protomaps daily
+    build, +~2 MB self-hosted glyphs/sprite via `scripts/fetch-basemap-assets.mjs`; **zero
+    third-party calls** — confirmed in-browser). Fetched once → cached on-device → the map
+    makes **zero** network calls at view time (no when/where-you-look leak) and works
+    offline. **To productionise:** per-circle *"save this area"* (bbox of safe zones +
+    buffer → server-side `pmtiles extract` endpoint → OPFS via `maplibre-offline-pmtiles`);
+    out-of-area disclosure = blank basemap + chip, **never** live-fetch mid-event; amend
+    `sw.js` to preserve the basemap cache across deploys; vector restyle already done.
   - **Multi-relay fan-out** — now unblocked by gift-wrap-everything (Phase A `[~]`);
     single relay = single point of failure.
   - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".

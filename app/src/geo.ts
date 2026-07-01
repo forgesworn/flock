@@ -1,8 +1,10 @@
-// Geocoding via OSM Nominatim — privacy-preserving (NOT Google), and the endpoint
-// is build-time configurable so a self-hosted Nominatim can be used. Only hit when
-// a user deliberately sets a rendezvous by name/address — never continuously.
+// Geocoding via OSM Nominatim — privacy-preserving (NOT Google). Served
+// **same-origin** (`/nominatim/*`) by default, reverse-proxied by the host so the
+// literal place-name query reaches Nominatim from the host, not the user's IP.
+// Only hit when a user deliberately sets a rendezvous by name/address — never
+// continuously. Override VITE_NOMINATIM_URL to point at a Nominatim directly.
 
-const NOMINATIM = import.meta.env.VITE_NOMINATIM_URL || 'https://nominatim.openstreetmap.org'
+const NOMINATIM = import.meta.env.VITE_NOMINATIM_URL || '/nominatim'
 
 export interface GeocodeResult { lat: number; lon: number; address: string }
 

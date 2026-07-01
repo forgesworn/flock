@@ -33,6 +33,39 @@ flock.forgesworn.dev {
 		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; base-uri 'self'; form-action 'self'"
 	}
 
+	# Map tiles — reverse-proxied through this origin so the third-party tile CDN
+	# only ever sees this server, never the user's IP + viewport (which is roughly
+	# where the circle is). The user talks only to flock.forgesworn.dev, which they
+	# already trust to serve the app — no new third party. Client-identifying
+	# headers are stripped; a proper User-Agent is set for OSM's tile-usage policy;
+	# a long max-age lets Cloudflare/browser cache so few requests reach OSM.
+	handle_path /tiles/* {
+		reverse_proxy https://tile.openstreetmap.org {
+			header_up Host tile.openstreetmap.org
+			header_up -Referer
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Proto
+			header_up -X-Forwarded-Host
+			header_up User-Agent "flock/1.0 (+https://flock.forgesworn.dev)"
+			header_down Cache-Control "public, max-age=604800"
+		}
+	}
+
+	# Nominatim geocoding — same treatment. The literal place-name query reaches
+	# Nominatim from this server, not the user's IP. `no-store` keeps the query out
+	# of any shared (Cloudflare) cache — geocoding is occasional and user-specific.
+	handle_path /nominatim/* {
+		reverse_proxy https://nominatim.openstreetmap.org {
+			header_up Host nominatim.openstreetmap.org
+			header_up -Referer
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Proto
+			header_up -X-Forwarded-Host
+			header_up User-Agent "flock/1.0 (+https://flock.forgesworn.dev)"
+			header_down Cache-Control "private, no-store"
+		}
+	}
+
 	# Service worker must never be stale (so app updates land); hashed assets are immutable.
 	@sw path /sw.js
 	header @sw Cache-Control "no-cache"

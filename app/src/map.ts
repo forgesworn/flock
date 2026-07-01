@@ -1,8 +1,12 @@
 // Map view — maplibre-gl with OSM raster tiles. Renders member positions and
 // circular safe zones, with a live preview circle for the geofence editor.
 //
-// Privacy note: OSM tiles are fetched from openstreetmap.org, which sees the
-// viewport. A self-hosted tile source would be the production choice.
+// Privacy note: tiles are served **same-origin** (`/tiles/*`) by default,
+// reverse-proxied to OpenStreetMap by the host (Caddy in production, the Vite
+// dev-server proxy in dev). The third-party tile CDN therefore only ever sees
+// the host, never the user's IP + map viewport — the viewport is what roughly
+// reveals where the circle is. Override VITE_TILE_URL to point at any tile
+// server directly (self-hosters), or a local PMTiles basemap (see basemap.ts).
 
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -16,9 +20,9 @@ export interface MapPoint {
   status: 'active' | 'stale' | 'alert'
 }
 
-// Tile source is overridable at build time so self-hosters can point at their
-// own tile server and avoid leaking the viewport to a third party.
-const TILE_URL = import.meta.env.VITE_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+// Same-origin by default (proxied → OSM); overridable at build time so
+// self-hosters can point at their own tile server.
+const TILE_URL = import.meta.env.VITE_TILE_URL || '/tiles/{z}/{x}/{y}.png'
 const TILE_ATTRIBUTION = import.meta.env.VITE_TILE_ATTRIBUTION || '© OpenStreetMap contributors'
 
 const STYLE: maplibregl.StyleSpecification = {
@@ -34,6 +38,13 @@ const STYLE: maplibregl.StyleSpecification = {
   layers: [
     { id: 'osm', type: 'raster', source: 'osm', paint: { 'raster-saturation': -0.55, 'raster-brightness-max': 0.82, 'raster-contrast': -0.05 } },
   ],
+}
+
+// Opt into the local/offline vector basemap (see basemap.ts). Off by default —
+// build-time (VITE_PMTILES=1) or a per-device localStorage flag for testing.
+function usePmtilesBasemap(): boolean {
+  if (import.meta.env.VITE_PMTILES === '1') return true
+  try { return localStorage.getItem('flock.pmtiles') === '1' } catch { return false }
 }
 
 function ring(lat: number, lon: number, radiusMetres: number, steps = 72): number[][] {
@@ -68,10 +79,26 @@ export class MapView {
   private pendingNoReport: NoReportZone[] | null = null
   private pendingPreview: CircleGeofence | null = null
 
-  constructor(container: HTMLElement, centre?: { lat: number; lon: number }) {
+  // Lazily resolve the basemap style: the vector PMTiles path (local/offline) when
+  // the flag is set, otherwise the proxied raster tiles. The pmtiles + protomaps
+  // deps are dynamic-imported only when needed, so they stay out of the default
+  // bundle. Falls back to raster if the local basemap assets aren't present.
+  static async create(container: HTMLElement, centre?: { lat: number; lon: number }): Promise<MapView> {
+    let style: maplibregl.StyleSpecification | undefined
+    if (usePmtilesBasemap()) {
+      try {
+        const bm = await import('./basemap')
+        bm.registerPmtilesProtocol()
+        style = bm.pmtilesStyle(bm.LOCAL_BASEMAP_URL)
+      } catch { /* assets missing → fall back to raster */ }
+    }
+    return new MapView(container, centre, style)
+  }
+
+  constructor(container: HTMLElement, centre?: { lat: number; lon: number }, style: maplibregl.StyleSpecification = STYLE) {
     this.map = new maplibregl.Map({
       container,
-      style: STYLE,
+      style,
       center: centre ? [centre.lon, centre.lat] : [-0.1278, 51.5074],
       zoom: 13.5,
       attributionControl: { compact: true },

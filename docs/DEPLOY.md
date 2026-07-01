@@ -12,17 +12,26 @@ flock is designed so the host (and we) capture nothing:
 
 - **No analytics, no third-party scripts.** Fonts are self-hosted; nothing phones home.
 - **Access logging is off** in the provided Caddy config.
-- The only outbound calls are to (a) the user-configured **Nostr relay** and
-  (b) the **map tile server** — both overridable at build time so a self-hoster
-  can point at their own and avoid any third party.
+- The browser's only outbound calls are to (a) the user-configured **Nostr relay**
+  and (b) **this origin**. Map tiles (`/tiles/*`) and geocoding (`/nominatim/*`) are
+  **reverse-proxied by the host** to OpenStreetMap, so the third-party CDN only ever
+  sees the host — never a user's IP + map viewport (which roughly reveals where the
+  circle is). All overridable at build time (below).
 
 ## Build-time configuration
 
 | Env var | Default | Purpose |
 |---|---|---|
 | `VITE_DEFAULT_RELAY` | `wss://relay.trotters.cc` | Default Nostr relay (users can still change it in-app) |
-| `VITE_TILE_URL` | OpenStreetMap | Map tile template `{z}/{x}/{y}` |
+| `VITE_TILE_URL` | `/tiles/{z}/{x}/{y}.png` (host-proxied → OSM) | Map tile template `{z}/{x}/{y}`; point at any tile server to bypass the proxy |
 | `VITE_TILE_ATTRIBUTION` | © OpenStreetMap | Attribution shown on the map |
+| `VITE_NOMINATIM_URL` | `/nominatim` (host-proxied → OSM) | Geocoding endpoint (rendezvous-by-name) |
+
+The same-origin defaults (`/tiles/*`, `/nominatim/*`) rely on the host reverse-proxying
+to OpenStreetMap — the `handle_path` blocks in `deploy/Caddyfile` (and the Vite dev
+proxy in `vite.config.ts`). Self-hosters using a minimal config (below) should either
+copy those proxy blocks **or** set `VITE_TILE_URL` / `VITE_NOMINATIM_URL` to a tile /
+Nominatim server directly.
 
 ```sh
 VITE_DEFAULT_RELAY=wss://relay.example.com \

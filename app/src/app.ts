@@ -795,7 +795,7 @@ async function initMap(): Promise<void> {
   const container = document.getElementById('map')
   if (!container) return
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
-  mapView = new MapView(container, fix ?? undefined)
+  mapView = await MapView.create(container, fix ?? undefined)
   mapView.setGeofences(persisted.geofences)
   mapView.setNoReportZones(persisted.noReportZones)
   mapView.onMove(() => { if (addMode) updatePreview() })

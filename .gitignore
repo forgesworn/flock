@@ -7,6 +7,9 @@ dist-app/
 build/
 *.tsbuildinfo
 
+# Generated basemap assets (regenerate: scripts/fetch-basemap-assets.mjs + go-pmtiles extract)
+app/public/basemap/
+
 # Test / coverage
 coverage/
 .vitest/
