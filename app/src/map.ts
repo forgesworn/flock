@@ -79,13 +79,17 @@ export class MapView {
   private pendingNoReport: NoReportZone[] | null = null
   private pendingPreview: CircleGeofence | null = null
 
-  // Lazily resolve the basemap style: the vector PMTiles path (local/offline) when
-  // the flag is set, otherwise the proxied raster tiles. The pmtiles + protomaps
-  // deps are dynamic-imported only when needed, so they stay out of the default
-  // bundle. Falls back to raster if the local basemap assets aren't present.
-  static async create(container: HTMLElement, centre?: { lat: number; lon: number }): Promise<MapView> {
+  // Lazily resolve the basemap style, best first: (1) the circle's saved offline
+  // area (OPFS vector — zero network at view time); (2) the bundled demo vector
+  // basemap when the dev flag is set; (3) the proxied raster tiles. The pmtiles +
+  // protomaps deps are dynamic-imported only when needed, so they stay out of the
+  // default bundle. Falls back to raster if a vector path can't be built.
+  static async create(container: HTMLElement, centre?: { lat: number; lon: number }, opts: { circleId?: string } = {}): Promise<MapView> {
     let style: maplibregl.StyleSpecification | undefined
-    if (usePmtilesBasemap()) {
+    if (opts.circleId) {
+      try { style = (await (await import('./offlineArea')).savedAreaStyle(opts.circleId)) ?? undefined } catch { /* no saved area */ }
+    }
+    if (!style && usePmtilesBasemap()) {
       try {
         const bm = await import('./basemap')
         bm.registerPmtilesProtocol()

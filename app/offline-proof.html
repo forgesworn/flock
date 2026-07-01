@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- Throwaway proof harness for "save this area" (offlineArea.ts): save → OPFS →
+     render from the local file. Served by Vite at /offline-proof.html. Needs the
+     extract service running (server/extract.mjs on :8788, proxied at /api/extract). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>flock — offline area proof</title>
+    <style>html, body, #map { margin: 0; height: 100%; background: #0b0e12; }</style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script type="module">
+      import maplibregl from 'maplibre-gl'
+      import 'maplibre-gl/dist/maplibre-gl.css'
+      import { saveArea, savedAreaStyle, removeSavedArea } from './src/offlineArea.ts'
+
+      window.__log = []
+      const log = (m) => window.__log.push(m)
+      const circle = { kind: 'circle', centre: { lat: 53.99, lon: -1.54 }, radiusMetres: 4000 }
+
+      window.__run = async () => {
+        await removeSavedArea('proof') // clean slate
+        log('saving…')
+        const saved = await saveArea('proof', [circle], [])
+        window.__savedBytes = saved && saved.bytes
+        log('saved bytes=' + window.__savedBytes)
+
+        window.__renderStart = performance.now() // after this, the map must not hit any tile network
+        const style = await savedAreaStyle('proof')
+        window.__hasStyle = !!style
+        const map = new maplibregl.Map({ container: 'map', style, center: [-1.54, 53.99], zoom: 13.5 })
+        window.__errs = []
+        map.on('error', (e) => window.__errs.push(String(e && e.error ? e.error : e)))
+        map.on('load', () => map.once('idle', () => { window.__ready = true }))
+      }
+      window.__run().catch((e) => { window.__fatal = String(e && e.stack ? e.stack : e) })
+    </script>
+  </body>
+</html>

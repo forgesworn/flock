@@ -35,6 +35,9 @@ export default defineConfig({
         rewrite: (p) => p.replace(/^\/nominatim/, ''),
         headers: { 'User-Agent': 'flock-dev/1.0 (+https://flock.forgesworn.dev)' },
       },
+      // Offline-basemap extract service (server/extract.mjs; prod = Caddy reverse_proxy).
+      // Run it alongside dev:  GO_PMTILES_BIN=~/go/bin/go-pmtiles node server/extract.mjs
+      '/api/extract': { target: 'http://localhost:8788', changeOrigin: false },
     },
   },
 })

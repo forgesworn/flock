@@ -44,12 +44,15 @@ const DUSK: Flavor = {
   address_label: '#5c6675', address_label_halo: '#0b0e12',
 }
 
-let registered = false
-/** Register the pmtiles:// protocol with maplibre (idempotent). */
-export function registerPmtilesProtocol(): void {
-  if (registered) return
-  maplibregl.addProtocol('pmtiles', new Protocol().tile)
-  registered = true
+let protocol: Protocol | null = null
+/** Register the pmtiles:// protocol with maplibre (idempotent); returns the shared
+ *  Protocol instance so local (OPFS) archives can be `.add()`ed to it. */
+export function registerPmtilesProtocol(): Protocol {
+  if (!protocol) {
+    protocol = new Protocol()
+    maplibregl.addProtocol('pmtiles', protocol.tile)
+  }
+  return protocol
 }
 
 /** A maplibre style backed by a same-origin PMTiles vector source + local fonts/sprite. */

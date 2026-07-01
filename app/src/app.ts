@@ -74,6 +74,8 @@ let root: HTMLElement
 let toastTimer = 0
 
 let mapView: MapView | null = null
+let offlineSaving = false // "save this area" in flight
+let offlineSavedBytes: number | null = null // saved offline-basemap size for the active circle
 let addMode = false
 let addRadius = 300
 
@@ -641,7 +643,32 @@ function mapPanelInner(): string {
     <div class="row" style="justify-content:space-between;margin-bottom:8px"><strong>Safe places</strong><button class="btn small" data-action="add-zone" data-kind="safe">＋ Add</button></div>
     <div class="zone-list">${safeList}</div>
     <div class="row" style="justify-content:space-between;margin:16px 0 8px"><strong>Private places</strong><button class="btn small" data-action="add-zone" data-kind="noreport">＋ Add</button></div>
-    <div class="zone-list">${privList}</div>`
+    <div class="zone-list">${privList}</div>
+    ${offlineMapControl()}`
+}
+
+// The "save this area" control (see offlineArea.ts). Hidden until the feature flag
+// is on (the extract service must be deployed first — see offlineMapEnabled).
+function offlineMapControl(): string {
+  if (!offlineMapEnabled()) return ''
+  const hasZones = persisted.geofences.length > 0 || persisted.noReportZones.length > 0
+  const saved = offlineSavedBytes != null
+  const mb = saved ? (offlineSavedBytes! / 1e6).toFixed(1) : ''
+  const status = offlineSaving
+    ? '<span class="muted">Saving…</span>'
+    : saved ? `<span class="muted">Saved · ${mb} MB · works offline</span>` : '<span class="muted">Not saved</span>'
+  const buttons = offlineSaving
+    ? '<button class="btn small" disabled>Saving…</button>'
+    : saved
+      ? '<button class="btn small" data-action="save-offline-map">Update</button><button class="btn small ghost" data-action="remove-offline-map">Remove</button>'
+      : `<button class="btn small primary" data-action="save-offline-map"${hasZones ? '' : ' disabled'}>Save map offline</button>`
+  const help = hasZones
+    ? 'Downloads the map around your places once — then it works with no signal, and privately (nobody sees when or where you look).'
+    : 'Add a safe or private place first, then save its map for offline.'
+  return `
+    <div class="row" style="justify-content:space-between;margin:16px 0 8px"><strong>Offline map</strong>${status}</div>
+    <div class="row" style="gap:10px">${buttons}</div>
+    <div class="note">${help}</div>`
 }
 
 // ── Views: onboarding ────────────────────────────────────────────────────────
@@ -795,13 +822,55 @@ async function initMap(): Promise<void> {
   const container = document.getElementById('map')
   if (!container) return
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
-  mapView = await MapView.create(container, fix ?? undefined)
+  mapView = await MapView.create(container, fix ?? undefined, { circleId: activeCircle()?.id })
   mapView.setGeofences(persisted.geofences)
   mapView.setNoReportZones(persisted.noReportZones)
   mapView.onMove(() => { if (addMode) updatePreview() })
   updateMapData()
   wireMapPanel()
   requestAnimationFrame(() => mapView?.map.resize())
+  if (offlineMapEnabled()) void refreshOfflineState()
+}
+
+// ── Offline map ("save this area") ───────────────────────────────────────────
+// Off by default until the extract service (server/extract.mjs) is deployed to the
+// host; enable with VITE_OFFLINE_MAP=1 or localStorage 'flock.offlinemap'='1'.
+function offlineMapEnabled(): boolean {
+  if (import.meta.env.VITE_OFFLINE_MAP === '1') return true
+  try { return localStorage.getItem('flock.offlinemap') === '1' } catch { return false }
+}
+
+async function refreshOfflineState(): Promise<void> {
+  const id = activeCircle()?.id
+  const info = id ? await (await import('./offlineArea')).savedAreaInfo(id) : null
+  offlineSavedBytes = info?.bytes ?? null
+  renderMapPanel()
+}
+
+async function saveOfflineMap(): Promise<void> {
+  const id = activeCircle()?.id
+  if (!id || offlineSaving) return
+  offlineSaving = true
+  renderMapPanel()
+  try {
+    const { saveArea } = await import('./offlineArea')
+    const r = await saveArea(id, persisted.geofences, persisted.noReportZones)
+    offlineSavedBytes = r?.bytes ?? offlineSavedBytes
+    offlineSaving = false
+    await initMap() // re-init so the map now renders from the saved OPFS basemap
+  } catch {
+    offlineSaving = false
+    toast('Could not save the map — is the extract service running?')
+    renderMapPanel()
+  }
+}
+
+async function removeOfflineMap(): Promise<void> {
+  const id = activeCircle()?.id
+  if (!id) return
+  await (await import('./offlineArea')).removeSavedArea(id)
+  offlineSavedBytes = null
+  await initMap()
 }
 
 function wireMapPanel(): void {
@@ -1320,6 +1389,8 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'save-zone': saveZone(); break
     case 'del-zone': delZone(Number(node.dataset.i)); break
     case 'del-noreport': delNoReport(Number(node.dataset.i)); break
+    case 'save-offline-map': void saveOfflineMap(); break
+    case 'remove-offline-map': void removeOfflineMap(); break
     default: break
   }
 }

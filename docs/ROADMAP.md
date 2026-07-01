@@ -142,10 +142,18 @@ Two halves that compose into one feature:
     build, +~2 MB self-hosted glyphs/sprite via `scripts/fetch-basemap-assets.mjs`; **zero
     third-party calls** — confirmed in-browser). Fetched once → cached on-device → the map
     makes **zero** network calls at view time (no when/where-you-look leak) and works
-    offline. **To productionise:** per-circle *"save this area"* (bbox of safe zones +
-    buffer → server-side `pmtiles extract` endpoint → OPFS via `maplibre-offline-pmtiles`);
-    out-of-area disclosure = blank basemap + chip, **never** live-fetch mid-event; amend
-    `sw.js` to preserve the basemap cache across deploys; vector restyle already done.
+    offline. Vector dusk restyle done.
+  - [~] **"Save this area" (Stage 2) — built & verified locally.** `app/src/area.ts`
+    (bbox of a circle's zones + buffer; tested), `server/extract.mjs` (clips the Protomaps
+    build **server-side** so the browser only ever talks to our origin — 413/400 guards,
+    `no-store`, bbox never logged), `app/src/offlineArea.ts` (POST → OPFS → a maplibre style
+    backed by a pmtiles `FileSource`), and a flag-gated UI (`VITE_OFFLINE_MAP`) on the map
+    screen. **Verified in a real browser:** save → 3.7 MB to OPFS → the map renders with
+    **zero** tile-network calls (only same-origin glyph/sprite). **Remaining:** deploy
+    `server/extract.mjs` behind Caddy on the host (discrete step — approach C: on-demand
+    remote extract, nothing hosted); SW-precache glyphs/sprite for *full* offline;
+    out-of-area disclosure (blank basemap + chip, **never** live-fetch mid-event); an e2e
+    (mock the extract endpoint — CI has no `go-pmtiles`).
   - **Multi-relay fan-out** — now unblocked by gift-wrap-everything (Phase A `[~]`);
     single relay = single point of failure.
   - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".
