@@ -4,6 +4,7 @@ import {
   decryptMeetingRequest,
   buildMeetingShareSignal,
   decryptMeetingShare,
+  parseMeetingShare,
   MEETING_REQUEST_TYPE,
   MEETING_SHARE_TYPE,
   type MeetingRequest,
@@ -20,6 +21,20 @@ const req = (o: Partial<MeetingRequest> = {}): MeetingRequest => ({
 })
 const share = (o: Partial<MeetingShare> = {}): MeetingShare => ({
   requestId: 'mtg-1', member: B, geohash: 'gcpvj0', precision: 6, mode: 'cycle', timestamp: NOW, ...o,
+})
+
+describe('parseMeetingShare (non-throwing validation of a decrypted share)', () => {
+  it('returns a well-formed share unchanged', () => {
+    const s = share({ geohash: 'gcpvj0zzz', precision: 9 })
+    expect(parseMeetingShare(s)).toEqual(s)
+  })
+
+  it('returns null for a malformed or non-object payload — never throws', () => {
+    expect(parseMeetingShare(share({ precision: 0 }))).toBeNull() // precision out of range
+    expect(parseMeetingShare({ ...share(), member: 'not-hex' })).toBeNull()
+    expect(parseMeetingShare(null)).toBeNull()
+    expect(parseMeetingShare('nope')).toBeNull()
+  })
 })
 
 describe('meeting-point signals round-trip', () => {

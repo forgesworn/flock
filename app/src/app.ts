@@ -23,7 +23,7 @@ import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
-import { buildInviteWrap, buildReseedWraps, readInvite } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap } from './invite'
 import {
   decideEmission,
   classifyContainment,
@@ -1291,7 +1291,12 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
   const signer = getSigner()
   if (!signer) return
   const payload = await readInvite(signer, e)
-  if (!payload) return
+  if (!payload) {
+    // Not an invite/reseed — maybe a targeted EXACT meeting share to my personal inbox.
+    const exact = await readMeetingExactWrap(signer, e)
+    if (exact) await onExactMeetingShare(exact)
+    return
+  }
   if (payload.t === 'invite') {
     if (persisted.circles.some((c) => c.id === payload.id)) return // already a member
     upsertCircle({
@@ -1315,6 +1320,21 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     dropPresence(existing.id) // old-key pins are meaningless under the new seed
     toast('Circle key was rotated')
     refresh()
+  }
+}
+
+// A contributor sent me (the proposer) their EXACT spot for a meeting I'm running —
+// only I could decrypt it. Merge it (preferring the finer disclosure) and recompute.
+async function onExactMeetingShare(share: MeetingShare): Promise<void> {
+  const me = persisted.identity?.pk
+  for (const c of persisted.circles) {
+    const st = cstate(c.id)
+    if (st.meeting?.id !== share.requestId || st.meeting.setBy !== me) continue // I'm the proposer of a live search
+    if (mergeMeetingShare(st, share)) {
+      await refreshMeetingSuggestion(c.id)
+      refresh()
+    }
+    return
   }
 }
 
@@ -1619,6 +1639,7 @@ function syncRzvTicker(): void {
 // ordinary rendezvous. Coordinates never leave except as a neighbourhood geohash
 // cell, and only from those who actively tap "share" (withhold-by-default holds).
 const MEETING_PRECISION = 6 // geohash chars ≈ neighbourhood; exactly policy's `coarse`
+const MEETING_EXACT_PRECISION = 9 // geohash chars ≈ 5 m; the "Exact" rung, shared only with a named individual
 const MEETING_TIME_BUDGET_MIN = 30 // reachability budget for the on-device isochrones
 const VENUE_SEARCH_RADIUS_M = 1500 // hunt for real venues within ~18 min walk of the fair point
 // Human labels for the fairness strategies (design doc). Only offered when there
@@ -1656,17 +1677,30 @@ async function proposeMeeting(): Promise<void> {
 // Publish my COARSE spot toward the active request. Shared by "propose" (proposer
 // auto-contributes) and the explicit "Share my spot" button. Coarsening to a
 // neighbourhood geohash cell happens here at the edge — the exact fix never leaves.
-async function contributeMeetingShare(): Promise<void> {
+async function contributeMeetingShare(exact = false): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   const cs = c ? cstate(c.id) : null
   if (!c || !id || !cs?.meeting) return
-  if (!fix) { toast('Turn on sharing so we can use your rough spot'); return }
-  const geohash = encode(fix.lat, fix.lon, MEETING_PRECISION)
-  const share: MeetingShare = { requestId: cs.meeting.id, member: id.pk, geohash, precision: MEETING_PRECISION, mode: travelMode, timestamp: nowSec() }
+  const f = fix
+  if (!f) { toast('Turn on sharing so we can use your rough spot'); return }
+  const share: MeetingShare = { requestId: cs.meeting.id, member: id.pk, geohash: encode(f.lat, f.lon, MEETING_PRECISION), precision: MEETING_PRECISION, mode: travelMode, timestamp: nowSec() }
   try {
+    // The group inbox always gets only the coarse neighbourhood cell.
     await publishSignal(await buildMeetingShareSignal({ groupId: c.id, seedHex: c.seedHex, share }), c)
-    cs.meetingShares.set(id.pk, share)
+    mergeMeetingShare(cs, share)
+    // Opt-in: ALSO send my EXACT spot, gift-wrapped to the proposer's personal inbox
+    // — only they can decrypt it; the rest of the group still sees only the cell.
+    if (exact && cs.meeting.setBy !== id.pk) {
+      const signer = getSigner()
+      if (signer) {
+        const exactShare: MeetingShare = { requestId: cs.meeting.id, member: id.pk, geohash: encode(f.lat, f.lon, MEETING_EXACT_PRECISION), precision: MEETING_EXACT_PRECISION, mode: travelMode, timestamp: nowSec() }
+        try {
+          await svc.publishSigned(persisted.relayUrls, await buildMeetingExactWrap(signer, cs.meeting.setBy, exactShare) as never)
+          toast(`Shared your exact spot with ${nameFor(cs.meeting.setBy)}`)
+        } catch { /* best effort — the coarse share already reached the group */ }
+      }
+    }
     await refreshMeetingSuggestion(c.id)
     render()
   } catch { toast('Could not share your spot') }
@@ -1720,6 +1754,17 @@ function meetingParticipants(st: CircleState): Array<{ lat: number; lon: number;
     const d = decode(s.geohash)
     return { lat: d.lat, lon: d.lon, label: nameFor(s.member) }
   })
+}
+
+// Store a contribution, preferring the FINER disclosure when we already hold one for
+// this member — an exact share (gift-wrapped to me, the proposer) must not be
+// overwritten by a coarser group-inbox echo arriving later, whichever order they
+// land in. Returns whether anything changed (so the caller can skip a recompute).
+function mergeMeetingShare(st: CircleState, share: MeetingShare): boolean {
+  const existing = st.meetingShares.get(share.member)
+  if (existing && share.precision < existing.precision) return false
+  st.meetingShares.set(share.member, share)
+  return true
 }
 
 // Re-rank the already-fetched venues under the current fairness strategy — NO
@@ -1791,12 +1836,15 @@ function meetingCard(): string {
   const dismissed = meetingDismissed.has(m.id)
   const count = cs.meetingShares.size
 
+  const proposerName = esc(nameFor(m.setBy))
   const prompt = (!iShared && !dismissed)
     ? `<div class="note">Share a rough spot (neighbourhood only) so we can pick somewhere fair.</div>
-       <div class="row" style="gap:10px">
+       <div class="row" style="gap:10px;flex-wrap:wrap">
          <button class="btn small primary" data-action="share-meeting">Share my spot</button>
+         ${!iProposed ? `<button class="btn small" data-action="share-meeting-exact">Exact, only to ${proposerName}</button>` : ''}
          <button class="btn small ghost" data-action="dismiss-meeting">Not now</button>
-       </div>`
+       </div>
+       ${!iProposed ? `<div class="note" style="font-size:12px;opacity:0.85">“Exact” shares your precise spot with ${proposerName} alone — the group still sees only your neighbourhood.</div>` : ''}`
     : `<div class="note">${count === 1 ? '1 person has' : `${count} people have`} shared a rough spot${iShared ? " — you're in" : ''}.</div>`
 
   let suggestion = ''
@@ -1914,6 +1962,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'rzv-pick-cancel': cancelRzvPick(); break
     case 'propose-meeting': void proposeMeeting(); break
     case 'share-meeting': void contributeMeetingShare(); break
+    case 'share-meeting-exact': void contributeMeetingShare(true); break
     case 'dismiss-meeting': dismissMeeting(); break
     case 'set-meeting-rzv': void setMeetingAsRendezvous(); break
     case 'mtg-fairness': setMeetingFairness(node.dataset.fair as FairnessStrategy); break
@@ -2486,8 +2535,9 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       }
     } else if (t === MEETING_SHARE_TYPE) {
       const share = await decryptMeetingShare(c.seedHex, e.content)
-      if (st.meeting && share.requestId === st.meeting.id) {
-        st.meetingShares.set(share.member, share)
+      // Prefer a finer disclosure already held (an exact share via my personal inbox
+      // must not be clobbered by this coarser group echo — see mergeMeetingShare).
+      if (st.meeting && share.requestId === st.meeting.id && mergeMeetingShare(st, share)) {
         await refreshMeetingSuggestion(c.id) // proposer-only inside; recomputes the fair point
       }
     } else if (t === OFFGRID_SIGNAL_TYPE) {

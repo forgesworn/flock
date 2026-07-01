@@ -5,6 +5,7 @@
 
 import { giftWrap, giftUnwrap } from './giftwrap'
 import { personalInboxTag } from './keys'
+import { parseMeetingShare, type MeetingShare } from '@forgesworn/flock'
 import type { FlockSigner, SignedEvent } from './signer'
 import type { Mode } from './store'
 
@@ -30,6 +31,34 @@ export function buildInviteWrap(signer: FlockSigner, recipientPk: string, payloa
 /** Gift-wrap a reseed payload to many recipients. */
 export function buildReseedWraps(signer: FlockSigner, recipientPks: string[], payload: InvitePayload): Promise<SignedEvent[]> {
   return Promise.all(recipientPks.map((pk) => buildInviteWrap(signer, pk, payload)))
+}
+
+// An EXACT meeting-point share, targeted at ONE recipient (the proposer) via the
+// same personal-inbox channel as invites. The group inbox still gets only the
+// coarse cell; this rides gift-wrap so the precise spot reaches that one person and
+// no one else. Same rumour kind as invites; distinguished by the payload `t`.
+interface MeetingExactPayload { t: 'mtg-loc'; share: MeetingShare }
+
+/** Gift-wrap an EXACT meeting-point share to one recipient (the proposer). Encrypted
+ *  to their real key; filed under `personalInboxTag` so the npub stays off the wire.
+ *  Only they can decrypt the exact spot — everyone else sees only the coarse cell. */
+export function buildMeetingExactWrap(signer: FlockSigner, recipientPk: string, share: MeetingShare): Promise<SignedEvent> {
+  const payload: MeetingExactPayload = { t: 'mtg-loc', share }
+  return giftWrap(signer, recipientPk, { kind: RUMOR_KIND, content: JSON.stringify(payload), tags: [] }, personalInboxTag(recipientPk))
+}
+
+/** Unwrap a personal-inbox wrap as an exact meeting share; null if it isn't one (or
+ *  isn't addressed to us). Validated via the library's non-throwing parser. */
+export async function readMeetingExactWrap(signer: FlockSigner, wrap: { pubkey: string; content: string }): Promise<MeetingShare | null> {
+  const rumor = await giftUnwrap((pk, ct) => signer.nip44Decrypt(pk, ct), wrap)
+  if (!rumor) return null
+  try {
+    const o = JSON.parse(rumor.content) as Record<string, unknown>
+    if (o.t !== 'mtg-loc') return null
+    return parseMeetingShare(o.share)
+  } catch {
+    return null
+  }
 }
 
 /** Unwrap a gift wrap addressed to us (via the signer); returns the invite payload or null. */

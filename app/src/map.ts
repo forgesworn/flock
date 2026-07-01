@@ -259,7 +259,10 @@ export class MapView {
     this.contribMarkers = []
     for (const p of points) {
       const el = document.createElement('div')
-      el.className = 'map-pin contrib'
+      // A sub-halo-threshold radius means an EXACT share (a precise dot); a coarse
+      // cell gets the "rough area" blob. The class lets the exact dot read sharper.
+      const exact = (p.radiusMetres ?? 0) < HALO_MIN_METRES
+      el.className = `map-pin contrib${exact ? ' exact' : ''}`
       // textContent for the (untrusted) petname/profile label; never innerHTML.
       el.innerHTML = '<span class="tag"></span><span class="dot"></span>'
       ;(el.querySelector('.tag') as HTMLElement).textContent = p.label

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { generateSecretKey } from 'nostr-tools/pure'
 import { makeLocalSigner } from './signer'
-import { buildInviteWrap, buildReseedWraps, readInvite, type InvitePayload } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap, type InvitePayload } from './invite'
 import { personalInboxTag } from './keys'
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
@@ -42,5 +42,38 @@ describe('signer-based NIP-59 gift-wrapped invites', () => {
     expect(await readInvite(bob, wraps[0])).toEqual(reseed)
     expect(await readInvite(carol, wraps[1])).toEqual(reseed)
     expect(await readInvite(carol, wraps[0])).toBeNull()
+  })
+})
+
+describe('targeted EXACT meeting-point share (personal-inbox gift-wrap)', () => {
+  const exactShare = { requestId: 'mtg-1', member: 'a'.repeat(64), geohash: 'gcpvj0zab', precision: 9, mode: 'walk' as const, timestamp: 1_700_000_000 }
+
+  it('round-trips to the one recipient, filed under their personal-inbox tag', async () => {
+    const contributor = signer()
+    const proposer = signer()
+    const wrap = await buildMeetingExactWrap(contributor, proposer.pubkey, exactShare)
+    expect(wrap.kind).toBe(1059)
+    // Routed to the proposer's derived tag, never their npub — nothing on the wire ties it to them.
+    const pTag = wrap.tags.find((t) => t[0] === 'p')?.[1]
+    expect(pTag).toBe(personalInboxTag(proposer.pubkey))
+    expect(pTag).not.toBe(proposer.pubkey)
+    expect(await readMeetingExactWrap(proposer, wrap)).toEqual(exactShare)
+  })
+
+  it('the exact spot is readable ONLY by the named recipient (the privacy invariant)', async () => {
+    const contributor = signer()
+    const proposer = signer()
+    const eve = signer()
+    const wrap = await buildMeetingExactWrap(contributor, proposer.pubkey, exactShare)
+    expect(await readMeetingExactWrap(eve, wrap)).toBeNull()
+  })
+
+  it('an invite is never mistaken for an exact share, and vice versa (fall-through dispatch)', async () => {
+    const alice = signer()
+    const bob = signer()
+    const inviteWrap = await buildInviteWrap(alice, bob.pubkey, payload)
+    expect(await readMeetingExactWrap(bob, inviteWrap)).toBeNull() // an invite is not an exact share
+    const exactWrap = await buildMeetingExactWrap(alice, bob.pubkey, exactShare)
+    expect(await readInvite(bob, exactWrap)).toBeNull() // an exact share is not an invite
   })
 })

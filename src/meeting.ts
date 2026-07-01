@@ -107,3 +107,18 @@ export async function decryptMeetingShare(seedHex: string, content: string): Pro
   const plaintext = await decryptEnvelope(deriveGroupKey(seedHex), content)
   return validateShare(JSON.parse(plaintext) as Record<string, unknown>)
 }
+
+/**
+ * Parse + validate a MeetingShare from an untrusted, already-decrypted object —
+ * non-throwing (returns null on any malformation). The coarse group-inbox path uses
+ * {@link decryptMeetingShare} (which validates as it decrypts); this is for an
+ * **exact** share that arrived gift-wrapped to a member's personal inbox, where the
+ * transport already decrypted the payload and only shape-validation remains.
+ */
+export function parseMeetingShare(o: unknown): MeetingShare | null {
+  try {
+    return validateShare(o as Record<string, unknown>)
+  } catch {
+    return null
+  }
+}

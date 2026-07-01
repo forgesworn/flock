@@ -448,6 +448,8 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 /* Meeting-point contributor pin — soft violet, distinct from live presence (blue). */
 .map-pin.contrib .dot { background: #a78bfa; box-shadow: 0 0 0 1px rgba(255,255,255,0.25); }
 .map-pin.contrib .tag { color: #cbb7fb; border-color: #6d5bbf; }
+/* An EXACT contributor (shared precisely, only with me) reads as a crisp, glowing dot. */
+.map-pin.contrib.exact .dot { background: #d6c6ff; box-shadow: 0 0 9px #a78bfa; }
 
 /* Suggested meeting venue — a pin drop, distinct from the rendezvous flag. */
 .venue-pin { display: flex; flex-direction: column; align-items: center; }
