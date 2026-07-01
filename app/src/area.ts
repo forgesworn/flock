@@ -64,3 +64,8 @@ export function bboxSpanMetres(b: BBox): { widthMetres: number; heightMetres: nu
 export function bboxToExtractArg(b: BBox): string {
   return [b.minLon, b.minLat, b.maxLon, b.maxLat].join(',')
 }
+
+/** Whether a point falls within a bbox — used to flag members outside a saved map. */
+export function bboxContains(b: BBox, lat: number, lon: number): boolean {
+  return lon >= b.minLon && lon <= b.maxLon && lat >= b.minLat && lat <= b.maxLat
+}

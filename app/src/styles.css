@@ -414,6 +414,16 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .crosshair[hidden] { display: none; }
 .crosshair::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--calm); }
 
+/* Out-of-area chip: a member pin falls beyond the saved offline map's bounds. */
+.offline-oob {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 4;
+  max-width: calc(100% - 24px); padding: 6px 12px; border-radius: 999px;
+  background: rgba(14, 17, 22, 0.86); backdrop-filter: blur(6px);
+  border: 1px solid var(--warn-dim); color: var(--warn);
+  font-size: 12.5px; font-weight: 600; white-space: nowrap; pointer-events: none;
+}
+.offline-oob[hidden] { display: none; }
+
 .map-pin { display: flex; flex-direction: column; align-items: center; }
 .map-pin .tag {
   font-size: 11px; font-weight: 700;

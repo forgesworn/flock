@@ -15,6 +15,7 @@ import { encode, decode } from 'geohash-kit'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
+import { bboxContains, type BBox } from './area'
 import { buildInviteWrap, buildReseedWraps, readInvite } from './invite'
 import {
   decideEmission,
@@ -76,6 +77,7 @@ let toastTimer = 0
 let mapView: MapView | null = null
 let offlineSaving = false // "save this area" in flight
 let offlineSavedBytes: number | null = null // saved offline-basemap size for the active circle
+let offlineBBox: BBox | null = null // bounds of the active circle's saved map (null = not offline)
 let addMode = false
 let addRadius = 300
 
@@ -588,6 +590,7 @@ function mapView_screen(): string {
       <div class="map-stage">
         <div id="map" class="map-canvas"></div>
         <div id="crosshair" class="crosshair" hidden></div>
+        <div id="offline-oob" class="offline-oob" hidden></div>
       </div>
       <div class="map-panel" id="map-panel">${mapPanelInner()}</div>
     </div>`
@@ -842,9 +845,11 @@ function offlineMapEnabled(): boolean {
 
 async function refreshOfflineState(): Promise<void> {
   const id = activeCircle()?.id
-  const info = id ? await (await import('./offlineArea')).savedAreaInfo(id) : null
-  offlineSavedBytes = info?.bytes ?? null
+  const oa = await import('./offlineArea')
+  offlineSavedBytes = id ? (await oa.savedAreaInfo(id))?.bytes ?? null : null
+  offlineBBox = id ? await oa.savedAreaBBox(id) : null
   renderMapPanel()
+  updateMapData() // re-evaluate the out-of-area chip against the loaded bounds
 }
 
 async function saveOfflineMap(): Promise<void> {
@@ -917,7 +922,18 @@ function memberPoints(): MapPoint[] {
     }
   })
 }
-function updateMapData(): void { mapView?.setMembers(memberPoints()) }
+function updateMapData(): void {
+  const pts = memberPoints()
+  mapView?.setMembers(pts)
+  // Out-of-area chip: in offline mode, flag any pin beyond the saved map's bounds.
+  // We never live-fetch to cover it — leaking a viewport mid-event is the wrong call.
+  const el = document.getElementById('offline-oob')
+  if (!el) return
+  const bbox = offlineBBox
+  const outside = bbox ? pts.filter((p) => !bboxContains(bbox, p.lat, p.lon)) : []
+  el.hidden = outside.length === 0
+  if (outside.length) el.textContent = `⚠ ${outside.length} ${outside.length === 1 ? 'pin' : 'pins'} outside your saved map`
+}
 
 function saveZone(): void {
   if (!mapView) return

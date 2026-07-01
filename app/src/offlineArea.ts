@@ -8,7 +8,7 @@
 
 import { PMTiles, FileSource } from 'pmtiles'
 import type maplibregl from 'maplibre-gl'
-import { areaBounds } from './area'
+import { areaBounds, type BBox } from './area'
 import { registerPmtilesProtocol, pmtilesStyle } from './basemap'
 import type { Geofence, NoReportZone } from '@forgesworn/flock'
 
@@ -45,6 +45,16 @@ export async function savedAreaInfo(circleId: string): Promise<{ bytes: number }
   try {
     const fh = await (await opfsRoot()).getFileHandle(opfsName(circleId))
     return { bytes: (await fh.getFile()).size }
+  } catch { return null }
+}
+
+/** The saved basemap's covered bounds (from the archive header), or null if none is
+ *  saved — used to flag members who fall outside the offline map. */
+export async function savedAreaBBox(circleId: string): Promise<BBox | null> {
+  try {
+    const fh = await (await opfsRoot()).getFileHandle(opfsName(circleId))
+    const h = await new PMTiles(new FileSource(await fh.getFile())).getHeader()
+    return { minLon: h.minLon, minLat: h.minLat, maxLon: h.maxLon, maxLat: h.maxLat }
   } catch { return null }
 }
 

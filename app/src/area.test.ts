@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { areaBounds, bboxSpanMetres, bboxToExtractArg } from './area'
+import { areaBounds, bboxSpanMetres, bboxToExtractArg, bboxContains } from './area'
 import type { Geofence, NoReportZone } from '@forgesworn/flock'
 
 const LONDON = { lat: 51.5074, lon: -0.1278 }
@@ -58,5 +58,14 @@ describe('bboxSpanMetres', () => {
 describe('bboxToExtractArg', () => {
   it('formats min_lon,min_lat,max_lon,max_lat for go-pmtiles --bbox', () => {
     expect(bboxToExtractArg({ minLon: -1.62, minLat: 53.94, maxLon: -1.46, maxLat: 54.04 })).toBe('-1.62,53.94,-1.46,54.04')
+  })
+})
+
+describe('bboxContains', () => {
+  const HARROGATE = { minLon: -1.62, minLat: 53.94, maxLon: -1.46, maxLat: 54.04 }
+  it('is true inside the box and false outside (either axis)', () => {
+    expect(bboxContains(HARROGATE, 53.99, -1.54)).toBe(true) // centre
+    expect(bboxContains(HARROGATE, 53.99, -1.30)).toBe(false) // east of it (Knaresborough-ish)
+    expect(bboxContains(HARROGATE, 53.80, -1.54)).toBe(false) // south of it (Leeds-ish)
   })
 })
