@@ -195,7 +195,10 @@ export class MapView {
     for (const p of points) {
       const el = document.createElement('div')
       el.className = `map-pin ${p.status}`
-      el.innerHTML = `<span class="tag">${p.label}</span><span class="dot"></span>`
+      // textContent, not innerHTML: the label is now a member-chosen petname / public
+      // profile name (untrusted), so it must never be interpolated into markup.
+      el.innerHTML = '<span class="tag"></span><span class="dot"></span>'
+      ;(el.querySelector('.tag') as HTMLElement).textContent = p.label
       this.markers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(this.map))
     }
     // "Rough area" halos — one per pin whose disclosed precision is coarse enough

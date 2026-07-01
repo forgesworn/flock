@@ -85,8 +85,15 @@ and a real launch.
   5-min heartbeat; breach 30 s / 3-min), both under the 600 s "stale" window so a stationary member still reads as
   "active". Explicit **SOS/pick-up bypass** the gate and always fire. Cadence is per-circle and reset on reseed.
   The pure gate is unit-tested (7 cases: first-send, floor, cell-change, heartbeat, clock-skew); the night-out
-  map e2e asserts the halo renders. **Follow-ups:** friendlier pin labels (petname, not 2-char initials);
-  presence survives a refresh (beacons are in-memory only today).
+  map e2e asserts the halo renders.
+- [x] **Presence polish — petname pins + survives a refresh** (`app/src/store.ts`, `map.ts`). Pins now show a
+  member's **petname** (→ opted-in public name → 2-char initials; never a long npub) instead of hex initials —
+  rendered via `textContent`, which also **closes an XSS surface** now that a pin label is member-chosen rather
+  than hex. **Presence survives a refresh / PWA relaunch**: beacons are cached per-circle in localStorage
+  (`prunePresence` — a 6 h age cap + drop-circles-you've-left, pruned on load), rehydrated on mount, and dropped
+  on reseed/leave/disband — so a reload no longer blanks the map while it waits up to 5 min for a peer's next
+  beacon. Cache is on-device only (no new metadata leaves the phone). 6 new unit tests (`store.presence.test.ts`);
+  the night-out map e2e now nicknames A, reloads B, and asserts A's rough area **and** petname persist. **Follow-ups:** none.
 
 ## Phase D — Identity & social
 

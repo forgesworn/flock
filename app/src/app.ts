@@ -129,6 +129,28 @@ function cstate(id: string): CircleState {
   return s
 }
 
+// Presence cache — mirror member beacons to localStorage so map pins survive a
+// refresh / PWA relaunch (a peer's next beacon can be up to a heartbeat — 5 min —
+// away, which would otherwise leave the map blank on reload). The live Map stays the
+// source of truth; this just lets a fresh load rehydrate it. Pruned by age + circle
+// existence in store.load(). On-device only — no new metadata leaves the phone.
+function saveBeacon(circleId: string, b: MemberBeacon): void {
+  cstate(circleId).beacons.set(b.member, b)
+  persisted.presence[circleId] = [...cstate(circleId).beacons.values()]
+  store.save(persisted)
+}
+/** Forget a circle's cached pins (on reseed/leave) so stale positions never resurface. */
+function dropPresence(circleId: string): void {
+  if (persisted.presence[circleId]) { delete persisted.presence[circleId]; store.save(persisted) }
+}
+/** Restore cached pins into live state on startup so a reload doesn't blank the map. */
+function rehydratePresence(): void {
+  for (const [cid, list] of Object.entries(persisted.presence)) {
+    const st = cstate(cid)
+    for (const b of list) st.beacons.set(b.member, b)
+  }
+}
+
 // ── Active circle + writers ──────────────────────────────────────────────────
 function activeCircle(): store.Circle | null {
   return persisted.circles.find((c) => c.id === persisted.activeCircleId) ?? persisted.circles[0] ?? null
@@ -158,6 +180,7 @@ function removeCircle(id: string): void {
   persisted.circles = persisted.circles.filter((c) => c.id !== id)
   circleStates.delete(id)
   beaconCadence.delete(id)
+  delete persisted.presence[id]
   if (persisted.activeCircleId === id) persisted.activeCircleId = persisted.circles[0]?.id ?? null
   store.save(persisted)
 }
@@ -166,7 +189,7 @@ function sweepExpired(): boolean {
   const now = nowSec()
   const live = persisted.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
   if (live.length === persisted.circles.length) return false
-  for (const c of persisted.circles) if (!live.includes(c)) { circleStates.delete(c.id); beaconCadence.delete(c.id) }
+  for (const c of persisted.circles) if (!live.includes(c)) { circleStates.delete(c.id); beaconCadence.delete(c.id); delete persisted.presence[c.id] }
   persisted.circles = live
   if (!live.some((c) => c.id === persisted.activeCircleId)) persisted.activeCircleId = live[0]?.id ?? null
   store.save(persisted)
@@ -233,6 +256,16 @@ function nameFor(pk: string): string {
   return shortNpub(pk)
 }
 
+/** Short label for a map pin: my private petname → public name (opted-in) → 2-char
+ *  initials. Falls back to initials, never a long npub, so the pin tag stays tidy;
+ *  caps a long name so one member can't stretch the tag across the map. Rendered via
+ *  textContent in map.ts, so it is not (and must not be double-) HTML-escaped here. */
+function pinLabel(pk: string): string {
+  const name = (persisted.petnames[pk] || (persisted.showProfiles ? getProfile(pk)?.name : '') || '').trim()
+  if (!name) return initials(pk)
+  return name.length > 14 ? `${name.slice(0, 13)}…` : name
+}
+
 /** Avatar markup — a public picture (opted-in) or initials. `isMe` shows "You". */
 function avatarHtml(pk: string, isMe: boolean, small = false): string {
   const cls = small ? 'avatar small' : 'avatar'
@@ -263,6 +296,7 @@ const ICON = {
 // ── Mount / render ──────────────────────────────────────────────────────────
 export function mount(el: HTMLElement): void {
   root = el
+  rehydratePresence() // restore cached member pins so a refresh doesn't blank the map
   store.save(persisted) // persist any legacy→multi-circle migration / pruning straight away
   render()
   void restoreSignet()
@@ -963,7 +997,7 @@ function memberPoints(): MapPoint[] {
       member: e.member,
       lat: d.lat,
       lon: d.lon,
-      label: e.member === me ? 'You' : initials(e.member),
+      label: e.member === me ? 'You' : pinLabel(e.member),
       status: st.alerts.has(e.member) ? 'alert' as const : e.status,
       // Show the disclosed area at its true precision, so a coarse share reads as
       // "roughly here" rather than a deceptively exact pin.
@@ -1124,6 +1158,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     const st = cstate(existing.id)
     st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
+    dropPresence(existing.id) // old-key pins are meaningless under the new seed
     toast('Circle key was rotated')
     refresh()
   }
@@ -1165,6 +1200,7 @@ async function reseedCircle(removePk?: string): Promise<void> {
     const st = cstate(c.id)
     st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
+    dropPresence(c.id) // old-key pins are meaningless under the new seed
     toast(removePk ? 'Member removed & key rotated' : 'Circle key rotated')
     render()
   } catch { toast('Reseed failed') }
@@ -1604,7 +1640,7 @@ async function autoEmit(): Promise<void> {
     await publishSignal(template, c)
     // Only record the send (local pin + cadence) once a relay has accepted it, so a
     // transient failure is retried on the next fix rather than silently swallowed.
-    cstate(c.id).beacons.set(id.pk, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
+    saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
     beaconCadence.set(c.id, { lastGeohash: geohash, lastSentAt: nowSec() })
   } catch { /* no relay accepted — leave cadence untouched so the next fix retries */ }
   refresh()
@@ -1644,7 +1680,7 @@ async function emit(trigger: 'pickup' | 'help'): Promise<void> {
       }
       const geohash = encode(position.lat, position.lon, plan.precision)
       template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision })
-      cstate(c.id).beacons.set(id.pk, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
+      saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
     }
     await publishSignal(template, c)
     toast(trigger === 'help' ? 'Help sent to your circle' : 'Pick-up request sent')
@@ -1808,10 +1844,10 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       const who = a.member || e.pubkey
       st.alerts.set(who, e.created_at)
       if (!me || e.pubkey !== me.pk) { alertActive = true; toast(`🚨 Help raised in ${c.name}`) }
-      if (a.geohash) st.beacons.set(who, { member: who, geohash: a.geohash, precision: a.precision, timestamp: a.timestamp || e.created_at })
+      if (a.geohash) saveBeacon(c.id, { member: who, geohash: a.geohash, precision: a.precision, timestamp: a.timestamp || e.created_at })
     } else if (t === 'beacon' || t === 'breach' || t === 'pickup') {
       const p = await decryptBeacon(deriveBeaconKey(c.seedHex), e.content)
-      st.beacons.set(e.pubkey, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
+      saveBeacon(c.id, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
       if (t === 'pickup' && (!me || e.pubkey !== me.pk)) toast(`Pick-up request in ${c.name}`)
     } else if (t === CHECKIN_SIGNAL_TYPE) {
       const ci = await decryptCheckIn(c.seedHex, e.content)

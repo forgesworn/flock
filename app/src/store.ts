@@ -3,7 +3,7 @@
 
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { decode as nip19decode } from 'nostr-tools/nip19'
-import type { Geofence, NoReportZone } from '@forgesworn/flock'
+import type { Geofence, NoReportZone, MemberBeacon } from '@forgesworn/flock'
 import { resolveRelays } from './relays'
 import { deriveCircleSeed } from './keys'
 
@@ -40,6 +40,10 @@ export interface Persisted {
   offGridUntil?: number
   /** Local, private nicknames for members (pubkey → name). Never leaves the device. */
   petnames: Record<string, string>
+  /** Cached member beacons per circle (id → beacons) so map pins survive a refresh
+   *  or a PWA relaunch. A convenience cache only — pruned by age + circle existence
+   *  on load; live beacons always overwrite. On-device only, like everything here. */
+  presence: Record<string, MemberBeacon[]>
   /** Opt-in: fetch public kind:0 profiles (names/avatars) from public relays. Default off. */
   showProfiles?: boolean
   /** How the identity authenticates: a local key, or a Signet/bunker signer. */
@@ -50,6 +54,32 @@ export interface Persisted {
 
 const KEY = 'flock:v1'
 
+/** Cached presence beacons older than this are dropped on load — a pin from hours
+ *  ago is noise, not safety info. Generous enough to survive an evening of refreshes
+ *  (a night-out circle), tight enough not to resurrect yesterday's positions. */
+export const PRESENCE_MAX_AGE_SEC = 6 * 60 * 60
+
+/**
+ * Keep only cached beacons that are recent enough AND belong to a circle that still
+ * exists — never resurrect an ancient pin, or leak presence from a circle you've
+ * left / disbanded / reseeded. Pure; returns a fresh object.
+ */
+export function prunePresence(
+  presence: Record<string, MemberBeacon[]>,
+  circleIds: string[],
+  now: number,
+  maxAgeSec: number,
+): Record<string, MemberBeacon[]> {
+  const live = new Set(circleIds)
+  const out: Record<string, MemberBeacon[]> = {}
+  for (const [cid, list] of Object.entries(presence)) {
+    if (!live.has(cid)) continue
+    const kept = list.filter((b) => now - b.timestamp <= maxAgeSec)
+    if (kept.length) out[cid] = kept
+  }
+  return out
+}
+
 const toHex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 export const fromHex = (h: string): Uint8Array =>
@@ -57,7 +87,7 @@ export const fromHex = (h: string): Uint8Array =>
 const randHex = (n: number): string => toHex(crypto.getRandomValues(new Uint8Array(n)))
 
 export function load(): Persisted {
-  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrls: resolveRelays(), geofences: [], noReportZones: [], petnames: {} }
+  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrls: resolveRelays(), geofences: [], noReportZones: [], petnames: {}, presence: {} }
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return fresh
@@ -77,6 +107,8 @@ export function load(): Persisted {
     if (!state.circles.some((c) => c.id === state.activeCircleId)) {
       state.activeCircleId = state.circles[0]?.id ?? null
     }
+    // Rehydrate cached presence, but drop ancient pins and any circle we've since left.
+    state.presence = prunePresence(o.presence ?? {}, state.circles.map((c) => c.id), now, PRESENCE_MAX_AGE_SEC)
     return state
   } catch { /* ignore corrupt state */ }
   return fresh

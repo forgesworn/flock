@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, memberPill, PARIS } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, memberPill, setPetname, PARIS } from './fixtures'
 
 // Single-person map UI: the two zone kinds the privacy model rests on.
 // "Safe places" (you're told if I leave) and "Private places" (I stay hidden,
@@ -72,6 +72,23 @@ test.describe('map — safe & private places', () => {
     // A shared coarsely (night-out geohash-6, ~600 m) — so the pin must carry a
     // "rough area" halo, not a deceptively exact point. Poll the drawn halo count
     // (the source may populate a beat after the marker on first style load).
+    await expect
+      .poll(() => B.evaluate(() => (window as unknown as { flockMapView?: { memberAreaCount(): number } }).flockMapView?.memberAreaCount() ?? 0), { timeout: 15_000 })
+      .toBeGreaterThan(0)
+
+    // Friendlier label: B nicknames A, and the pin shows the petname — not hex initials.
+    await setPetname(B, 'Alex')
+    await gotoTab(B, 'map')
+    await expect(B.locator('.map-pin .tag', { hasText: 'Alex' })).toBeVisible()
+
+    // Presence + petname must survive a refresh. Beacons and nicknames are cached
+    // on-device, so reloading B still shows A's rough area labelled "Alex" — without
+    // waiting up to 5 min for A's next beacon. A is stationary (its heartbeat won't
+    // re-fire in this window), so this proves the on-device cache, not a re-broadcast.
+    await B.reload()
+    await gotoTab(B, 'map')
+    await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
+    await expect(B.locator('.map-pin .tag', { hasText: 'Alex' })).toBeVisible()
     await expect
       .poll(() => B.evaluate(() => (window as unknown as { flockMapView?: { memberAreaCount(): number } }).flockMapView?.memberAreaCount() ?? 0), { timeout: 15_000 })
       .toBeGreaterThan(0)
