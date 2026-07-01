@@ -509,6 +509,19 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .icon-btn { background: transparent; border: 1px solid var(--line); color: var(--muted); width: 30px; height: 30px; border-radius: 9px; font-size: 13px; flex: none; cursor: pointer; }
 .member.editing .input { padding: 9px 12px; font-size: 14px; }
 
+/* ── Spoken pick-up verification ───────────────────────────────────────── */
+/* The word tile: prominent, read-aloud. user-select:none so the silent long-press
+   to reveal the duress word never pops a text-selection menu (which would be a tell). */
+.word-tile {
+  font-family: var(--font-display); font-size: 34px; font-weight: 560; letter-spacing: -0.01em;
+  text-align: center; padding: 20px 14px; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 14px;
+  user-select: none; -webkit-user-select: none; cursor: pointer; touch-action: none;
+}
+.note.subtle { color: var(--faint); font-size: 12px; }
+.verify-ok { color: var(--safe); font-weight: 600; text-align: center; padding: 4px 0; }
+.verify-no { color: var(--alert); font-weight: 600; text-align: center; padding: 4px 0; }
+
 /* ── Settings switch ───────────────────────────────────────────────────── */
 .switch { width: 46px; height: 28px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); position: relative; flex: none; cursor: pointer; transition: background .15s; }
 .switch .knob { position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }

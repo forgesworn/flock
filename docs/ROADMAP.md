@@ -104,7 +104,26 @@ and a real launch.
   (**off by default** — fetching tells public relays which pubkeys you're looking
   up). Inline nickname edit on the Circle screen; settings toggle. Shown
   everywhere (members, alerts, buzz, rendezvous).
-- [ ] **canary spoken-verify** — "is this really my parent picking me up?" pick-up confirmation.
+- [x] **canary spoken-verify — "is this really my parent, and are they safe?"** (`src/spokenverify.ts`,
+  Circle screen). A **face-to-face, on-device, zero-relay** pick-up identity check: both phones derive the
+  same rotating word from the shared circle seed + a time-based counter (canary `getCounter`, flock-fixed at
+  a **1 h rotation, ±1 tolerance** in one audited `SPOKEN_VERIFY` block), so the collector reads a word aloud
+  ("Prove it's me") and the child confirms it locally ("Check someone") — **nothing is published**, so there's
+  no metadata and no battery (squarely on the minimal-footprint north star), and an impostor who lacks the seed
+  simply can't produce the word. **Coercion resistance is built in:** every member also has a **collision-avoided
+  duress word**; under coercion the collector reads *that* instead — it verifies as an **identical ✓** (the UI is
+  observationally identical, invariants #1/#2) yet **silently raises the circle `help` alarm** naming the coerced
+  member (via the existing duress-key path, invariant #3). **Tell-safe by construction:** an alert whose *subject*
+  differs from its *sender* is only ever a spoken-verify duress, so the inbound guard keeps it off **both** the
+  coerced person's and the checker's screens (a coercer may be watching either) — only the *other* guardians light
+  up. A check only detects duress for members your device already knows (roster) — inherent, and correct (you
+  verify people in your circle). Pure lib (`spokenWordsFor` / `checkSpokenWord` / `spokenCounter`), **+17 unit
+  tests** incl. the two SAFETY invariants (a duress word never reads as plain `verified`; the verify word never
+  reads as `duress`); a two-part e2e proves face-to-face verify + impostor-reject (2 people) and the **silent
+  duress alarm** reaching a third guardian while the checker and the coerced collector stay calm (3 people).
+  **Follow-ups:** surface an alert about a subject not yet on a guardian's roster (add `ensureMember(subject)` to
+  the help path); a discreet on-tile duress reveal is a silent long-press (no visible affordance) — worth an
+  onboarding note.
 - [ ] **Trust** — `nostr-attestations` / `nostr-veil` vouching (optional).
 
 ## Phase E — Recovery & resilience

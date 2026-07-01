@@ -54,6 +54,10 @@
     "./offgrid": {
       "types": "./dist/offgrid.d.ts",
       "import": "./dist/offgrid.js"
+    },
+    "./spokenverify": {
+      "types": "./dist/spokenverify.d.ts",
+      "import": "./dist/spokenverify.js"
     }
   },
   "files": [

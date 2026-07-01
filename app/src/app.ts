@@ -58,6 +58,9 @@ import {
   decryptBeacon,
   deriveDuressKey,
   decryptDuressAlert,
+  spokenCounter,
+  spokenWordsFor,
+  checkSpokenWord,
   type MemberBeacon,
   type CircleGeofence,
   type Geofence,
@@ -121,6 +124,9 @@ let darkDurSec = 3600 // chosen break length (sec); -1 = custom (read from input
 let addZoneKind: 'safe' | 'noreport' = 'safe' // which kind of zone the map editor is adding
 let newZonePolicy: 'withhold' | 'coarse' = 'withhold' // suppression strength for a new no-report zone
 let editingPetname: string | null = null // pubkey whose nickname is being edited inline
+let pickupPanel: 'show' | 'check' | null = null // spoken pick-up verify panel, if open
+let pickupOutcome: 'pass' | 'fail' | null = null // last check result (duress renders as pass — no tell)
+let showDuressWord = false // "prove it's me" tile is silently showing the duress word
 
 // Per-circle live state — signals are circle-scoped, so beacons/alerts/etc. from
 // one circle must never bleed into another. Keyed by circle id.
@@ -312,6 +318,12 @@ export function mount(el: HTMLElement): void {
   // and only flips on a real visibilitychange, so headless/normal foreground always samples.
   document.addEventListener('visibilitychange', () => { hidden = document.hidden; syncWatch() })
   if (import.meta.env.DEV) (window as unknown as { flockSampling?: () => boolean }).flockSampling = () => !!stopWatch // e2e seam (dev only)
+  // e2e seam (dev only): the active circle's current spoken words — the faithful
+  // stand-in for "the collector reads the word aloud" so a test needn't fake a hold.
+  if (import.meta.env.DEV) (window as unknown as { flockSpoken?: () => { verify: string; duress: string } | null }).flockSpoken = () => {
+    const ctx = spokenCtx()
+    return ctx ? spokenWordsFor(ctx.seedHex, ctx.me, ctx.counter, ctx.members) : null
+  }
   rehydratePresence() // restore cached member pins so a refresh doesn't blank the map
   store.save(persisted) // persist any legacy→multi-circle migration / pruning straight away
   render()
@@ -575,9 +587,58 @@ function circleView(): string {
       <div class="note">A gentle alert to everyone — their phone buzzes with your reason.</div>
     </div>
 
+    ${pickupCard()}
+
     ${rzvCard()}
 
     ${alone ? '' : inviteSections()}`
+}
+
+// Spoken pick-up verification — "is this really my parent, and are they safe?".
+// A face-to-face, on-device check: one person reads the circle's rotating word
+// aloud, the other confirms it in their flock. Nothing is published (see
+// spokenverify.ts) — an impostor can't know the word. Under coercion the reader
+// gives their duress word instead: it looks ordinary, verifies as a normal ✓, and
+// silently raises the circle alarm for everyone else.
+function pickupCard(): string {
+  return `<div class="section-title" style="margin-top:22px">Pick-up check</div>
+    <div class="card stack">
+      ${pickupPanel === 'show' ? pickupShowInner()
+        : pickupPanel === 'check' ? pickupCheckInner()
+        : `<div class="note">Confirm who's collecting — face to face, no signal needed. An impostor can't fake the word.</div>
+           <div class="row" style="gap:10px">
+             <button class="btn small primary" data-action="pickup-show">Prove it's me</button>
+             <button class="btn small" data-action="pickup-check">Check someone</button>
+           </div>`}
+    </div>`
+}
+
+// "Prove it's me": show my word to read aloud. Long-pressing the tile silently
+// swaps in my duress word (no label, identical styling) — the coercion channel.
+function pickupShowInner(): string {
+  const ctx = spokenCtx()
+  if (!ctx) return '<div class="note">Add someone to your circle first.</div>'
+  const words = spokenWordsFor(ctx.seedHex, ctx.me, ctx.counter, ctx.members)
+  const word = showDuressWord ? words.duress : words.verify
+  return `<div class="note">Read this word to whoever's checking. They confirm it in their flock.</div>
+    <div class="word-tile" data-action="spoken-reveal">${esc(word)}</div>
+    <div class="note subtle">Rotates automatically. Only your circle can produce it.</div>
+    <button class="btn small ghost" data-action="pickup-close">Done</button>`
+}
+
+// "Check someone": type the word they said. verified / stale / duress all render an
+// identical ✓ (the duress case MUST look ordinary); only a real mismatch shows ✗.
+function pickupCheckInner(): string {
+  const outcome = pickupOutcome === 'pass'
+    ? '<div class="verify-ok">✓ Verified — it’s really them</div>'
+    : pickupOutcome === 'fail'
+      ? '<div class="verify-no">✗ That’s not the word — don’t hand over</div>'
+      : ''
+  return `<div class="note">Ask who's collecting for their word, then type it here.</div>
+    <div class="field"><input class="input" id="spoken-input" placeholder="The word they said" autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck="false" /></div>
+    <button class="btn small primary" data-action="pickup-check-run">Check</button>
+    ${outcome}
+    <button class="btn small ghost" data-action="pickup-close">Done</button>`
 }
 
 function youView(): string {
@@ -889,6 +950,7 @@ function wireApp(): void {
     if ((node as HTMLElement).closest('#map-panel')) return // wired by wireMapPanel
     const action = node.getAttribute('data-action') as string
     if (action === 'sos-hold') { wireSos(node as HTMLElement); return }
+    if (action === 'spoken-reveal') { wireDuressReveal(node as HTMLElement); return }
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   })
   if (tab === 'map') void initMap()
@@ -1467,6 +1529,10 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'mode': setMode(node.dataset.mode as Mode); break
     case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'pickup': void emit('pickup'); break
+    case 'pickup-show': pickupPanel = 'show'; showDuressWord = false; pickupOutcome = null; render(); break
+    case 'pickup-check': pickupPanel = 'check'; pickupOutcome = null; render(); break
+    case 'pickup-close': pickupPanel = null; pickupOutcome = null; showDuressWord = false; render(); break
+    case 'pickup-check-run': void runSpokenCheck(); break
     case 'copy-invite': copyInvite(); break
     case 'copy-npub': copyNpub(); break
     case 'send-invite': void sendInvite(); break
@@ -1779,6 +1845,76 @@ async function emit(trigger: 'pickup' | 'help'): Promise<void> {
   refresh()
 }
 
+// ── Spoken pick-up verification ───────────────────────────────────────────────
+// Current context for the active circle: the shared seed, the full roster (so every
+// member's duress word is checked — never a subset), me, and the time-based counter
+// both devices derive from (canary getCounter) — so the two phones agree with no
+// round-trip and nothing is ever published for the check itself.
+function spokenCtx(): { seedHex: string; members: string[]; me: string; counter: number } | null {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id) return null
+  return { seedHex: c.seedHex, members: c.members ?? [], me: id.pk, counter: spokenCounter(nowSec()) }
+}
+
+async function runSpokenCheck(): Promise<void> {
+  const ctx = spokenCtx()
+  if (!ctx) return
+  const input = (document.getElementById('spoken-input') as HTMLInputElement | null)?.value ?? ''
+  const res = checkSpokenWord(input, ctx.seedHex, ctx.members, ctx.counter)
+  // verified / stale / duress → an identical ✓. The duress case MUST be visually
+  // indistinguishable so a coercer watching this screen sees an ordinary success;
+  // only a true 'failed' shows the ✗.
+  pickupOutcome = res.status === 'failed' ? 'fail' : 'pass'
+  render()
+  // Then, silently, raise the circle alarm for a coerced collector — after the
+  // render so nothing about the alarm can surface on this device.
+  if (res.status === 'duress' && res.duressMembers.length) await raiseDuressAlarm(res.duressMembers)
+}
+
+// Silently raise the circle's help alarm for a coerced collector spotted during a
+// pick-up check. No toast, no local alert state — a coercer may be watching THIS
+// phone; only the other members' devices light up (see the onIncoming help guard).
+// Location follows the same policy as an SOS, so a no-report refuge is never pinned.
+async function raiseDuressAlarm(members: string[]): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id) return
+  const use = (await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 5000, timeoutMs: 2500 })) ?? fix
+  const position = use ? { lat: use.lat, lon: use.lon } : null
+  const plan = decideEmission({
+    mode: c.mode,
+    position,
+    trigger: 'help',
+    geofences: c.mode === 'family' ? persisted.geofences : undefined,
+    offGrid: isDark(),
+    noReportZones: persisted.noReportZones,
+    accuracyMetres: use?.accuracy,
+  })
+  const location = position && plan.action !== 'withhold'
+    ? { geohash: encode(position.lat, position.lon, plan.precision), precision: plan.precision, locationSource: 'beacon' as const }
+    : null
+  for (const m of members) {
+    try {
+      const template = await buildHelpSignal({ groupId: c.id, seedHex: c.seedHex, member: m, location })
+      await publishSignal(template, c)
+    } catch { /* stay silent even on failure — no tell on this device */ }
+  }
+}
+
+// Silent long-press to reveal the duress word on the "prove it's me" tile. No fill
+// or animation (that would be a tell) — hold ~0.6 s and the word swaps in place.
+function wireDuressReveal(node: HTMLElement): void {
+  const HOLD = 600
+  let timer = 0
+  const begin = (e: Event): void => { e.preventDefault(); timer = window.setTimeout(() => { showDuressWord = !showDuressWord; render() }, HOLD) }
+  const cancel = (): void => { if (timer) { clearTimeout(timer); timer = 0 } }
+  node.addEventListener('pointerdown', begin)
+  node.addEventListener('pointerup', cancel)
+  node.addEventListener('pointerleave', cancel)
+  node.addEventListener('pointercancel', cancel)
+}
+
 function copyInvite(): void {
   const c = activeCircle()
   if (!c) return
@@ -1931,6 +2067,12 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
     if (t === 'help') {
       const a = await decryptDuressAlert(deriveDuressKey(c.seedHex), e.content)
       const who = a.member || e.pubkey
+      // Spoken-verify silent duress: an alert whose SUBJECT differs from its SENDER is
+      // only ever produced by a pick-up check (a normal SOS always names its own
+      // sender). If I'm either party — the flagged collector, or the child who
+      // detected it — it must NEVER surface on THIS screen; a coercer may be watching.
+      // Other members surface and act on it as usual.
+      if (me && who !== e.pubkey && (who === me.pk || e.pubkey === me.pk)) return
       st.alerts.set(who, e.created_at)
       if (!me || e.pubkey !== me.pk) { alertActive = true; toast(`🚨 Help raised in ${c.name}`) }
       if (a.geohash) saveBeacon(c.id, { member: who, geohash: a.geohash, precision: a.precision, timestamp: a.timestamp || e.created_at })
