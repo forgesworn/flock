@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { deliveredCount, RELAY_TIMEOUT } from './services'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { deliveredCount, RELAY_TIMEOUT, currentPosition } from './services'
 
 const ok = (v: unknown): PromiseSettledResult<unknown> => ({ status: 'fulfilled', value: v })
 const rej = (r: unknown): PromiseSettledResult<unknown> => ({ status: 'rejected', reason: r })
@@ -27,5 +27,31 @@ describe('deliveredCount', () => {
 
   it('treats an empty/undefined fulfilled value as accepted (relays often ack with no reason)', () => {
     expect(deliveredCount([ok(undefined), ok(null)])).toBe(2)
+  })
+})
+
+describe('currentPosition', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('resolves a Fix from the browser geolocation (seconds, not millis)', async () => {
+    vi.stubGlobal('navigator', {
+      geolocation: {
+        getCurrentPosition: (success: PositionCallback) =>
+          success({ coords: { latitude: 51.5, longitude: -0.12, accuracy: 12 }, timestamp: 1_700_000_000_000 } as GeolocationPosition),
+      },
+    })
+    expect(await currentPosition()).toEqual({ lat: 51.5, lon: -0.12, accuracy: 12, at: 1_700_000_000 })
+  })
+
+  it('resolves null (never rejects) when permission is denied', async () => {
+    vi.stubGlobal('navigator', {
+      geolocation: { getCurrentPosition: (_: PositionCallback, error: PositionErrorCallback) => error({ code: 1, message: 'denied' } as GeolocationPositionError) },
+    })
+    expect(await currentPosition()).toBeNull()
+  })
+
+  it('resolves null when geolocation is unavailable', async () => {
+    vi.stubGlobal('navigator', {})
+    expect(await currentPosition()).toBeNull()
   })
 })

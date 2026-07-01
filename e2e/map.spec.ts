@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, memberPill } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, memberPill, PARIS } from './fixtures'
 
 // Single-person map UI: the two zone kinds the privacy model rests on.
 // "Safe places" (you're told if I leave) and "Private places" (I stay hidden,
@@ -29,6 +29,26 @@ test.describe('map — safe & private places', () => {
     await A.click('[data-action="add-zone"][data-kind="noreport"]')
     await A.click('[data-action="save-zone"]')
     await expect(A.locator('.dot-private')).toBeVisible()
+  })
+
+  // Regression: opening the map must centre on YOUR location, not the hard-coded
+  // London default. It used to only centre once you'd started sharing and a fix
+  // had landed; a fresh user (no share yet) was stranded in London. The device
+  // here sits in Paris and never shares — a zone saved at the map centre must
+  // therefore land in Paris, proving the view actively located the user.
+  test('opening the map centres on your location, not the London default (no share)', async ({ browser }) => {
+    const A = await newPerson(browser, PARIS)
+    await createCircle(A, { name: 'Trip', mode: 'family' })
+    await gotoTab(A, 'map')
+    await expect(A.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
+    await A.waitForTimeout(1_500) // let the one-shot locate centre the view
+
+    await A.click('[data-action="add-zone"][data-kind="safe"]')
+    await A.click('[data-action="save-zone"]')
+    const centre = await A.evaluate(() => JSON.parse(localStorage.getItem('flock:v1') || '{}').geofences?.[0]?.centre ?? null)
+    expect(centre, 'a zone should have saved at the map centre').not.toBeNull()
+    expect(centre.lat).toBeCloseTo(PARIS.latitude, 1) // ≈48.86, nowhere near London's 51.51
+    expect(centre.lon).toBeCloseTo(PARIS.longitude, 1) // ≈2.35, nowhere near London's -0.13
   })
 
   // The point of the map: when someone discloses a location, you SEE them on it.

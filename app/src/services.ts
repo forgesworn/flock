@@ -134,3 +134,25 @@ export function watchLocation(
   )
   return () => navigator.geolocation.clearWatch(id)
 }
+
+/**
+ * One-shot foreground location — resolves to a Fix, or `null` if geolocation is
+ * unavailable, denied, or times out. Used to centre the map on the user without
+ * starting a continuous share; purely local, nothing is broadcast. Never rejects,
+ * so callers can simply skip centring on a null.
+ */
+export function currentPosition(): Promise<Fix | null> {
+  if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+        at: Math.floor(pos.timestamp / 1000),
+      }),
+      () => resolve(null),
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 20_000 },
+    )
+  })
+}

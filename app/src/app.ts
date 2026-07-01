@@ -849,6 +849,15 @@ async function initMap(): Promise<void> {
   wireMapPanel()
   requestAnimationFrame(() => mapView?.map.resize())
   if (offlineMapEnabled()) void refreshOfflineState()
+  if (!fix) void centreOnCurrentPosition() // no live share yet → actively locate for the map
+}
+
+// Centre the map on the user's current position without starting a share. Purely
+// local (nothing is broadcast); silently does nothing if permission is denied or
+// the user has since started placing a zone (we must not yank the view then).
+async function centreOnCurrentPosition(): Promise<void> {
+  const f = await svc.currentPosition()
+  if (f && mapView && !addMode) mapView.flyTo({ lat: f.lat, lon: f.lon }, { instant: true })
 }
 
 // ── Offline map ("save this area") ───────────────────────────────────────────

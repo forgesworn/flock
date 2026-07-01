@@ -73,6 +73,7 @@ const fc = (features: PolyFeature[]): FeatureCollection => ({ type: 'FeatureColl
 
 export class MapView {
   readonly map: maplibregl.Map
+  readonly geolocate: maplibregl.GeolocateControl
   private markers: maplibregl.Marker[] = []
   private ready = false
   private pendingFences: Geofence[] | null = null
@@ -108,6 +109,16 @@ export class MapView {
       attributionControl: { compact: true },
     })
     this.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+    // "Locate me" — a live position dot + a button to recentre after panning away.
+    // Reads the browser's geolocation directly and only affects the local view;
+    // nothing here is broadcast (flock never shares a position without an explicit send).
+    this.geolocate = new maplibregl.GeolocateControl({
+      positionOptions: { enableHighAccuracy: true, maximumAge: 5000, timeout: 20_000 },
+      trackUserLocation: true,
+      showUserLocation: true,
+      showAccuracyCircle: true,
+    })
+    this.map.addControl(this.geolocate, 'top-right')
     this.map.on('load', () => {
       this.map.addSource('fences', { type: 'geojson', data: fc([]) })
       this.map.addLayer({ id: 'fences-fill', type: 'fill', source: 'fences', paint: { 'fill-color': '#5fd0a8', 'fill-opacity': 0.14 } })
@@ -133,8 +144,12 @@ export class MapView {
     return { lat: c.lat, lon: c.lng }
   }
 
-  flyTo(c: { lat: number; lon: number }): void {
-    this.map.flyTo({ center: [c.lon, c.lat], zoom: 15 })
+  flyTo(c: { lat: number; lon: number }, opts: { instant?: boolean } = {}): void {
+    const camera = { center: [c.lon, c.lat] as [number, number], zoom: 15 }
+    // Instant for the initial "centre on me" so we don't swoop across the world
+    // from the default view; animated when recentring an already-placed map.
+    if (opts.instant) this.map.jumpTo(camera)
+    else this.map.flyTo(camera)
   }
 
   setGeofences(fences: Geofence[]): void {
