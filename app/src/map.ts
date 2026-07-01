@@ -87,12 +87,16 @@ export class MapView {
   readonly geolocate: maplibregl.GeolocateControl
   private markers: maplibregl.Marker[] = []
   private rzvMarker: maplibregl.Marker | null = null
+  private venueMarker: maplibregl.Marker | null = null
+  private contribMarkers: maplibregl.Marker[] = []
   private ready = false
   private pendingFences: Geofence[] | null = null
   private pendingNoReport: NoReportZone[] | null = null
   private pendingPreview: CircleGeofence | null = null
   private pendingMembers: MapPoint[] | null = null
+  private pendingContrib: MapPoint[] | null = null
   private memberAreaFeatures = 0 // count of rough-area halos currently drawn (inspection/e2e)
+  private contribAreaFeatures = 0 // count of contributor halos currently drawn (inspection/e2e)
 
   // Lazily resolve the basemap style, best first: (1) the circle's saved offline
   // area (OPFS vector — zero network at view time); (2) the bundled demo vector
@@ -152,10 +156,17 @@ export class MapView {
       this.map.addSource('members-area', { type: 'geojson', data: fc([]) })
       this.map.addLayer({ id: 'members-area-fill', type: 'fill', source: 'members-area', paint: { 'fill-color': statusColour, 'fill-opacity': 0.15 } })
       this.map.addLayer({ id: 'members-area-line', type: 'line', source: 'members-area', paint: { 'line-color': statusColour, 'line-width': 1.5, 'line-opacity': 0.4 } })
+      // Meeting-point contributor cells — the coarse spots people opted to share to
+      // find a fair place. A distinct soft violet, dashed, so it never reads as live
+      // presence (blue, solid); same precision-driven "rough area" as presence.
+      this.map.addSource('contrib-area', { type: 'geojson', data: fc([]) })
+      this.map.addLayer({ id: 'contrib-area-fill', type: 'fill', source: 'contrib-area', paint: { 'fill-color': '#a78bfa', 'fill-opacity': 0.16 } })
+      this.map.addLayer({ id: 'contrib-area-line', type: 'line', source: 'contrib-area', paint: { 'line-color': '#a78bfa', 'line-width': 1.5, 'line-opacity': 0.5, 'line-dasharray': [2, 2] } })
       this.ready = true
       if (this.pendingFences) this.setGeofences(this.pendingFences)
       if (this.pendingNoReport) this.setNoReportZones(this.pendingNoReport)
       if (this.pendingMembers) this.setMembers(this.pendingMembers)
+      if (this.pendingContrib) this.setContributorPins(this.pendingContrib)
       this.setPreview(this.pendingPreview)
     })
   }
@@ -237,9 +248,59 @@ export class MapView {
     this.rzvMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([point.lon, point.lat]).addTo(this.map)
   }
 
+  /**
+   * Show (or clear) the meeting-point contributors — each person's cell at its
+   * disclosed precision (exact = a dot, coarse = a "rough area" blob), in a distinct
+   * violet layer so it reads as "who's helping pick a place", apart from live
+   * presence. Proposer-only, while a search is live; cleared when it ends.
+   */
+  setContributorPins(points: MapPoint[]): void {
+    this.contribMarkers.forEach((m) => m.remove())
+    this.contribMarkers = []
+    for (const p of points) {
+      const el = document.createElement('div')
+      el.className = 'map-pin contrib'
+      // textContent for the (untrusted) petname/profile label; never innerHTML.
+      el.innerHTML = '<span class="tag"></span><span class="dot"></span>'
+      ;(el.querySelector('.tag') as HTMLElement).textContent = p.label
+      this.contribMarkers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(this.map))
+    }
+    if (!this.ready) { this.pendingContrib = points; return }
+    const halos = points
+      .filter((p) => (p.radiusMetres ?? 0) >= HALO_MIN_METRES)
+      .map((p): PolyFeature => ({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Polygon', coordinates: [ring(p.lat, p.lon, p.radiusMetres as number)] },
+      }))
+    this.contribAreaFeatures = halos.length
+    ;(this.map.getSource('contrib-area') as maplibregl.GeoJSONSource).setData(fc(halos))
+  }
+
+  /** How many contributor "rough area" halos are drawn (inspection aid / e2e). */
+  contributorAreaCount(): number { return this.contribAreaFeatures }
+
+  /**
+   * Show (or clear) the suggested meeting venue as a distinct pin — separate from
+   * both the member markers and the rendezvous flag — so the proposer sees the
+   * candidate place on the map before committing it as the rendezvous.
+   */
+  setMeetingVenue(point: { lat: number; lon: number; label?: string } | null): void {
+    this.venueMarker?.remove()
+    this.venueMarker = null
+    if (!point) return
+    const el = document.createElement('div')
+    el.className = 'venue-pin'
+    el.innerHTML = '<span class="tag"></span><span class="flag">📍</span>'
+    ;(el.querySelector('.tag') as HTMLElement).textContent = point.label || 'Fair spot'
+    this.venueMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([point.lon, point.lat]).addTo(this.map)
+  }
+
   destroy(): void {
     this.markers.forEach((m) => m.remove())
+    this.contribMarkers.forEach((m) => m.remove())
     this.rzvMarker?.remove()
+    this.venueMarker?.remove()
     this.map.remove()
   }
 }

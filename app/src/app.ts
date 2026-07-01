@@ -1131,16 +1131,42 @@ function memberPoints(): MapPoint[] {
   })
 }
 function updateMapData(): void {
-  const pts = memberPoints()
+  const st = active()
+  const me = persisted.identity?.pk
+  const r = st?.rendezvous
+  // While the proposer is running a meeting search (no rendezvous yet), the
+  // contributor cells take over the map — the same people at the same coarse cells,
+  // so drawing presence too would just double every blob (see setContributorPins).
+  const runningMeeting = !!(st && st.meeting && st.meeting.setBy === me && !r)
+  const pts = runningMeeting ? [] : memberPoints()
   mapView?.setMembers(pts)
-  const r = active()?.rendezvous
   mapView?.setRendezvous(r ? { lat: r.place.lat, lon: r.place.lon, label: r.place.label || r.place.address?.split(',')[0] } : null)
-  // Out-of-area chip: in offline mode, flag any pin beyond the saved map's bounds.
-  // We never live-fetch to cover it — leaking a viewport mid-event is the wrong call.
+  // Meeting-point overlays — each contributor's cell at its disclosed precision + the
+  // suggested venue, so the proposer can eyeball the inputs and the pick on the map.
+  let shown = pts
+  if (runningMeeting && st) {
+    const contrib: MapPoint[] = [...st.meetingShares.values()].map((s) => {
+      const d = decode(s.geohash)
+      return {
+        member: s.member, lat: d.lat, lon: d.lon,
+        label: s.member === me ? 'You' : pinLabel(s.member),
+        status: 'active' as const, radiusMetres: precisionToRadius(s.precision),
+      }
+    })
+    mapView?.setContributorPins(contrib)
+    const v = st.meetingSuggestion?.venue
+    mapView?.setMeetingVenue(v ? { lat: v.lat, lon: v.lon, label: v.venueType === 'centroid' ? 'Fair spot' : v.name } : null)
+    shown = contrib
+  } else {
+    mapView?.setContributorPins([])
+    mapView?.setMeetingVenue(null)
+  }
+  // Out-of-area chip: in offline mode, flag any shown pin beyond the saved map's
+  // bounds. We never live-fetch to cover it — leaking a viewport mid-event is wrong.
   const el = document.getElementById('offline-oob')
   if (!el) return
   const bbox = offlineBBox
-  const outside = bbox ? pts.filter((p) => !bboxContains(bbox, p.lat, p.lon)) : []
+  const outside = bbox ? shown.filter((p) => !bboxContains(bbox, p.lat, p.lon)) : []
   el.hidden = outside.length === 0
   if (outside.length) el.textContent = `⚠ ${outside.length} ${outside.length === 1 ? 'pin' : 'pins'} outside your saved map`
 }
