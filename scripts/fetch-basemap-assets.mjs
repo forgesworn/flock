@@ -19,8 +19,16 @@ import { fileURLToPath } from 'node:url'
 const ASSETS = 'https://protomaps.github.io/basemaps-assets'
 // The dark flavour's layers() reference these three fontstacks.
 const FONTSTACKS = ['Noto Sans Regular', 'Noto Sans Medium', 'Noto Sans Italic']
-// Latin + Latin-Extended + a little Cyrillic/Greek — covers UK/European labels.
-const RANGES = Array.from({ length: 8 }, (_, i) => `${i * 256}-${i * 256 + 255}`)
+// Glyph ranges maplibre requests for place/road labels: Latin + Greek/Cyrillic/
+// Hebrew/Arabic (0–2047), plus General Punctuation & symbols (8192–8703 — en/em
+// dashes, curly quotes, bullets, ellipsis, currency), which real labels use
+// constantly. CJK and other scripts fall back to boxes — add their ranges here if
+// flock ever targets those regions.
+const RANGES = [
+  ...Array.from({ length: 8 }, (_, i) => `${i * 256}-${i * 256 + 255}`), // 0–2047
+  '8192-8447',
+  '8448-8703',
+]
 const SPRITES = ['dark.json', 'dark.png', 'dark@2x.json', 'dark@2x.png']
 
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '../app/public/basemap')
