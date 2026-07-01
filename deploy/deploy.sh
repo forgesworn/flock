@@ -13,7 +13,12 @@ set -eu
 HOST="${HOST:-deploy@95.217.39.110}"
 REMOTE_DIR="${REMOTE_DIR:-/var/www/flock}"
 
-echo "→ building dist-app"
+# Offline maps ("save this area") need the extract service (server/extract.mjs),
+# which is live on our host — so enable the feature by default. Self-hosters without
+# the service should build with VITE_OFFLINE_MAP=0 (see docs/DEPLOY.md).
+export VITE_OFFLINE_MAP="${VITE_OFFLINE_MAP:-1}"
+
+echo "→ building dist-app (offline map: ${VITE_OFFLINE_MAP})"
 npm run build:app
 
 echo "→ deploying to ${HOST}:${REMOTE_DIR}"

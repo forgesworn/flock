@@ -26,6 +26,7 @@ flock is designed so the host (and we) capture nothing:
 | `VITE_TILE_URL` | `/tiles/{z}/{x}/{y}.png` (host-proxied → OSM) | Map tile template `{z}/{x}/{y}`; point at any tile server to bypass the proxy |
 | `VITE_TILE_ATTRIBUTION` | © OpenStreetMap | Attribution shown on the map |
 | `VITE_NOMINATIM_URL` | `/nominatim` (host-proxied → OSM) | Geocoding endpoint (rendezvous-by-name) |
+| `VITE_OFFLINE_MAP` | `1` (canonical deploy) | Show "save this area" offline maps — **requires the extract service** below; set `0` if you haven't deployed it |
 
 The same-origin defaults (`/tiles/*`, `/nominatim/*`) rely on the host reverse-proxying
 to OpenStreetMap — the `handle_path` blocks in `deploy/Caddyfile` (and the Vite dev
