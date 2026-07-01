@@ -228,12 +228,16 @@ hardware cost to what we actually disclose. (Ordered biggest-win-first.)
   crossing or pin precisely). The watch is shared across triggers, so accuracy is derived
   from the circle's mode + proximity to a fence; the guard that matters is that a
   low-accuracy fix must never cause a **false** breach or **miss** a real one.
-- [ ] **Back off sampling when it can't matter** *(safe, self-contained wins)*: **suspend
-  the GPS watch entirely while off-grid** (today `onFix` early-returns on `isDark()` but
-  the watch keeps burning) and resume on come-back; **pause / slow on page-hidden**
-  (`visibilitychange` — a foreground PWA can't sample in the background regardless);
-  **lengthen the interval when stationary** (we already know the cell hasn't changed —
-  the sampling twin of the cadence gate).
+- [~] **Back off sampling when it can't matter.** **Shipped:** the GPS watch is now
+  centralised behind `syncWatch()` = `sharing && !isDark() && !hidden`, so it suspends
+  **entirely during an off-grid break** (it used to keep burning while `onFix`
+  early-returned) and while the app is **backgrounded** (`visibilitychange` — a foreground
+  PWA can't sample in the background regardless), and resumes on come-back / auto-resume /
+  return-to-foreground. A safe subset — **no change to accuracy, the emission decision, or
+  the SOS path**; full e2e green plus a new "sampling suspends during a break, resumes on
+  return" test. **Deferred:** lengthen the interval when **stationary** — that trades off
+  breach-detection latency, so it folds into the accuracy-matched-to-precision design
+  (item above) rather than shipping blind.
 - [ ] **Battery-aware** *(nice-to-have)*: the Battery Status API — widen intervals / drop
   accuracy when the phone is low, **except** during an active alert (safety wins over
   battery).

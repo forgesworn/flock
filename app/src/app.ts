@@ -70,6 +70,7 @@ let sharing = false
 let alertActive = false
 let breachActive = false
 let stopWatch: (() => void) | null = null
+let hidden = false // app backgrounded (page hidden) — pause sampling; a hidden PWA can't sample reliably anyway
 const subs = new Map<string, () => void>() // circleId@relay@inboxPk → unsubscribe (one per circle)
 // Last automatic beacon per circle — drives the movement-aware re-emit gate so a
 // stationary member (identical geohash cell) doesn't keep waking the relays.
@@ -296,6 +297,11 @@ const ICON = {
 // ── Mount / render ──────────────────────────────────────────────────────────
 export function mount(el: HTMLElement): void {
   root = el
+  // Pause sampling when the app is backgrounded, resume when it returns — a hidden PWA
+  // can't sample reliably anyway, so this is pure battery saved. `hidden` starts false
+  // and only flips on a real visibilitychange, so headless/normal foreground always samples.
+  document.addEventListener('visibilitychange', () => { hidden = document.hidden; syncWatch() })
+  if (import.meta.env.DEV) (window as unknown as { flockSampling?: () => boolean }).flockSampling = () => !!stopWatch // e2e seam (dev only)
   rehydratePresence() // restore cached member pins so a refresh doesn't blank the map
   store.save(persisted) // persist any legacy→multi-circle migration / pruning straight away
   render()
@@ -1262,6 +1268,7 @@ function startMonitor(): void {
     if (persisted.offGridUntil && persisted.offGridUntil <= nowSec()) {
       persisted.offGridUntil = undefined
       store.save(persisted)
+      syncWatch() // break timer elapsed → resume sampling if sharing
       toast('Break over — sharing back on')
     }
     const expired = sweepExpired()
@@ -1320,6 +1327,7 @@ function goDark(): void {
   persisted.offGridUntil = until
   store.save(persisted)
   goingDark = false
+  syncWatch() // stop burning GPS for a break that shares nothing
   toast('On a break — sharing paused')
   void broadcastOffGrid(until, why)
   render()
@@ -1328,6 +1336,7 @@ function goDark(): void {
 function comeBack(): void {
   persisted.offGridUntil = undefined
   store.save(persisted)
+  syncWatch() // resume sampling if we were sharing before the break
   toast("You're back on")
   void broadcastOffGrid(nowSec()) // until≤now tells every circle the break is over
   render()
@@ -1582,18 +1591,37 @@ function setMode(mode: Mode): void {
   render()
 }
 
+// The location watch should run only when it can actually do something: we're
+// sharing, not on a deliberate break, and the app is in the foreground. Anything
+// else is GPS burned for nothing — an off-grid break emits nothing, and a hidden
+// PWA can't sample reliably regardless. (Minimal-footprint north star — Phase H.)
+function shouldSample(): boolean {
+  return sharing && !isDark() && !hidden
+}
+
+/** Start or stop the location watch so it matches shouldSample(). Idempotent — the
+ *  single place the GPS watch is turned on or off. */
+function syncWatch(): void {
+  const want = shouldSample()
+  if (want && !stopWatch) {
+    stopWatch = svc.watchLocation(onFix, (msg) => { toast(msg); sharing = false; syncWatch(); render() })
+  } else if (!want && stopWatch) {
+    stopWatch()
+    stopWatch = null
+  }
+}
+
 function startSharing(): void {
   if (sharing) return
   sharing = true
-  stopWatch = svc.watchLocation(onFix, (msg) => { toast(msg); sharing = false; render() })
+  syncWatch()
   render()
 }
 
 function stopSharing(): void {
   sharing = false
   breachActive = false
-  stopWatch?.()
-  stopWatch = null
+  syncWatch()
   render()
 }
 
