@@ -99,7 +99,8 @@
     "url": "https://github.com/forgesworn/flock/issues"
   },
   "dependencies": {
-    "canary-kit": "^2.10.0"
+    "canary-kit": "^2.10.0",
+    "rendezvous-kit": "^1.21.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
