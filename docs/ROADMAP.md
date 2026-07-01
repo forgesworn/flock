@@ -232,14 +232,14 @@ Two halves that compose into one feature:
     kind:0 avatars still need `img-src https:`). Verified at the edge: `/tiles` + `/nominatim`
     200 same-origin, and the built app no longer references `tile.openstreetmap.org`. **The
     original launch-blocker (the map viewport leak) is closed in production.**
-  - [~] **Proxy Overpass venue search (meeting point) — code shipped, host step pending.**
+  - [x] **Proxy Overpass venue search (meeting point) — DEPLOYED & LIVE.**
     `/overpass/*` reverse-proxies same-origin to OSM Overpass (Caddy `handle_path` + Vite
     dev proxy, client-identifying headers stripped, `no-store`), mirroring the Stage 0
     tiles/Nominatim proxy — `searchVenues` sends only a **bounding box**, never a
-    participant's coordinates. The **`deploy/Caddyfile` drop-in must be applied on the
-    host** (`sudo tee … && caddy validate && systemctl reload`) to light up prod venues;
-    until then the meeting-point flow degrades gracefully to the on-device centroid
-    (Phase F Slice 3a).
+    participant's coordinates. The `deploy/Caddyfile` drop-in is applied on the host and
+    verified at the edge (`/overpass` returns live Overpass JSON, 200). Prod venues are
+    live; the flow still degrades gracefully to the on-device centroid if Overpass is
+    unreachable (Phase F Slice 3a).
   - [~] **Local / offline vector basemap (Stage 1) — spiked & proven.** A vector PMTiles
     basemap (`app/src/basemap.ts`, behind `VITE_PMTILES=1` / `localStorage flock.pmtiles`)
     renders flock's **dusk palette** from a **single same-origin file** — a whole ~11 km
