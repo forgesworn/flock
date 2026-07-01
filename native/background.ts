@@ -92,5 +92,5 @@ async function onBackgroundFix(loc: BgLocation): Promise<void> {
     geohash,
     precision: plan.precision,
   })
-  await svc.publishEvent(s.relayUrl, template, makeLocalSigner(s.identity.skHex))
+  await svc.publishEvent(s.relayUrls, template, makeLocalSigner(s.identity.skHex))
 }

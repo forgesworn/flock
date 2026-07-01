@@ -6,7 +6,7 @@ import type { Mode } from './store'
 import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
-import { PRIVATE_RELAYS } from './relays'
+import { PRIVATE_RELAYS, parseRelayList } from './relays'
 import { deriveCircleSeed, deriveInbox } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { geocode } from './geo'
@@ -536,10 +536,11 @@ function youView(): string {
         ? 'Signed in with Signet — your key lives in your signer and never touches flock.'
         : 'Quick-start key, stored in this browser only — not secure key storage. Sign in with Signet for real use.'}</div>
     </div>
-    <div class="section-title" style="margin-top:18px">Relay</div>
+    <div class="section-title" style="margin-top:18px">Relays</div>
     <div class="card stack">
-      <div class="field"><label for="relay">Nostr relay</label><input class="input" id="relay" value="${esc(persisted.relayUrl)}" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
-      <button class="btn small" data-action="save-relay">Save relay</button>
+      <div class="field"><label for="relay">Nostr relays (one per line)</label><textarea class="input" id="relay" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false">${esc(persisted.relayUrls.join('\n'))}</textarea></div>
+      <div class="note">Alerts go to every relay here, so one being down can't swallow an SOS. Add a backup you trust — even encrypted, a public relay still sees the timing of your traffic.</div>
+      <button class="btn small" data-action="save-relay">Save relays</button>
     </div>
     <div class="section-title" style="margin-top:18px">Circle security</div>
     <div class="card stack">
@@ -1048,7 +1049,7 @@ async function publishSignal(unsigned: { kind: number; content: string; tags: st
   if (!circle || !signer) return
   const inbox = deriveInbox(circle.seedHex)
   const wrap = await giftWrap(signer, inbox.pk, unsigned)
-  await svc.publishSigned(persisted.relayUrl, wrap as never)
+  await svc.publishSigned(persisted.relayUrls, wrap as never)
 }
 
 // ── Members, invites & reseed ────────────────────────────────────────────────
@@ -1068,11 +1069,11 @@ function ensureMember(circle: store.Circle, pk: string): void {
 function ensureInviteSub(): void {
   const id = persisted.identity
   if (!id) { stopInviteSub?.(); stopInviteSub = null; inviteSubKey = ''; return }
-  const key = `${id.pk}@${persisted.relayUrl}`
+  const key = `${id.pk}@${persisted.relayUrls.join(',')}`
   if (key === inviteSubKey && stopInviteSub) return
   stopInviteSub?.()
   inviteSubKey = key
-  stopInviteSub = svc.subscribeGiftWraps(persisted.relayUrl, id.pk, (e) => { void onInviteWrap(e) })
+  stopInviteSub = svc.subscribeGiftWraps(persisted.relayUrls, id.pk, (e) => { void onInviteWrap(e) })
 }
 
 async function onInviteWrap(e: { pubkey: string; content: string; tags: string[][] }): Promise<void> {
@@ -1115,7 +1116,7 @@ async function sendInvite(): Promise<void> {
   if (pk === signer.pubkey) { toast("That's your own key"); return }
   try {
     const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
-    await svc.publishSigned(persisted.relayUrl, wrap as never)
+    await svc.publishSigned(persisted.relayUrls, wrap as never)
     ensureMember(c, pk)
     toast('Secure invite sent')
     render()
@@ -1133,7 +1134,7 @@ async function reseedCircle(removePk?: string): Promise<void> {
   try {
     if (recipients.length) {
       const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
-      for (const w of wraps) await svc.publishSigned(persisted.relayUrl, w as never)
+      for (const w of wraps) await svc.publishSigned(persisted.relayUrls, w as never)
     }
     patchCircleById(c.id, { seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) })
     const st = cstate(c.id)
@@ -1638,12 +1639,14 @@ function ensureProfiles(): void {
 }
 
 function saveRelay(): void {
-  const url = (document.getElementById('relay') as HTMLInputElement | null)?.value?.trim()
-  if (!url || !url.startsWith('ws')) { toast('Enter a ws:// or wss:// relay URL'); return }
-  persisted.relayUrl = url
+  const el = document.getElementById('relay') as HTMLTextAreaElement | HTMLInputElement | null
+  const relays = parseRelayList(el?.value ?? '')
+  if (!relays.length) { toast('Enter at least one ws:// or wss:// relay'); return }
+  persisted.relayUrls = relays
   store.save(persisted)
+  ensureInviteSub()
   ensureSubscriptions()
-  toast('Relay saved')
+  toast(relays.length > 1 ? `Saved ${relays.length} relays` : 'Relay saved')
 }
 
 /** Leave just the active circle (local removal). Identity and other circles stay. */
@@ -1707,19 +1710,20 @@ function resetDevice(): void {
 
 // ── Inbound ──────────────────────────────────────────────────────────────────
 function ensureSubscriptions(): void {
-  const relay = persisted.relayUrl
+  const relays = persisted.relayUrls
+  const relayKey = relays.join(',')
   // Desired subs: one per circle, keyed by inbox (a reseed → new inbox → re-subscribe).
   const wanted = new Map<string, store.Circle>()
   for (const c of persisted.circles) {
     const inbox = deriveInbox(c.seedHex)
-    wanted.set(`${c.id}@${relay}@${inbox.pk}`, c)
+    wanted.set(`${c.id}@${relayKey}@${inbox.pk}`, c)
   }
   for (const [key, stop] of subs) if (!wanted.has(key)) { stop(); subs.delete(key) }
   for (const [key, c] of wanted) {
     if (subs.has(key)) continue
     const inbox = deriveInbox(c.seedHex)
     const circleId = c.id
-    subs.set(key, svc.subscribeGiftWraps(relay, inbox.pk, (wrap) => { void onSignalWrap(circleId, wrap, inbox.sk) }))
+    subs.set(key, svc.subscribeGiftWraps(relays, inbox.pk, (wrap) => { void onSignalWrap(circleId, wrap, inbox.sk) }))
   }
 }
 

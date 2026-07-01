@@ -12,41 +12,79 @@ function getPool(): SimplePool {
   return pool
 }
 
-/** Sign an unsigned flock builder event via the signer and publish it to the relay. */
-export async function publishEvent(relayUrl: string, template: EventTemplate, signer: FlockSigner) {
+// Per-relay publish deadline — a safety alert must not hang on one slow or dead
+// relay when another may already have accepted it.
+const PUBLISH_TIMEOUT_MS = 8000
+/** Sentinel a publish resolves to when it outruns PUBLISH_TIMEOUT_MS. */
+export const RELAY_TIMEOUT = '__flock_relay_timeout__'
+// nostr-tools' SimplePool RESOLVES a publish with a "connection failure…" string
+// (rather than rejecting) when a relay is unreachable — so a naive Promise.any
+// would read an all-relays-down fan-out as a success. It must be excluded explicitly.
+const CONNECTION_FAILURE = 'connection failure'
+
+/** How many of a fan-out's settled publishes genuinely reached a relay — i.e. a
+ *  relay accepted the event. Excludes rejections (relay refused the event),
+ *  unreachable relays (the pool's "connection failure" resolution) and timeouts. */
+export function deliveredCount(results: PromiseSettledResult<unknown>[]): number {
+  return results.filter((r) => {
+    if (r.status !== 'fulfilled') return false
+    const v = String(r.value ?? '')
+    return v !== RELAY_TIMEOUT && !v.startsWith(CONNECTION_FAILURE)
+  }).length
+}
+
+/** Race a publish against a resolve-only timeout so one dead relay can't stall the fan-out. */
+function withTimeout(p: Promise<unknown>, ms: number): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<string>((resolve) => { timer = setTimeout(() => resolve(RELAY_TIMEOUT), ms) })
+  return Promise.race([Promise.resolve(p).finally(() => clearTimeout(timer)), timeout])
+}
+
+/** Fan a signed event out to every relay; succeed if ANY accepts, throw if none do
+ *  — so callers surface a real "couldn't send" rather than a silent false success. */
+async function fanOut(relays: readonly string[], signed: unknown): Promise<void> {
+  const attempts = getPool().publish([...relays], signed as never).map((p) => withTimeout(p, PUBLISH_TIMEOUT_MS))
+  const results = await Promise.allSettled(attempts)
+  if (deliveredCount(results) === 0) throw new Error('No relay accepted the event')
+}
+
+/** Sign an unsigned flock builder event via the signer and fan it out to the relays. */
+export async function publishEvent(relays: readonly string[], template: EventTemplate, signer: FlockSigner) {
   const signed = await signer.signEvent(template)
-  await Promise.any(getPool().publish([relayUrl], signed as never))
+  await fanOut(relays, signed)
   return signed
 }
 
-/** Publish an already-signed event (e.g. a NIP-59 gift wrap). */
-export async function publishSigned(relayUrl: string, signed: { id: string; sig: string; [k: string]: unknown }) {
-  await Promise.any(getPool().publish([relayUrl], signed as never))
+/** Fan an already-signed event (e.g. a NIP-59 gift wrap) out to the relays. */
+export async function publishSigned(relays: readonly string[], signed: { id: string; sig: string; [k: string]: unknown }) {
+  await fanOut(relays, signed)
   return signed
 }
 
-/** Subscribe to NIP-59 gift wraps (kind 1059) addressed to me. Returns an unsubscribe fn. */
+/** Subscribe to NIP-59 gift wraps (kind 1059) addressed to me, across all relays.
+ *  One subscribeMany call → the pool dedupes the same wrap arriving from several
+ *  relays (per-call known-id set). Returns an unsubscribe fn. */
 export function subscribeGiftWraps(
-  relayUrl: string,
+  relays: readonly string[],
   myPubkey: string,
   onEvent: (e: { id: string; pubkey: string; content: string; tags: string[][]; created_at: number }) => void,
 ): () => void {
   const sub = getPool().subscribeMany(
-    [relayUrl],
+    [...relays],
     { kinds: [1059], '#p': [myPubkey] },
     { onevent: onEvent },
   )
   return () => sub.close()
 }
 
-/** Subscribe to a circle's kind-20078 signals by hashed d-tag. Returns an unsubscribe fn. */
+/** Subscribe to a circle's kind-20078 signals by hashed d-tag, across all relays. Returns an unsubscribe fn. */
 export function subscribeSignals(
-  relayUrl: string,
+  relays: readonly string[],
   dTag: string,
   onEvent: (e: { pubkey: string; content: string; tags: string[][]; created_at: number }) => void,
 ): () => void {
   const sub = getPool().subscribeMany(
-    [relayUrl],
+    [...relays],
     { kinds: [20_078], '#d': [dTag] },
     { onevent: onEvent },
   )

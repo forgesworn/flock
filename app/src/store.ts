@@ -4,7 +4,7 @@
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { decode as nip19decode } from 'nostr-tools/nip19'
 import type { Geofence, NoReportZone } from '@forgesworn/flock'
-import { PRIVATE_RELAYS } from './relays'
+import { resolveRelays } from './relays'
 import { deriveCircleSeed } from './keys'
 
 export type Mode = 'family' | 'nightout'
@@ -31,7 +31,8 @@ export interface Persisted {
   circles: Circle[]
   /** Which circle is in focus. */
   activeCircleId: string | null
-  relayUrl: string
+  /** Relays sensitive traffic is fanned out to (delivery redundancy). Non-empty. */
+  relayUrls: string[]
   geofences: Geofence[]
   /** Inverse geofences — inside one, disclosure is capped even on a trigger. On-device only. */
   noReportZones: NoReportZone[]
@@ -48,8 +49,6 @@ export interface Persisted {
 }
 
 const KEY = 'flock:v1'
-// Sensitive traffic defaults to our own no-log relay (see relays.ts / docs/PRIVACY.md).
-const DEFAULT_RELAY = PRIVATE_RELAYS[0]
 
 const toHex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
@@ -58,12 +57,14 @@ export const fromHex = (h: string): Uint8Array =>
 const randHex = (n: number): string => toHex(crypto.getRandomValues(new Uint8Array(n)))
 
 export function load(): Persisted {
-  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrl: DEFAULT_RELAY, geofences: [], noReportZones: [], petnames: {} }
+  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrls: resolveRelays(), geofences: [], noReportZones: [], petnames: {} }
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return fresh
-    const o = JSON.parse(raw) as Partial<Persisted> & { circle?: Circle | null }
-    const state: Persisted = { ...fresh, ...o, circles: o.circles ?? [], noReportZones: o.noReportZones ?? [], petnames: o.petnames ?? {} }
+    const o = JSON.parse(raw) as Partial<Persisted> & { circle?: Circle | null; relayUrl?: string }
+    const state: Persisted = { ...fresh, ...o, circles: o.circles ?? [], noReportZones: o.noReportZones ?? [], petnames: o.petnames ?? {}, relayUrls: resolveRelays(o) }
+    // Migrate the legacy single-relay field into the fanned-out list (resolveRelays did the work).
+    delete (state as unknown as Record<string, unknown>).relayUrl
     // Migrate the legacy single-circle shape.
     if (o.circle && !state.circles.length) {
       state.circles = [o.circle]
