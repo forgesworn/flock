@@ -20,10 +20,16 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+const HOST = process.env.HOST ?? '127.0.0.1' // localhost-only; Caddy reverse-proxies to it
 const PORT = Number(process.env.PORT ?? 8788)
 const BIN = process.env.GO_PMTILES_BIN ?? 'go-pmtiles'
 const MAXZOOM_CAP = Number(process.env.EXTRACT_MAXZOOM ?? 15)
 const MAX_SPAN_KM = Number(process.env.EXTRACT_MAX_SPAN_KM ?? 60)
+// The endpoint is public, so bound the blast radius: cap concurrent extracts (each
+// spawns go-pmtiles + range-reads the remote build) so a flood can't exhaust the
+// shared box. Excess requests get 429 rather than piling up.
+const MAX_CONCURRENT = Number(process.env.EXTRACT_MAX_CONCURRENT ?? 3)
+let inflight = 0
 
 // Resolve the newest daily planet build once, then reuse for the day.
 let cached = null // { url, day: 'YYYYMMDD' }
@@ -95,13 +101,17 @@ const server = createServer((req, res) => {
     let parsed
     try { parsed = validateBody(JSON.parse(raw || '{}')) } catch { parsed = { error: 'invalid JSON' } }
     if (parsed.error) { res.writeHead(parsed.error.includes('too large') ? 413 : 400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: parsed.error })); return }
+    if (inflight >= MAX_CONCURRENT) { res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '5' }).end(JSON.stringify({ error: 'busy — try again shortly' })); return }
+    inflight++
     try {
       const bytes = await extract(parsed.bbox, parsed.maxzoom) // NB: bbox intentionally not logged
       res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store', 'content-length': bytes.length }).end(bytes)
     } catch (e) {
       res.writeHead(502, { 'content-type': 'application/json' }).end(JSON.stringify({ error: String(e.message || e) }))
+    } finally {
+      inflight--
     }
   })
 })
 
-server.listen(PORT, () => console.error(`flock extract service on :${PORT} (bin=${BIN}, maxzoom≤${MAXZOOM_CAP}, span≤${MAX_SPAN_KM}km)`))
+server.listen(PORT, HOST, () => console.error(`flock extract service on ${HOST}:${PORT} (bin=${BIN}, maxzoom≤${MAXZOOM_CAP}, span≤${MAX_SPAN_KM}km, maxConcurrent=${MAX_CONCURRENT})`))

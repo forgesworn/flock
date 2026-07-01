@@ -66,6 +66,13 @@ flock.forgesworn.dev {
 		}
 	}
 
+	# Offline-basemap extract service (server/extract.mjs via flock-extract.service).
+	# Clips a bbox from the Protomaps build server-side so the browser only ever talks
+	# to this origin. `handle` (not handle_path) preserves the /api/extract path.
+	handle /api/extract {
+		reverse_proxy 127.0.0.1:8791
+	}
+
 	# Service worker must never be stale (so app updates land); hashed assets are immutable.
 	@sw path /sw.js
 	header @sw Cache-Control "no-cache"

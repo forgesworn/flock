@@ -64,6 +64,31 @@ npm run deploy
 # override: HOST=user@host REMOTE_DIR=/srv/flock npm run deploy
 ```
 
+## Offline-basemap extract service (`/api/extract`)  ✅ LIVE
+
+Powers "save this area" (offline vector maps). `server/extract.mjs` is a small Node
+service that clips a bbox from the Protomaps daily build **server-side** — so the
+browser only ever talks to this origin — and streams the `.pmtiles`. On the host it
+runs as `flock-extract.service` on `127.0.0.1:8791`, reverse-proxied by Caddy at
+`/api/extract` (in `deploy/Caddyfile`). Public endpoint, so the service caps request
+span (60 km) and concurrency (3 → 429).
+
+One-time host setup (`deploy@95.217.39.110`):
+
+```sh
+# 1. go-pmtiles binary (Linux x86_64), installed as /usr/local/bin/go-pmtiles
+curl -sSL https://github.com/protomaps/go-pmtiles/releases/download/v1.30.3/go-pmtiles_1.30.3_Linux_x86_64.tar.gz | tar xz pmtiles
+sudo install -m0755 pmtiles /usr/local/bin/go-pmtiles
+# 2. service code + unit
+sudo mkdir -p /opt/flock-extract && sudo chown deploy:deploy /opt/flock-extract
+scp server/extract.mjs deploy@95.217.39.110:/opt/flock-extract/
+cat deploy/flock-extract.service | ssh deploy@95.217.39.110 'sudo tee /etc/systemd/system/flock-extract.service'
+ssh deploy@95.217.39.110 'sudo systemctl daemon-reload && sudo systemctl enable --now flock-extract'
+# 3. the /api/extract route is part of deploy/Caddyfile — drop it in + reload (as above)
+```
+
+To update the service code later: `scp server/extract.mjs …:/opt/flock-extract/ && ssh … 'sudo systemctl restart flock-extract'`.
+
 ## Self-hosting (anyone)
 
 flock is meant to be self-hostable. Build with your own relay/tiles and serve
