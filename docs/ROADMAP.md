@@ -146,19 +146,19 @@ Two halves that compose into one feature:
     third-party calls** — confirmed in-browser). Fetched once → cached on-device → the map
     makes **zero** network calls at view time (no when/where-you-look leak) and works
     offline. Vector dusk restyle done.
-  - [~] **"Save this area" (Stage 2) — extract service DEPLOYED & LIVE; feature staged.**
+  - [x] **"Save this area" (Stage 2) — LAUNCHED & LIVE.** Per-circle offline vector maps:
     `app/src/area.ts` (bbox of zones + buffer; tested) → `server/extract.mjs` on the host
     (`flock-extract.service` on `127.0.0.1:8791`, Caddy `/api/extract`; clips the Protomaps
     daily build **server-side** so the browser only ever talks to our origin — 400/413/429
     guards, span + concurrency caps, `no-store`, bbox never logged) → `app/src/offlineArea.ts`
-    (POST → OPFS → a maplibre style over a pmtiles `FileSource`). Glyphs/sprite shipped to
-    prod and kept in a **deploy-surviving** SW cache (`flock-basemap-v1`). **Verified
-    end-to-end on the live origin:** `POST /api/extract` → valid `PMTiles` → OPFS round-trip;
-    and locally, render from OPFS with **zero** tile-network calls. The user-facing button is
-    behind `VITE_OFFLINE_MAP` — testable on prod now via `localStorage.flock.offlinemap='1'`.
-    **Remaining before launch:** out-of-area disclosure (blank basemap + chip, **never**
-    live-fetch mid-event); then flip `VITE_OFFLINE_MAP` on; an e2e (mock `/api/extract` —
-    CI has no `go-pmtiles`).
+    (POST → OPFS → a maplibre style over a pmtiles `FileSource`). `VITE_OFFLINE_MAP` is on in
+    the canonical deploy; glyphs (Latin + General Punctuation) + sprite shipped and kept in a
+    **deploy-surviving** SW cache (`flock-basemap-v1`); an **out-of-area chip** flags pins
+    beyond the saved map (**never** live-fetches mid-event). **Verified end-to-end on prod:**
+    onboard → add a place → "Save map offline" → 6.5 MB to OPFS → the vector map renders
+    offline with **no asset 404s**. **Follow-ups:** an e2e (mock `/api/extract` — CI has no
+    `go-pmtiles`); CJK/other-script glyph ranges if flock goes international; a per-IP
+    rate-limit on `/api/extract`.
   - **Multi-relay fan-out** — now unblocked by gift-wrap-everything (Phase A `[~]`);
     single relay = single point of failure.
   - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".
