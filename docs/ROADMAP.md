@@ -146,17 +146,19 @@ Two halves that compose into one feature:
     third-party calls** — confirmed in-browser). Fetched once → cached on-device → the map
     makes **zero** network calls at view time (no when/where-you-look leak) and works
     offline. Vector dusk restyle done.
-  - [~] **"Save this area" (Stage 2) — built & verified locally.** `app/src/area.ts`
-    (bbox of a circle's zones + buffer; tested), `server/extract.mjs` (clips the Protomaps
-    build **server-side** so the browser only ever talks to our origin — 413/400 guards,
-    `no-store`, bbox never logged), `app/src/offlineArea.ts` (POST → OPFS → a maplibre style
-    backed by a pmtiles `FileSource`), and a flag-gated UI (`VITE_OFFLINE_MAP`) on the map
-    screen. **Verified in a real browser:** save → 3.7 MB to OPFS → the map renders with
-    **zero** tile-network calls (only same-origin glyph/sprite). **Remaining:** deploy
-    `server/extract.mjs` behind Caddy on the host (discrete step — approach C: on-demand
-    remote extract, nothing hosted); SW-precache glyphs/sprite for *full* offline;
-    out-of-area disclosure (blank basemap + chip, **never** live-fetch mid-event); an e2e
-    (mock the extract endpoint — CI has no `go-pmtiles`).
+  - [~] **"Save this area" (Stage 2) — extract service DEPLOYED & LIVE; feature staged.**
+    `app/src/area.ts` (bbox of zones + buffer; tested) → `server/extract.mjs` on the host
+    (`flock-extract.service` on `127.0.0.1:8791`, Caddy `/api/extract`; clips the Protomaps
+    daily build **server-side** so the browser only ever talks to our origin — 400/413/429
+    guards, span + concurrency caps, `no-store`, bbox never logged) → `app/src/offlineArea.ts`
+    (POST → OPFS → a maplibre style over a pmtiles `FileSource`). Glyphs/sprite shipped to
+    prod and kept in a **deploy-surviving** SW cache (`flock-basemap-v1`). **Verified
+    end-to-end on the live origin:** `POST /api/extract` → valid `PMTiles` → OPFS round-trip;
+    and locally, render from OPFS with **zero** tile-network calls. The user-facing button is
+    behind `VITE_OFFLINE_MAP` — testable on prod now via `localStorage.flock.offlinemap='1'`.
+    **Remaining before launch:** out-of-area disclosure (blank basemap + chip, **never**
+    live-fetch mid-event); then flip `VITE_OFFLINE_MAP` on; an e2e (mock `/api/extract` —
+    CI has no `go-pmtiles`).
   - **Multi-relay fan-out** — now unblocked by gift-wrap-everything (Phase A `[~]`);
     single relay = single point of failure.
   - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".
