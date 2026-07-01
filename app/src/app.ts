@@ -11,6 +11,8 @@ import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { geocode, reverseGeocode } from './geo'
 import { formatCountdown } from './countdown'
+import { suggestMeetingPoint } from './meetingPoint'
+import type { RendezvousSuggestion, TransportMode } from 'rendezvous-kit'
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
@@ -52,8 +54,16 @@ import {
   decryptRendezvousStatus,
   RENDEZVOUS_SIGNAL_TYPE,
   RENDEZVOUS_STATUS_TYPE,
+  buildMeetingRequestSignal,
+  decryptMeetingRequest,
+  buildMeetingShareSignal,
+  decryptMeetingShare,
+  MEETING_REQUEST_TYPE,
+  MEETING_SHARE_TYPE,
   type Rendezvous,
   type RendezvousStatus,
+  type MeetingRequest,
+  type MeetingShare,
   type TravelMode,
   deriveBeaconKey,
   decryptBeacon,
@@ -140,13 +150,21 @@ interface CircleState {
   rzvStatuses: Map<string, RendezvousStatus>
   rendezvous: Rendezvous | null
   offgrid: Map<string, OffGrid>
+  // Meeting-point search (Phase F "where"): the active proposal, each member's
+  // opt-in coarse contribution, and the fair point the proposer's device computed.
+  meeting: MeetingRequest | null
+  meetingShares: Map<string, MeetingShare>
+  meetingSuggestion: RendezvousSuggestion | null
 }
 const circleStates = new Map<string, CircleState>()
 function cstate(id: string): CircleState {
   let s = circleStates.get(id)
-  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map() }; circleStates.set(id, s) }
+  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null }; circleStates.set(id, s) }
   return s
 }
+// Meeting-point requests I've declined to contribute to (by requestId). Declining
+// sends nothing — this only hides the "share your spot?" prompt on my own device.
+const meetingDismissed = new Set<string>()
 
 // Presence cache — mirror member beacons to localStorage so map pins survive a
 // refresh / PWA relaunch (a peer's next beacon can be up to a heartbeat — 5 min —
@@ -592,6 +610,8 @@ function circleView(): string {
     </div>
 
     ${pickupCard()}
+
+    ${meetingCard()}
 
     ${rzvCard()}
 
@@ -1250,6 +1270,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     patchCircleById(existing.id, { seedHex: payload.s })
     const st = cstate(existing.id)
     st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
+    st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
     beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(existing.id) // old-key pins are meaningless under the new seed
     toast('Circle key was rotated')
@@ -1292,6 +1313,7 @@ async function reseedCircle(removePk?: string): Promise<void> {
     patchCircleById(c.id, { seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) })
     const st = cstate(c.id)
     st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
+    st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
     beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(c.id) // old-key pins are meaningless under the new seed
     toast(removePk ? 'Member removed & key rotated' : 'Circle key rotated')
@@ -1550,6 +1572,153 @@ function syncRzvTicker(): void {
   else if (!want && rzvTicker) { clearInterval(rzvTicker); rzvTicker = 0 }
 }
 
+// ── Meeting point — the "where" of Phase F ────────────────────────────────────
+// "Some of us are in one bar, some in another — where do we all go?" A member
+// proposes; each other member may opt in and contribute a COARSE spot; the
+// proposer's device computes a fair midpoint on-device and turns it into an
+// ordinary rendezvous. Coordinates never leave except as a neighbourhood geohash
+// cell, and only from those who actively tap "share" (withhold-by-default holds).
+const MEETING_PRECISION = 6 // geohash chars ≈ neighbourhood; exactly policy's `coarse`
+const MEETING_TIME_BUDGET_MIN = 30 // reachability budget for the on-device isochrones
+const kitMode = (m: TravelMode): TransportMode => (m === 'transit' ? 'public_transit' : m)
+
+async function proposeMeeting(): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id) return
+  const request: MeetingRequest = {
+    id: `mtg-${nowSec().toString(36)}`,
+    setBy: id.pk,
+    mode: travelMode,
+    maxTimeMinutes: MEETING_TIME_BUDGET_MIN,
+    createdAt: nowSec(),
+  }
+  const cs = cstate(c.id)
+  cs.meeting = request
+  cs.meetingShares.clear()
+  cs.meetingSuggestion = null
+  try {
+    await publishSignal(await buildMeetingRequestSignal({ groupId: c.id, seedHex: c.seedHex, request }), c)
+    toast('Asking everyone for a rough spot')
+    render()
+    await contributeMeetingShare() // the proposer opts in too — my own coarse spot, if I have a fix
+  } catch { toast('Could not start the meeting-point search') }
+}
+
+// Publish my COARSE spot toward the active request. Shared by "propose" (proposer
+// auto-contributes) and the explicit "Share my spot" button. Coarsening to a
+// neighbourhood geohash cell happens here at the edge — the exact fix never leaves.
+async function contributeMeetingShare(): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  const cs = c ? cstate(c.id) : null
+  if (!c || !id || !cs?.meeting) return
+  if (!fix) { toast('Turn on sharing so we can use your rough spot'); return }
+  const geohash = encode(fix.lat, fix.lon, MEETING_PRECISION)
+  const share: MeetingShare = { requestId: cs.meeting.id, member: id.pk, geohash, precision: MEETING_PRECISION, mode: travelMode, timestamp: nowSec() }
+  try {
+    await publishSignal(await buildMeetingShareSignal({ groupId: c.id, seedHex: c.seedHex, share }), c)
+    cs.meetingShares.set(id.pk, share)
+    await refreshMeetingSuggestion(c.id)
+    render()
+  } catch { toast('Could not share your spot') }
+}
+
+// Declining contributes nothing — this only hides the prompt on my own device.
+function dismissMeeting(): void {
+  const m = active()?.meeting
+  if (m) meetingDismissed.add(m.id)
+  render()
+}
+
+// The proposer's device recomputes the fair point whenever the contributions
+// change (≥2 needed). Purely on-device: each coarse geohash is decoded back to its
+// cell centre and fed to the isochrone/fairness maths — no network, no raw coords.
+async function refreshMeetingSuggestion(circleId: string): Promise<void> {
+  const st = cstate(circleId)
+  const me = persisted.identity?.pk
+  if (!st.meeting || st.meeting.setBy !== me || st.meetingShares.size < 2) return
+  const participants = [...st.meetingShares.values()].map((s) => {
+    const d = decode(s.geohash)
+    return { lat: d.lat, lon: d.lon, label: nameFor(s.member) }
+  })
+  try {
+    const [suggestion] = await suggestMeetingPoint(participants, { mode: kitMode(st.meeting.mode), maxTimeMinutes: st.meeting.maxTimeMinutes })
+    st.meetingSuggestion = suggestion ?? null
+    render()
+  } catch { /* best effort — keep the last good suggestion on screen */ }
+}
+
+// Pick the fair point → it becomes an ordinary rendezvous (everyone gets the pin +
+// countdown via the machinery already built). Setting it supersedes the search.
+async function setMeetingAsRendezvous(): Promise<void> {
+  const cs = active()
+  const s = cs?.meetingSuggestion
+  if (!cs || !s) return
+  const { lat, lon } = s.venue
+  cs.meeting = null
+  cs.meetingShares.clear()
+  cs.meetingSuggestion = null
+  toast('Setting the meeting point…')
+  const g = await reverseGeocode(lat, lon) // bounded, best-effort; a fair midpoint is often a road
+  await shareRendezvous({
+    lat,
+    lon,
+    geohash: encode(lat, lon, 10),
+    label: g ? g.address.split(',')[0] : 'Meeting point',
+    ...(g ? { address: g.address } : {}),
+  })
+}
+
+function cancelMeeting(): void {
+  const cs = active()
+  if (cs) { cs.meeting = null; cs.meetingShares.clear(); cs.meetingSuggestion = null }
+  render()
+}
+
+// The meeting-point flow card — shown in place of the rendezvous setup while a
+// search is live. Contributors opt in; once ≥2 are in, the proposer sees the fair
+// point and can turn it into the rendezvous.
+function meetingCard(): string {
+  const me = persisted.identity?.pk
+  const cs = active()
+  const m = cs?.meeting
+  if (!cs || !m || cs.rendezvous) return '' // a set rendezvous always wins the display
+  const iProposed = m.setBy === me
+  const iShared = !!me && cs.meetingShares.has(me)
+  const dismissed = meetingDismissed.has(m.id)
+  const count = cs.meetingShares.size
+
+  const prompt = (!iShared && !dismissed)
+    ? `<div class="note">Share a rough spot (neighbourhood only) so we can pick somewhere fair.</div>
+       <div class="row" style="gap:10px">
+         <button class="btn small primary" data-action="share-meeting">Share my spot</button>
+         <button class="btn small ghost" data-action="dismiss-meeting">Not now</button>
+       </div>`
+    : `<div class="note">${count === 1 ? '1 person has' : `${count} people have`} shared a rough spot${iShared ? " — you're in" : ''}.</div>`
+
+  let suggestion = ''
+  if (iProposed && cs.meetingSuggestion) {
+    const s = cs.meetingSuggestion
+    const etas = Object.entries(s.travelTimes)
+      .map(([who, mins]) => `<div class="row" style="gap:10px"><span class="who" style="font-size:14px">${esc(who)}</span><span class="pill warn" style="margin-left:auto">${Math.round(mins)} min</span></div>`)
+      .join('')
+    suggestion = `<div class="note" style="margin-top:6px">📍 A fair spot for everyone (as-the-crow-flies):</div>
+      <div class="list">${etas}</div>
+      <button class="btn small primary" data-action="set-meeting-rzv">Set this as the rendezvous</button>`
+  } else if (iProposed) {
+    suggestion = `<div class="note">Waiting for a second spot to work out a fair place…</div>`
+  }
+
+  return `<div class="section-title" style="margin-top:22px">Meeting point</div>
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between"><strong>Finding where to meet</strong><span class="muted">${count} sharing</span></div>
+      ${prompt}
+      ${suggestion}
+      ${iProposed ? '<button class="btn small ghost" data-action="cancel-meeting">Cancel</button>' : ''}
+    </div>`
+}
+
 function rzvCard(): string {
   const me = persisted.identity?.pk
   const cs = active()
@@ -1579,6 +1748,8 @@ function rzvCard(): string {
         ${r.setBy === me ? '<button class="btn small ghost" data-action="clear-rzv">Clear rendezvous</button>' : ''}
       </div>`
   }
+  // While a meeting-point search is live, the meeting card stands in for the setup.
+  if (cs?.meeting) return ''
   return `<div class="section-title" style="margin-top:22px">Rendezvous</div>
     <div class="card stack">
       <div class="field"><input class="input" id="rzv-place" placeholder="The Crown, or an address — blank for here" autocapitalize="words" autocorrect="off" /></div>
@@ -1592,6 +1763,8 @@ function rzvCard(): string {
         <button class="btn small primary" data-action="set-rzv">Set rendezvous</button>
         <button class="btn small ghost" data-action="rzv-pick">📍 Pick on map</button>
       </div>
+      <div class="note" style="margin-top:2px">Not sure where? Everyone shares a rough spot and flock picks a fair place.</div>
+      <button class="btn small ghost" data-action="propose-meeting">🧭 Find a meeting point</button>
     </div>`
 }
 
@@ -1624,6 +1797,11 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'rzv-pick': pickRzvOnMap(); break
     case 'rzv-pick-set': void setRzvFromMap(); break
     case 'rzv-pick-cancel': cancelRzvPick(); break
+    case 'propose-meeting': void proposeMeeting(); break
+    case 'share-meeting': void contributeMeetingShare(); break
+    case 'dismiss-meeting': dismissMeeting(); break
+    case 'set-meeting-rzv': void setMeetingAsRendezvous(); break
+    case 'cancel-meeting': cancelMeeting(); break
     case 'ask-dark': goingDark = true; render(); break
     case 'cancel-dark': goingDark = false; render(); break
     case 'dark-dur': {
@@ -2100,6 +2278,7 @@ function resetDevice(): void {
   mapView = null
   fix = null
   circleStates.clear()
+  meetingDismissed.clear()
   beaconCadence.clear()
   persisted = store.load()
   onboardStep = 'intro'
@@ -2173,11 +2352,27 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
     } else if (t === RENDEZVOUS_SIGNAL_TYPE) {
       st.rendezvous = await decryptRendezvous(c.seedHex, e.content)
       st.rzvStatuses.clear()
+      st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null // a set rendezvous supersedes any in-flight search
     } else if (t === RENDEZVOUS_STATUS_TYPE) {
       const status = await decryptRendezvousStatus(c.seedHex, e.content)
       st.rzvStatuses.set(status.member, status)
       if (status.status === 'at-risk' && st.rendezvous?.setBy === me?.pk && status.member !== me?.pk) {
         toast(`⚠ ${nameFor(status.member)} may miss the rendezvous`)
+      }
+    } else if (t === MEETING_REQUEST_TYPE) {
+      const request = await decryptMeetingRequest(c.seedHex, e.content)
+      // A brand-new proposal resets the contributions; an echo of the current one keeps them.
+      if (st.meeting?.id !== request.id) {
+        st.meeting = request
+        st.meetingShares.clear()
+        st.meetingSuggestion = null
+        if (!me || request.setBy !== me.pk) toast(`${nameFor(request.setBy)} wants to find a place to meet`)
+      }
+    } else if (t === MEETING_SHARE_TYPE) {
+      const share = await decryptMeetingShare(c.seedHex, e.content)
+      if (st.meeting && share.requestId === st.meeting.id) {
+        st.meetingShares.set(share.member, share)
+        await refreshMeetingSuggestion(c.id) // proposer-only inside; recomputes the fair point
       }
     } else if (t === OFFGRID_SIGNAL_TYPE) {
       const o = await decryptOffGrid(c.seedHex, e.content)

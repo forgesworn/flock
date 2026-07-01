@@ -1,6 +1,6 @@
 # Fair meeting point + granular location precision
 
-**Date:** 2026-07-01 · **Owner:** TBD · **Status:** design; build in slices after review
+**Date:** 2026-07-01 · **Owner:** TBD · **Status:** Slices 1 & 2 **shipped**; Slice 3 (venues + granular precision) pending
 
 ## Why this exists
 
@@ -115,12 +115,16 @@ personal tags):
 
 ## Phasing (build in slices)
 
-- **Slice 1 — engine core (pure, no UI/privacy surface).** Add the dep; implement the
-  on-device `RoutingEngine`; a thin `app/src/meetingPoint.ts` wrapping `findRendezvous`
-  (centroid-first). Full TDD. Deliverable: N coarse points → a ranked fair point.
-- **Slice 2 — the flow, single precision.** `meeting-request` + opt-in `meeting-share`
-  signals; proposer computes + shows suggestion cards; pick → set-rendezvous. Two-person
-  e2e. Uses the Neighbourhood default only.
+- ✅ **Slice 1 — engine core (pure, no UI/privacy surface).** Added the dep; implemented
+  the on-device `RoutingEngine` + `suggestMeetingPoint` in `app/src/meetingPoint.ts`
+  (centroid-first, +6 unit tests). We compose rendezvous-kit's geo primitives ourselves
+  rather than calling its `findRendezvous` — that always hits public Overpass, an
+  un-injectable third-party leak. Deliverable met: N coarse points → a ranked fair point.
+- ✅ **Slice 2 — the flow, single precision.** `mtg-req` + opt-in `mtg-loc` signals
+  (`src/meeting.ts`, +6 unit tests); the proposer's device computes + shows a suggestion
+  card; pick → set-rendezvous. Two-person **e2e** (`e2e/meeting.spec.ts`). Neighbourhood
+  (geohash-6) default only. `mtg-loc` carries an **already-encoded coarse geohash** (not
+  raw lat/lon), keeping coordinates out of the library and the coarsening at the edge.
 - **Slice 3 — granular precision + map pins + venues.** Per-circle default + per-person
   override + targeted exact beacons; map pins at disclosed precision; the Overpass proxy +
   venue types + fairness toggle.

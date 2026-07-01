@@ -12,7 +12,7 @@ and a real launch.
 - **Uber privacy** — the relay is untrusted; minimise all metadata (see `PRIVACY.md`).
 - **Minimal footprint (north star)** — flock must be nearly *free to run*: negligible **battery**, negligible **relay traffic**, negligible **metadata**. These are one idea, not three — disclosure-on-event (share only what a moment needs) is the same discipline as sample/emit-only-when-needed. The clean tell: **coarse sharing should use coarse, low-power location** (network/cell, not GPS) — a battery win that is *also* a privacy win (hardware that can't over-collect). Tracked in **Phase H**.
 - **Full e2e tests** — Playwright drives **two real browser contexts (two identities)** that talk to each other through `relay.trotters.cc`, so every assertion is on the *other* person's screen — the gift-wrap → relay → unwrap → decrypt → render path, proven between people. **No feature is "done" without an e2e.**
-  - ✅ **Covered** (`e2e/`, `npm run test:e2e` — 22 specs, green with one occasional live-relay retry): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map), and **rendezvous** (A map-picks a meeting point → B receives the flag pin **and** a live ticking countdown). Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
+  - ✅ **Covered** (`e2e/`, `npm run test:e2e` — 29 flows across 17 spec files, green with one occasional live-relay retry): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map), **rendezvous** (A map-picks a meeting point → B receives the flag pin **and** a live ticking countdown), and **meeting point** (A proposes → B **opts in** with a coarse spot → A's device computes a fair midpoint **on-device** → the pick lands on B as a rendezvous). Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
   - ✅ **Regression backbone** — the security-critical `decideEmission` core has an **exhaustive truth-table** (`src/policy.matrix.test.ts`): every one of the 216 permutations of mode × trigger × off-grid × position × geofence × no-report, checked against a differential oracle **and** standalone safety invariants (an SOS always fires; nothing emits without a position; off-grid never silences a trigger; a no-report zone never pins a sensitive address). 344 unit tests total.
   - 🐛 **Bug the e2e caught & fixed**: the 3-party test surfaced a roster-update race — `ensureMember` trusted a circle snapshot captured before an `await`, so two first-contact signals arriving together would let the later write clobber the earlier one, silently dropping a member (who'd then be skipped by reseeds and lists). Fixed to re-read the live roster.
   - 🐛 **Bug the e2e *missed* — and the guard that now catches it**: the map rendered **blank** on the live site. maplibre tags `#map` with `.maplibregl-map{position:relative}`, which (equal specificity, loaded later) beat the app's `.map-canvas{position:absolute;inset:0}` and collapsed the container to **height 0** — yet tiles still loaded and the canvas stayed "visible", so the e2e's visibility check passed while the map showed nothing. Fixed with a higher-specificity selector; `map.spec.ts` now asserts `#map` has real height. **And a release bug it exposed:** the service worker was serving returning users a **stale cached `index.html`** (pinning old hashed assets), so deploys silently didn't land — fixed by cache-busting the SW (`{ cache: 'reload' }` navigations + cache-name bump) and `Cache-Control: no-cache` on `index.html`. *Lesson: "canvas visible" ≠ "content rendered" — assert real dimensions.*
@@ -156,15 +156,35 @@ Two halves that compose into one feature:
   independent of member pins so it persists across presence updates and shows with
   no beacons). A two-person **e2e** (`e2e/rendezvous.spec.ts`) proves map-pick →
   B receives the flag pin **and** a *ticking* countdown over the live relay.
-- [ ] **Find a fair meeting point** — **rendezvous-kit** `findRendezvous()`:
-  members' coarse locations + each one's transport mode → isochrone intersection
-  → **Overpass venue search** (pub/café/park, OSM, no key) → **fairness scoring**
-  (`min_max` / `min_total` / `min_variance`) → ranked suggestions. "Some in bar A,
-  some in bar B → where do we all go?" The pick becomes a set rendezvous.
-  Engine-agnostic — start with a no-engine radius isochrone (distance/speed),
-  plug a routing engine (Valhalla/ORS/OSRM) later for road-accurate times.
-  rendezvous-kit deps only on `geohash-kit` (already in flock) — clean fit, and
-  flock becomes its real-world driver.
+- [x] **Find a fair meeting point** — "some in bar A, some in bar B → where do we
+  all go?", computed **entirely on-device** over **rendezvous-kit**. Two slices
+  shipped:
+  - **Slice 1 — engine core** (`app/src/meetingPoint.ts`, +6 unit tests). A flock
+    **on-device `RoutingEngine`** — radius isochrone (`circleToPolygon`, speed ×
+    time) + a haversine travel-time matrix, pure/offline/deterministic so **member
+    coordinates never leave the device** and there is **no third-party call**
+    (rendezvous-kit's own `findRendezvous` always hits public Overpass, so we
+    compose its geo primitives ourselves). `suggestMeetingPoint()` intersects the
+    isochrones and returns the centre of the overlap (centroid fallback when they
+    don't), with per-person ETAs + **fairness score** (`min_max` / `min_total` /
+    `min_variance`). A real engine (Valhalla/ORS) can slot behind the same seam
+    later — **opt-in, never a silent fallback**.
+  - **Slice 2 — the flow** (`src/meeting.ts` lib + Circle UI, +6 unit tests). New
+    protocol signals **`mtg-req`** (a proposal: mode + time budget) and **`mtg-loc`**
+    (a member's **opt-in, coarse** contribution — a neighbourhood **geohash-6 cell**,
+    never an exact fix), both group-envelope encrypted like rendezvous. Flow:
+    propose → each member taps **"Share my spot"** (declining sends nothing —
+    withhold-by-default holds) → the **proposer's device** decodes the coarse cells
+    and computes the fair point → **suggestion card** with everyone's ETA → **pick →
+    it becomes an ordinary set-rendezvous** (the pin + live countdown machinery
+    already built). A two-person **e2e** (`e2e/meeting.spec.ts`) proves propose →
+    B opts in → A computes → set → B receives the rendezvous, over the live relay.
+- [ ] **Meeting point — Slice 3 (venues + granular precision).** Real **venue
+  suggestions** via a same-origin **Overpass proxy** (pub/café/park, OSM, no key —
+  the kit sends only the search polygon, never participants), the fairness toggle
+  in the UI, **per-person precision overrides** (exact only to a named individual,
+  via their personal-inbox tag), and contributor **map pins at disclosed precision**.
+  See `docs/plans/2026-07-01-fair-meeting-point.md`.
 
 ## Phase G — Platform & release
 

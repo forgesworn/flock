@@ -73,7 +73,7 @@ A **breach** is being outside *every* fence in the set (`isBreach` /
 ### 3.3 Signals — kind `20078` (ephemeral)
 
 Built with `buildSignalEvent`; the `t` tag carries the type. Ephemeral events are
-not stored by relays. Four types:
+not stored by relays. Core types (`t` → payload / key / trigger):
 
 | `t` | Payload | Key | Trigger |
 |---|---|---|---|
@@ -82,12 +82,25 @@ not stored by relays. Four types:
 | `pickup` | `BeaconPayload` | beacon key | "pick me up" pressed |
 | `help`  | `DuressAlert`  | duress key | SOS / duress |
 | `checkin` | `CheckIn {member, timestamp, intervalSeconds}` | group envelope key (`deriveGroupKey`) | dead-man's-switch heartbeat |
+| `rzv` | `Rendezvous {id, place, deadline, mode, setBy, createdAt}` | group envelope key | someone sets "be at a place by a time" |
+| `rzv-status` | `RendezvousStatus {rendezvousId, member, status, etaSeconds, timestamp}` | group envelope key | a member's en-route / arrived / at-risk update |
+| `mtg-req` | `MeetingRequest {id, setBy, mode, maxTimeMinutes, createdAt}` | group envelope key | propose finding a fair meeting point |
+| `mtg-loc` | `MeetingShare {requestId, member, geohash, precision, mode, timestamp}` | group envelope key | **opt-in, coarse** spot toward a meeting point |
 
 `BeaconPayload` (`encryptBeacon`/`decryptBeacon`):
 
 ```jsonc
 { "geohash": "gcpuuz", "precision": 6, "timestamp": 1781913600 }
 ```
+
+**Meeting point (`mtg-req` / `mtg-loc`).** Finding a fair place needs locations, so
+it is a **new, voluntary, per-request disclosure** that must not become a standing
+leak. A proposal (`mtg-req`) invites contributions; each `mtg-loc` is a member's
+**coarse** cell only — a neighbourhood geohash (precision 6, = `policy.coarse`),
+**never an exact fix** — and **only sent if they actively opt in** (declining sends
+nothing, which is observationally identical to sharing). The proposer's device
+decodes the coarse cells and computes the fair midpoint **entirely on-device** (no
+third-party routing/venue call); the chosen point is published as an ordinary `rzv`.
 
 `help` reuses canary-kit's `DuressAlert` verbatim (`buildHelpSignal` →
 `buildDuressAlert` + `encryptDuressAlert`): `{ type, member, geohash, precision,
