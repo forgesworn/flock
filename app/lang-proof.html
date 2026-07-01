@@ -2,7 +2,9 @@
 <!-- Market glyph/label proof for the offline vector basemap (src/basemap.ts).
      Renders a bundled town PMTiles with the offline dusk style to confirm each
      launch market's diacritics render — no tofu boxes, no font 404s. Served by Vite:
-       /lang-proof.html?src=<town>&c=<lon>,<lat>&z=15
+       /lang-proof.html?src=<town>&c=<lon>,<lat>&z=15[&lang=de]
+     Labels follow the device locale by default (src/lang.ts); add &lang=<code> to
+     preview a market's local names (e.g. &lang=de → München, &lang=cs → Praha).
 
      Initial launch markets — all Latin-script, fully covered by the shipped glyph
      ranges (0–2047 + 8192–8703; see scripts/fetch-basemap-assets.mjs). Verified:
@@ -35,10 +37,11 @@
       const src = q.get('src') || 'harrogate'
       const [lon, lat] = (q.get('c') || '-1.54,53.99').split(',').map(Number)
       const zoom = Number(q.get('z') || 14)
+      const lang = q.get('lang') || undefined // undefined → device-locale default
 
       window.__errs = []
       registerPmtilesProtocol()
-      const style = pmtilesStyle(`${location.origin}/basemap/${src}.pmtiles`)
+      const style = pmtilesStyle(`${location.origin}/basemap/${src}.pmtiles`, lang)
       const map = new maplibregl.Map({ container: 'map', style, center: [lon, lat], zoom })
       map.on('error', (e) => window.__errs.push(String(e && e.error ? e.error : e)))
       map.on('load', () => map.once('idle', () => { window.__ready = true }))
