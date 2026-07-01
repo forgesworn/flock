@@ -22,8 +22,13 @@ export interface InnerEvent { kind: number; content: string; tags: string[][]; c
 export interface Rumor { pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; id?: string }
 
 /** Gift-wrap an inner event to a recipient pubkey. Seal signed by the signer
- *  (real key), wrap signed by a throwaway key. Hides sender, kind, and tags. */
-export async function giftWrap(signer: FlockSigner, recipientPk: string, inner: InnerEvent): Promise<SignedEvent> {
+ *  (real key), wrap signed by a throwaway key. Hides sender, kind, and tags.
+ *
+ *  `routeTag` is the `#p` value the relay files the wrap under; it defaults to
+ *  `recipientPk`. Encryption is ALWAYS to `recipientPk`, so decryption is
+ *  unaffected — pass a derived tag (e.g. `personalInboxTag`) to keep a real npub
+ *  off the wire while still delivering to that recipient. */
+export async function giftWrap(signer: FlockSigner, recipientPk: string, inner: InnerEvent, routeTag: string = recipientPk): Promise<SignedEvent> {
   const rumor: Rumor = {
     pubkey: signer.pubkey,
     created_at: inner.created_at ?? nowSec(),
@@ -37,7 +42,7 @@ export async function giftWrap(signer: FlockSigner, recipientPk: string, inner: 
   const ephSk = generateSecretKey()
   const wrapContent = nip44encrypt(JSON.stringify(seal), getConversationKey(ephSk, recipientPk))
   return finalizeEvent(
-    { kind: 1059, content: wrapContent, tags: [['p', recipientPk]], created_at: wrapTime() },
+    { kind: 1059, content: wrapContent, tags: [['p', routeTag]], created_at: wrapTime() },
     ephSk,
   ) as unknown as SignedEvent
 }

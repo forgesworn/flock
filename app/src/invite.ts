@@ -1,8 +1,10 @@
-// Secure invites & reseed — NIP-59 gift wrap addressed to a recipient's real key
-// (via the shared giftwrap module). The seal is signed by the member's signer
-// (LocalSigner or Signet), so a key in a bunker works too.
+// Secure invites & reseed — NIP-59 gift wrap encrypted to a recipient's real key,
+// but filed at the relay under a derived `personalInboxTag` (not the npub) so a
+// real, public Nostr identity never lands on the wire. The seal is signed by the
+// member's signer (LocalSigner or Signet), so a key in a bunker works too.
 
 import { giftWrap, giftUnwrap } from './giftwrap'
+import { personalInboxTag } from './keys'
 import type { FlockSigner, SignedEvent } from './signer'
 import type { Mode } from './store'
 
@@ -18,9 +20,11 @@ export interface InvitePayload {
 const RUMOR_KIND = 14
 const SEED_RE = /^[0-9a-f]{64}$/
 
-/** Gift-wrap an invite/reseed payload to a single recipient pubkey via the signer. */
+/** Gift-wrap an invite/reseed payload to a single recipient pubkey via the signer.
+ *  Encrypted to their real key; filed at the relay under `personalInboxTag` so the
+ *  npub itself is never exposed. */
 export function buildInviteWrap(signer: FlockSigner, recipientPk: string, payload: InvitePayload): Promise<SignedEvent> {
-  return giftWrap(signer, recipientPk, { kind: RUMOR_KIND, content: JSON.stringify(payload), tags: [] })
+  return giftWrap(signer, recipientPk, { kind: RUMOR_KIND, content: JSON.stringify(payload), tags: [] }, personalInboxTag(recipientPk))
 }
 
 /** Gift-wrap a reseed payload to many recipients. */

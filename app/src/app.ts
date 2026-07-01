@@ -7,7 +7,7 @@ import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
 import { PRIVATE_RELAYS, parseRelayList } from './relays'
-import { deriveCircleSeed, deriveInbox } from './keys'
+import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { geocode } from './geo'
 import { getProfile, fetchProfiles } from './profiles'
@@ -1073,7 +1073,8 @@ function ensureInviteSub(): void {
   if (key === inviteSubKey && stopInviteSub) return
   stopInviteSub?.()
   inviteSubKey = key
-  stopInviteSub = svc.subscribeGiftWraps(persisted.relayUrls, id.pk, (e) => { void onInviteWrap(e) })
+  // Listen on our derived personal-inbox tag, not our npub — the relay never sees a real key.
+  stopInviteSub = svc.subscribeGiftWraps(persisted.relayUrls, personalInboxTag(id.pk), (e) => { void onInviteWrap(e) })
 }
 
 async function onInviteWrap(e: { pubkey: string; content: string; tags: string[][] }): Promise<void> {

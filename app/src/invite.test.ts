@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { generateSecretKey } from 'nostr-tools/pure'
 import { makeLocalSigner } from './signer'
 import { buildInviteWrap, buildReseedWraps, readInvite, type InvitePayload } from './invite'
+import { personalInboxTag } from './keys'
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 const signer = () => makeLocalSigner(hex(generateSecretKey()))
@@ -15,7 +16,11 @@ describe('signer-based NIP-59 gift-wrapped invites', () => {
     const bob = signer()
     const wrap = await buildInviteWrap(alice, bob.pubkey, payload)
     expect(wrap.kind).toBe(1059)
-    expect(wrap.tags.find((t) => t[0] === 'p')?.[1]).toBe(bob.pubkey)
+    // Filed under Bob's derived personal-inbox tag, NOT his npub — the real key
+    // never lands on the wire, yet Bob (who can recompute the tag) still receives it.
+    const pTag = wrap.tags.find((t) => t[0] === 'p')?.[1]
+    expect(pTag).toBe(personalInboxTag(bob.pubkey))
+    expect(pTag).not.toBe(bob.pubkey)
     expect(await readInvite(bob, wrap)).toEqual(payload)
   })
 

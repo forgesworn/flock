@@ -10,9 +10,12 @@
 // signing identity, and is the single thing to back up (e.g. via shamir-words).
 
 import { fromNsec, derive } from 'nsec-tree'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
 import { fromHex } from './store'
 
 const toHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
+const enc = new TextEncoder()
 
 /** Derive a circle's 64-hex shared seed for a given epoch. Reseed = epoch + 1. */
 export function deriveCircleSeed(circleRootHex: string, circleId: string, epoch: number): string {
@@ -30,4 +33,22 @@ export function deriveCircleSeed(circleRootHex: string, circleId: string, epoch:
 export function deriveInbox(seedHex: string): { sk: Uint8Array; pk: string } {
   const id = derive(fromNsec(fromHex(seedHex)), 'flock:inbox', 0)
   return { sk: id.privateKey, pk: toHex(id.publicKey) }
+}
+
+/**
+ * A stable, non-reversible routing tag for a member's **personal inbox** — used as
+ * the `#p` tag on invite/reseed gift wraps instead of the member's real pubkey.
+ *
+ * The wrap is still NIP-44 encrypted to the real key (so only they can decrypt);
+ * this tag only tells the relay *where to file it*. Anyone who already knows the
+ * member's npub can recompute the tag to address them, but the relay — which never
+ * learns the npub — sees only an opaque hash it cannot reverse. This closes the one
+ * place a real, public Nostr identity used to touch the wire (the invite/reseed
+ * channel); steady-state signals already use a rotating derived inbox.
+ *
+ * Static (not time-rotated) on purpose: a removal-reseed must still be received if
+ * it was sent while the member was offline for days, which a rotating tag would miss.
+ */
+export function personalInboxTag(pubHex: string): string {
+  return bytesToHex(sha256(enc.encode(`flock:personal-inbox:v1:${pubHex.toLowerCase()}`)))
 }

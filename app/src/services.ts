@@ -61,17 +61,19 @@ export async function publishSigned(relays: readonly string[], signed: { id: str
   return signed
 }
 
-/** Subscribe to NIP-59 gift wraps (kind 1059) addressed to me, across all relays.
- *  One subscribeMany call → the pool dedupes the same wrap arriving from several
- *  relays (per-call known-id set). Returns an unsubscribe fn. */
+/** Subscribe to NIP-59 gift wraps (kind 1059) filed under a `#p` tag I own, across
+ *  all relays. The tag is a derived inbox (signals) or a `personalInboxTag`
+ *  (invites/reseeds) — never a bare npub. One subscribeMany call → the pool dedupes
+ *  the same wrap arriving from several relays (per-call known-id set). Returns an
+ *  unsubscribe fn. */
 export function subscribeGiftWraps(
   relays: readonly string[],
-  myPubkey: string,
+  pTag: string,
   onEvent: (e: { id: string; pubkey: string; content: string; tags: string[][]; created_at: number }) => void,
 ): () => void {
   const sub = getPool().subscribeMany(
     [...relays],
-    { kinds: [1059], '#p': [myPubkey] },
+    { kinds: [1059], '#p': [pTag] },
     { onevent: onEvent },
   )
   return () => sub.close()
