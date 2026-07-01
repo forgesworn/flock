@@ -341,6 +341,45 @@ hardware cost to what we actually disclose. (Ordered biggest-win-first.)
   measurement, gated exactly like the native background work (Phase 0 / no test devices
   yet). Ship the foreground PWA wins now; measure on-device when hardware lands.
 
+## Phase I — Product-audit hardening (2026-07-02)
+
+A full product audit (docs + spec + every module, findings verified in code)
+found the wire protocol sound — gift-wrap-everything has no bypass path, key
+domain separation holds — and the gaps clustered around the **human failure
+modes**. Plan with designs, decisions, and per-slice tests:
+`docs/plans/2026-07-02-product-audit-hardening.md`. In priority order:
+
+- [ ] **Slice 1 — no-report zones fail-safe under GPS noise** 🔴 — the cap uses crisp
+  `isInside` while breach uses accuracy-aware `classifyContainment`; a noisy fix near a
+  private place during an SOS can pin the exact address. Treat `uncertain` as inside
+  (capped); extend the truth-table.
+- [ ] **Slice 2 — confirm destructive actions** 🔴 — "Sign out & reset" and "Remove
+  member" execute on one tap; apply the disband two-step inline confirm idiom.
+- [ ] **Slice 3 — safe places sync across the circle** 🔴 — fences are device-local
+  only, so a guardian's safe place does nothing on the child's phone (FLOCK.md §3.2
+  unimplemented + stale). Gift-wrapped `t:'fences'` full-set signal, latest-wins,
+  per-circle model + migration; private places stay device-only by design. 3 sub-slices.
+- [ ] **Slice 4 — circle-root backup & restore** 🟠 — no export of `circleRootHex`
+  exists; device loss destroys every circle. Passphrase-encrypted export/import
+  (PBKDF2 → canary-kit envelope, no new crypto) as the stopgap before shamir-words.
+- [ ] **Slice 5 — duress cover for stop-sharing / disarm / off-grid** 🟠 — FLOCK.md
+  §6.1's coerced-stop silent alarm is unimplemented at the three real coercion points;
+  silent long-press variants riding the existing duress-key + tell-safe machinery.
+- [ ] **Slice 6 — uniform NIP-40 expiry on every gift wrap** 🟠 — wraps are retained by
+  relays forever; a future root compromise decrypts a family's whole history. One
+  uniform window (16 d, derived from the backdated `created_at` so no new metadata).
+- [ ] **Slice 7 — "joined the circle" notice** 🟡 — `ensureMember` adds seed-holders
+  silently; surface a banner so a leaked invite code is visible, not invisible.
+- [ ] **Slice 8 — permission-denied guidance + invite-wait feedback** 🟡 — denying
+  geolocation is a silent dead end (raw error toast, toggle reverts unexplained);
+  remote-invite wait spins forever with no timeout copy.
+- [ ] **Slice 9 — invite hygiene: share-sheet over clipboard** 🟡 — the raw seed on the
+  OS clipboard can cloud-sync; prefer QR + `navigator.share`, sharpen the fallback copy.
+- [ ] **Slice 10 — Cloudflare in the threat model + private map default** 🟡 — CF
+  terminates TLS in front of the same-origin proxies (sees IP + viewports/bboxes ≈
+  home); grey-cloud or document honestly, and flip the proven offline/vector basemap
+  to default.
+
 ## Resolved inputs
 
 - **Relay set** ✅ — adopted from `pallasite/src/credits.ts` into `app/src/relays.ts`:
