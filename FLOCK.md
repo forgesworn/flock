@@ -85,7 +85,7 @@ not stored by relays. Core types (`t` → payload / key / trigger):
 | `rzv` | `Rendezvous {id, place, deadline, mode, setBy, createdAt}` | group envelope key | someone sets "be at a place by a time" |
 | `rzv-status` | `RendezvousStatus {rendezvousId, member, status, etaSeconds, timestamp}` | group envelope key | a member's en-route / arrived / at-risk update |
 | `mtg-req` | `MeetingRequest {id, setBy, mode, maxTimeMinutes, createdAt}` | group envelope key | propose finding a fair meeting point |
-| `mtg-loc` | `MeetingShare {requestId, member, geohash, precision, mode, timestamp}` | group envelope key | **opt-in, coarse** spot toward a meeting point |
+| `mtg-loc` | `MeetingShare {requestId, member, geohash, precision, mode, timestamp}` | group envelope key (coarse) **or** recipient's key via NIP-59 (exact) | **opt-in** spot toward a meeting point — coarse to the group, or exact to one named person |
 
 `BeaconPayload` (`encryptBeacon`/`decryptBeacon`):
 
@@ -95,12 +95,22 @@ not stored by relays. Core types (`t` → payload / key / trigger):
 
 **Meeting point (`mtg-req` / `mtg-loc`).** Finding a fair place needs locations, so
 it is a **new, voluntary, per-request disclosure** that must not become a standing
-leak. A proposal (`mtg-req`) invites contributions; each `mtg-loc` is a member's
-**coarse** cell only — a neighbourhood geohash (precision 6, = `policy.coarse`),
-**never an exact fix** — and **only sent if they actively opt in** (declining sends
-nothing, which is observationally identical to sharing). The proposer's device
-decodes the coarse cells and computes the fair midpoint **entirely on-device** (no
-third-party routing/venue call); the chosen point is published as an ordinary `rzv`.
+leak. A proposal (`mtg-req`) invites contributions; each `mtg-loc` is **only sent if
+the member actively opts in** (declining sends nothing, which is observationally
+identical to sharing). By default a contribution is a member's **coarse** cell only —
+a neighbourhood geohash (precision 6, = `policy.coarse`) — sent to the group inbox.
+
+A member may additionally choose **"exact, only to &lt;proposer&gt;"**: the coarse cell
+still goes to the group, **plus** a precise (geohash-9) `mtg-loc` **gift-wrapped
+(NIP-59) to the proposer's personal inbox** — encrypted to *their* key and filed
+under `personalInboxTag`, so only the proposer decrypts it and no npub reaches the
+relay. Exact never reaches the group; the finer disclosure is preferred whichever
+order the two land in.
+
+The proposer's device decodes the cells and computes the fair midpoint **entirely
+on-device**. It may then search **real venues** via a **same-origin Overpass proxy**
+(`/overpass/*`) — only the search-area **bounding box** leaves the device, never a
+participant's coordinates — and the chosen point is published as an ordinary `rzv`.
 
 `help` reuses canary-kit's `DuressAlert` verbatim (`buildHelpSignal` →
 `buildDuressAlert` + `encryptDuressAlert`): `{ type, member, geohash, precision,

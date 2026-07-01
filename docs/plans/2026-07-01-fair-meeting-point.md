@@ -1,6 +1,6 @@
 # Fair meeting point + granular location precision
 
-**Date:** 2026-07-01 · **Owner:** TBD · **Status:** Slices 1 & 2 **shipped**; Slice 3 (venues + granular precision) pending
+**Date:** 2026-07-01 · **Owner:** TBD · **Status:** Slices 1–3 **shipped** (engine, flow, venues, fairness, per-person exact, map overlays)
 
 ## Why this exists
 
@@ -125,9 +125,18 @@ personal tags):
   card; pick → set-rendezvous. Two-person **e2e** (`e2e/meeting.spec.ts`). Neighbourhood
   (geohash-6) default only. `mtg-loc` carries an **already-encoded coarse geohash** (not
   raw lat/lon), keeping coordinates out of the library and the coarsening at the edge.
-- **Slice 3 — granular precision + map pins + venues.** Per-circle default + per-person
-  override + targeted exact beacons; map pins at disclosed precision; the Overpass proxy +
-  venue types + fairness toggle.
+- ✅ **Slice 3 — venues + granular precision + map pins.** Shipped in four sub-slices:
+  **3a** venues via a same-origin `/overpass` proxy (`app/src/venues.ts` → `searchVenues`,
+  bounding box only, best-effort with a centroid fallback); **3b** the fairness toggle
+  (min_max / min_total / min_variance), re-ranking the **cached** venues in place;
+  **3c** per-person **exact** precision — a contributor's precise (geohash-9) spot
+  gift-wrapped to the proposer's personal inbox (coarse still goes to the group), the
+  finer disclosure preferred whichever order they arrive; **3d** contributor cells at
+  disclosed precision (coarse blob / exact dot) + the venue pin on the proposer's map.
+  **Not built** (deferred, no forcing use yet): a per-**circle** default-precision
+  *setting* and arbitrary per-person overrides stored like petnames — the exact opt-in
+  targets the proposer (the one who computes), which covers the meeting-point need; the
+  ladder generalises to named individuals when a use lands.
 
 ## Privacy invariants / non-goals
 
@@ -140,9 +149,14 @@ personal tags):
 - Not doing (v1): continuous real-time tracking (this is a one-shot, opt-in contribution);
   road-accurate ETAs (as-the-crow-flies, like the existing rendezvous ETA).
 
-## Open questions
+## Open questions — resolved
 
-- Publish `rendezvous-kit` to npm, or workspace-link it into flock for now?
-- Default time budget + mode for a night-out context (e.g. 30 min, walk)?
-- Should a `meeting-request` auto-expire (NIP-40) like transient circles?
-- Do coarse contributions reuse the existing beacon signal, or is `mtg-loc` cleaner?
+- **Publish `rendezvous-kit` to npm, or workspace-link?** Installed as a dependency
+  (`^1.21.6`); flock composes its geo primitives + `searchVenues` directly (never
+  `findRendezvous`, which hard-codes public Overpass). Resolved.
+- **Default time budget + mode?** 30 min, walk (`MEETING_TIME_BUDGET_MIN` / `travelMode`).
+- **Should `mtg-req` auto-expire (NIP-40)?** Not needed — the search is short-lived and
+  cleared locally on set / cancel / a superseding rendezvous; it's an ephemeral signal,
+  not a stored event.
+- **Reuse the beacon signal or a dedicated `mtg-loc`?** Dedicated `mtg-loc` — cleaner: it
+  carries a `requestId` and is scoped to the request, not standing presence. Resolved.

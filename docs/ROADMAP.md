@@ -12,7 +12,7 @@ and a real launch.
 - **Uber privacy** — the relay is untrusted; minimise all metadata (see `PRIVACY.md`).
 - **Minimal footprint (north star)** — flock must be nearly *free to run*: negligible **battery**, negligible **relay traffic**, negligible **metadata**. These are one idea, not three — disclosure-on-event (share only what a moment needs) is the same discipline as sample/emit-only-when-needed. The clean tell: **coarse sharing should use coarse, low-power location** (network/cell, not GPS) — a battery win that is *also* a privacy win (hardware that can't over-collect). Tracked in **Phase H**.
 - **Full e2e tests** — Playwright drives **two real browser contexts (two identities)** that talk to each other through `relay.trotters.cc`, so every assertion is on the *other* person's screen — the gift-wrap → relay → unwrap → decrypt → render path, proven between people. **No feature is "done" without an e2e.**
-  - ✅ **Covered** (`e2e/`, `npm run test:e2e` — 29 flows across 17 spec files, green with one occasional live-relay retry): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map), **rendezvous** (A map-picks a meeting point → B receives the flag pin **and** a live ticking countdown), and **meeting point** (A proposes → B **opts in** with a coarse spot → A's device computes a fair midpoint **on-device** → the pick lands on B as a rendezvous). Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
+  - ✅ **Covered** (`e2e/`, `npm run test:e2e` — 33 flows across 21 spec files, green with one occasional live-relay retry): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map), **rendezvous** (A map-picks a meeting point → B receives the flag pin **and** a live ticking countdown), and the **meeting point** end-to-end (A proposes → B **opts in** with a coarse spot → A's device computes a fair midpoint **on-device** → the pick lands on B as a rendezvous), plus its **Slice 3** enrichments — a **named venue** upgrade (Overpass mocked for determinism), the **fairness** toggle re-ranking in place, contributor **cells + the venue pin** on the proposer's map, and a **per-person exact** share reaching the proposer alone as a crisp dot while the group stays coarse. Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
   - ✅ **Regression backbone** — the security-critical `decideEmission` core has an **exhaustive truth-table** (`src/policy.matrix.test.ts`): every one of the 216 permutations of mode × trigger × off-grid × position × geofence × no-report, checked against a differential oracle **and** standalone safety invariants (an SOS always fires; nothing emits without a position; off-grid never silences a trigger; a no-report zone never pins a sensitive address). 344 unit tests total.
   - 🐛 **Bug the e2e caught & fixed**: the 3-party test surfaced a roster-update race — `ensureMember` trusted a circle snapshot captured before an `await`, so two first-contact signals arriving together would let the later write clobber the earlier one, silently dropping a member (who'd then be skipped by reseeds and lists). Fixed to re-read the live roster.
   - 🐛 **Bug the e2e *missed* — and the guard that now catches it**: the map rendered **blank** on the live site. maplibre tags `#map` with `.maplibregl-map{position:relative}`, which (equal specificity, loaded later) beat the app's `.map-canvas{position:absolute;inset:0}` and collapsed the container to **height 0** — yet tiles still loaded and the canvas stayed "visible", so the e2e's visibility check passed while the map showed nothing. Fixed with a higher-specificity selector; `map.spec.ts` now asserts `#map` has real height. **And a release bug it exposed:** the service worker was serving returning users a **stale cached `index.html`** (pinning old hashed assets), so deploys silently didn't land — fixed by cache-busting the SW (`{ cache: 'reload' }` navigations + cache-name bump) and `Cache-Control: no-cache` on `index.html`. *Lesson: "canvas visible" ≠ "content rendered" — assert real dimensions.*
@@ -179,12 +179,33 @@ Two halves that compose into one feature:
     it becomes an ordinary set-rendezvous** (the pin + live countdown machinery
     already built). A two-person **e2e** (`e2e/meeting.spec.ts`) proves propose →
     B opts in → A computes → set → B receives the rendezvous, over the live relay.
-- [ ] **Meeting point — Slice 3 (venues + granular precision).** Real **venue
-  suggestions** via a same-origin **Overpass proxy** (pub/café/park, OSM, no key —
-  the kit sends only the search polygon, never participants), the fairness toggle
-  in the UI, **per-person precision overrides** (exact only to a named individual,
-  via their personal-inbox tag), and contributor **map pins at disclosed precision**.
-  See `docs/plans/2026-07-01-fair-meeting-point.md`.
+- [x] **Find a fair meeting point — Slice 3 (venues + granular precision)** — shipped
+  across four sub-slices, each committed + deployed:
+  - **3a — venues** (`app/src/venues.ts`, +5 unit): the on-device centroid is upgraded
+    to a real, named venue everyone can reach (pub/bar/café/restaurant/fast-food) via a
+    same-origin **`/overpass` proxy** (Caddy `handle_path` + Vite dev proxy, client
+    headers stripped) — `searchVenues` sends only a **bounding box**, never participant
+    coordinates. Best-effort: any failure (proxy down, rate-limited, no matches) keeps
+    the centroid. e2e proves the venue name rides propose→compute→set→the recipient's pin.
+  - **3b — fairness toggle**: with ≥2 candidate venues the proposer balances travel —
+    **Fairest** (min_max) / **Least total** (min_total) / **Most equal** (min_variance) —
+    persisted per device, re-ranking the **cached** venues **in place** (no re-fetch,
+    minimal footprint). +1 unit (strategies diverge deterministically) + e2e.
+  - **3c — per-person exact precision**: a contributor can share their **precise** spot
+    with the **proposer alone** — a geohash-9 share **gift-wrapped to the proposer's
+    personal inbox** (encrypted to their key, filed under `personalInboxTag`, no npub on
+    the wire) — while the group inbox still sees only the coarse cell. The proposer's
+    existing personal-inbox subscription falls through to a meeting-share decode (invite/
+    reseed path untouched); `mergeMeetingShare` prefers the finer disclosure whichever
+    order coarse/exact land. +5 unit incl. **the privacy invariant (only the named
+    recipient can decrypt)** + invite/exact cross-type isolation; e2e over the live relay.
+  - **3d — map overlays**: while a search is live the map shows each contributor's cell
+    **at its disclosed precision** (coarse = a violet "rough area" blob, exact = a crisp
+    glowing dot) + the suggested venue as its own pin, replacing presence pins so the
+    same people aren't double-drawn. e2e asserts the venue pin + both contributor cells.
+  - **Prod note:** venues need the `/overpass` **Caddy drop-in** applied on the host
+    (`deploy/Caddyfile`, `sudo tee`); until then the app degrades gracefully to the
+    centroid. See `docs/plans/2026-07-01-fair-meeting-point.md`.
 
 ## Phase G — Platform & release
 
