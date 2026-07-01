@@ -436,6 +436,19 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .map-pin.alert .dot { background: var(--alert); box-shadow: 0 0 12px var(--alert); }
 .map-pin.alert .tag { color: var(--alert); border-color: var(--alert-dim); }
 
+/* Rendezvous flag — the meeting point. Warm amber, distinct from member pins. */
+.rzv-pin { display: flex; flex-direction: column; align-items: center; }
+.rzv-pin .tag {
+  font-size: 11px; font-weight: 700;
+  background: var(--warn-dim); border: 1px solid var(--warn); color: var(--warn);
+  padding: 2px 7px; border-radius: 999px; white-space: nowrap; margin-bottom: 2px; box-shadow: var(--shadow);
+}
+.rzv-pin .flag { font-size: 20px; line-height: 1; color: var(--warn); text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+
+/* Live countdown in the rendezvous card — steady, tabular so digits don't jitter. */
+.rzv-countdown { font-variant-numeric: tabular-nums; }
+.rzv-countdown.overdue { color: var(--alert); }
+
 .map-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 .slider { width: 100%; accent-color: var(--calm); height: 26px; }
 .zone-list { display: flex; flex-direction: column; gap: 8px; }

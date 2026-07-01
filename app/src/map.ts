@@ -86,6 +86,7 @@ export class MapView {
   readonly map: maplibregl.Map
   readonly geolocate: maplibregl.GeolocateControl
   private markers: maplibregl.Marker[] = []
+  private rzvMarker: maplibregl.Marker | null = null
   private ready = false
   private pendingFences: Geofence[] | null = null
   private pendingNoReport: NoReportZone[] | null = null
@@ -218,8 +219,27 @@ export class MapView {
   /** How many "rough area" halos are currently drawn. An inspection aid (used by the e2e). */
   memberAreaCount(): number { return this.memberAreaFeatures }
 
+  /**
+   * Show (or clear) the rendezvous place as a distinct flag pin. Kept apart from
+   * the member markers — those are cleared and rebuilt on every `setMembers`,
+   * whereas the meeting point is a fixed spot that must persist across presence
+   * updates and show even when no one has shared a beacon yet.
+   */
+  setRendezvous(point: { lat: number; lon: number; label?: string } | null): void {
+    this.rzvMarker?.remove()
+    this.rzvMarker = null
+    if (!point) return
+    const el = document.createElement('div')
+    el.className = 'rzv-pin'
+    // textContent for the label (member/place-chosen, so untrusted); the flag glyph is static.
+    el.innerHTML = '<span class="tag"></span><span class="flag">⚑</span>'
+    ;(el.querySelector('.tag') as HTMLElement).textContent = point.label || 'Meet'
+    this.rzvMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([point.lon, point.lat]).addTo(this.map)
+  }
+
   destroy(): void {
     this.markers.forEach((m) => m.remove())
+    this.rzvMarker?.remove()
     this.map.remove()
   }
 }

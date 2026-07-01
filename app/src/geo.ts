@@ -24,3 +24,26 @@ export async function geocode(query: string): Promise<GeocodeResult | null> {
     return null
   }
 }
+
+/**
+ * Resolve coordinates to a display address (taxi-friendly) — used when a
+ * rendezvous is picked on the map rather than typed. Best-effort and **bounded**
+ * (5 s): a slow or missing geocoder must never block setting the meeting point,
+ * so a null just means "no street address", never a failure. Same-origin like
+ * `geocode` — the coordinates reach Nominatim from the host, not the user's IP.
+ */
+export async function reverseGeocode(lat: number, lon: number): Promise<GeocodeResult | null> {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  try {
+    const res = await fetch(`${NOMINATIM}/reverse?format=jsonv2&lat=${lat}&lon=${lon}`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return null
+    const o = (await res.json()) as { display_name?: string } | null
+    if (!o?.display_name) return null
+    return { lat, lon, address: o.display_name }
+  } catch {
+    return null
+  }
+}

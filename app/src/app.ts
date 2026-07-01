@@ -9,7 +9,8 @@ import { login as signetLogin, restoreSession as signetRestore, logout as signet
 import { PRIVATE_RELAYS, parseRelayList } from './relays'
 import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
-import { geocode } from './geo'
+import { geocode, reverseGeocode } from './geo'
+import { formatCountdown } from './countdown'
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
@@ -113,6 +114,8 @@ let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string }
 let travelMode: TravelMode = 'walk'
 let rzvDurationMin = 60
 let lastRzvStatus = 0
+let rzvPick = false // picking a rendezvous spot on the map (crosshair mode)
+let rzvTicker = 0 // 1 s interval driving the live countdown; 0 when idle
 
 let onboardStep: 'intro' | 'create' | 'join' | 'await' = 'intro'
 let onboardMode: Mode = 'family'
@@ -331,7 +334,8 @@ export function mount(el: HTMLElement): void {
 }
 
 function render(): void {
-  if (tab !== 'map' && mapView) { mapView.destroy(); mapView = null; addMode = false }
+  if (tab !== 'map' && mapView) { mapView.destroy(); mapView = null; addMode = false; rzvPick = false }
+  syncRzvTicker() // start/stop the live countdown to match the current screen
   if (persisted.identity) ensureInviteSub()
   if (!persisted.identity || !activeCircle() || adding) {
     root.innerHTML = onboardingView()
@@ -711,7 +715,7 @@ function mapView_screen(): string {
     <div class="map-shell">
       <div class="map-stage">
         <div id="map" class="map-canvas"></div>
-        <div id="crosshair" class="crosshair" hidden></div>
+        <div id="crosshair" class="crosshair"${addMode || rzvPick ? '' : ' hidden'}></div>
         <div id="offline-oob" class="offline-oob" hidden></div>
       </div>
       <div class="map-panel" id="map-panel">${mapPanelInner()}</div>
@@ -723,6 +727,15 @@ function radiusOf(z: Geofence): string {
 }
 
 function mapPanelInner(): string {
+  if (rzvPick) {
+    return `
+      <div class="row" style="justify-content:space-between"><strong>Meeting point</strong></div>
+      <div class="note">Pan the map so the crosshair sits where you'll meet, then set it.</div>
+      <div class="row" style="gap:10px">
+        <button class="btn small primary" data-action="rzv-pick-set">Set rendezvous here</button>
+        <button class="btn small ghost" data-action="rzv-pick-cancel">Cancel</button>
+      </div>`
+  }
   if (addMode) {
     const noreport = addZoneKind === 'noreport'
     const kindToggle = `
@@ -1054,7 +1067,7 @@ function renderMapPanel(): void {
   const panel = document.getElementById('map-panel')
   if (panel) panel.innerHTML = mapPanelInner()
   const ch = document.getElementById('crosshair')
-  if (ch) (ch as HTMLElement).hidden = !addMode
+  if (ch) (ch as HTMLElement).hidden = !addMode && !rzvPick
   wireMapPanel()
 }
 
@@ -1086,6 +1099,8 @@ function memberPoints(): MapPoint[] {
 function updateMapData(): void {
   const pts = memberPoints()
   mapView?.setMembers(pts)
+  const r = active()?.rendezvous
+  mapView?.setRendezvous(r ? { lat: r.place.lat, lon: r.place.lon, label: r.place.label || r.place.address?.split(',')[0] } : null)
   // Out-of-area chip: in offline mode, flag any pin beyond the saved map's bounds.
   // We never live-fetch to cover it — leaking a viewport mid-event is the wrong call.
   const el = document.getElementById('offline-oob')
@@ -1431,22 +1446,12 @@ function broadcastRzvStatus(): void {
   })()
 }
 
-async function setRendezvous(): Promise<void> {
+// Build + broadcast a rendezvous from a resolved place. Shared by the typed path
+// (geocode) and the map-pick path, so both go out over the relay identically.
+async function shareRendezvous(place: Rendezvous['place']): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
-  const q = (document.getElementById('rzv-place') as HTMLInputElement | null)?.value?.trim() ?? ''
-  let place: Rendezvous['place']
-  if (q) {
-    toast('Finding the place…')
-    const g = await geocode(q)
-    if (!g) { toast("Couldn't find that — try a fuller address"); return }
-    place = { lat: g.lat, lon: g.lon, label: q, address: g.address, geohash: encode(g.lat, g.lon, 10) }
-  } else if (fix) {
-    place = { lat: fix.lat, lon: fix.lon, geohash: encode(fix.lat, fix.lon, 10) }
-  } else {
-    toast('Type a place/address, or start sharing to use your spot'); return
-  }
   const r: Rendezvous = {
     id: `rzv-${nowSec().toString(36)}`,
     place,
@@ -1465,6 +1470,50 @@ async function setRendezvous(): Promise<void> {
   } catch { toast('Could not set rendezvous') }
 }
 
+async function setRendezvous(): Promise<void> {
+  const q = (document.getElementById('rzv-place') as HTMLInputElement | null)?.value?.trim() ?? ''
+  if (q) {
+    toast('Finding the place…')
+    const g = await geocode(q)
+    if (!g) { toast("Couldn't find that — try a fuller address"); return }
+    await shareRendezvous({ lat: g.lat, lon: g.lon, label: q, address: g.address, geohash: encode(g.lat, g.lon, 10) })
+  } else if (fix) {
+    await shareRendezvous({ lat: fix.lat, lon: fix.lon, geohash: encode(fix.lat, fix.lon, 10) })
+  } else {
+    toast('Type a place/address, or start sharing to use your spot')
+  }
+}
+
+// Map-pick: pan the map so the crosshair sits on the meeting spot, then read the
+// centre — the same idiom as the safe/private-place editor.
+function pickRzvOnMap(): void {
+  rzvPick = true
+  addMode = false // never both crosshair modes at once
+  tab = 'map'
+  render()
+}
+
+async function setRzvFromMap(): Promise<void> {
+  if (!mapView) return
+  const c = mapView.center()
+  rzvPick = false
+  tab = 'circle'
+  toast('Setting the meeting point…')
+  const g = await reverseGeocode(c.lat, c.lon) // bounded, best-effort; null just means "no street address"
+  await shareRendezvous({
+    lat: c.lat,
+    lon: c.lon,
+    geohash: encode(c.lat, c.lon, 10),
+    ...(g ? { label: g.address.split(',')[0], address: g.address } : {}),
+  })
+}
+
+function cancelRzvPick(): void {
+  rzvPick = false
+  tab = 'circle'
+  render()
+}
+
 function clearRendezvous(): void {
   const st = active()
   if (st) { st.rendezvous = null; st.rzvStatuses.clear() }
@@ -1476,6 +1525,29 @@ function copyRzvForTaxi(): void {
   if (!r) return
   const parts = [r.place.label, r.place.address, `${r.place.lat.toFixed(5)}, ${r.place.lon.toFixed(5)}`].filter(Boolean)
   navigator.clipboard?.writeText(parts.join(' — ')).then(() => toast('Copied — paste into your taxi app'), () => toast('Copy failed'))
+}
+
+// The live countdown to a rendezvous deadline. A dedicated 1 s ticker updates just
+// the #rzv-countdown text — never a full re-render (that would fight input focus and
+// waste work) — and only runs while a rendezvous is actually on screen (Circle tab),
+// so it costs nothing the rest of the time (minimal-footprint north star).
+function countdownLabel(dueInSeconds: number): string {
+  return dueInSeconds > 0 ? `in ${formatCountdown(dueInSeconds)}` : 'now'
+}
+
+function tickRzvCountdown(): void {
+  const r = active()?.rendezvous
+  const el = document.getElementById('rzv-countdown')
+  if (!r || !el) { syncRzvTicker(); return } // rendezvous or screen gone → wind down
+  const dueIn = r.deadline - nowSec()
+  el.textContent = countdownLabel(dueIn)
+  el.classList.toggle('overdue', dueIn <= 0)
+}
+
+function syncRzvTicker(): void {
+  const want = tab === 'circle' && !adding && !!activeCircle() && !!active()?.rendezvous
+  if (want && !rzvTicker) rzvTicker = window.setInterval(tickRzvCountdown, 1000)
+  else if (!want && rzvTicker) { clearInterval(rzvTicker); rzvTicker = 0 }
 }
 
 function rzvCard(): string {
@@ -1498,7 +1570,7 @@ function rzvCard(): string {
       .map((m) => `<button class="btn small${travelMode === m ? ' primary' : ''}" data-action="rzv-mode" data-mode="${m}">${m}</button>`).join('')
     return `<div class="section-title" style="margin-top:22px">Rendezvous</div>
       <div class="card stack">
-        <div class="row" style="justify-content:space-between"><strong>${r.mode === 'be-back' ? 'Be back' : 'Meet'}${dueIn > 0 ? ` in ${fmtMins(dueIn)}` : ' now'}</strong><span class="muted">by ${at}</span></div>
+        <div class="row" style="justify-content:space-between"><strong>${r.mode === 'be-back' ? 'Be back' : 'Meet'} <span id="rzv-countdown" class="rzv-countdown${dueIn <= 0 ? ' overdue' : ''}">${countdownLabel(dueIn)}</span></strong><span class="muted">by ${at}</span></div>
         <div class="note" style="margin-top:-2px">📍 ${esc(r.place.label || r.place.address || 'a set spot')}</div>
         <button class="btn small ghost" data-action="copy-rzv">Copy address for a taxi</button>
         <div class="list">${rows}</div>
@@ -1516,7 +1588,10 @@ function rzvCard(): string {
         <button class="btn small${rzvDurationMin === 60 ? ' primary' : ''}" data-action="rzv-dur" data-min="60">1 hour</button>
         <button class="btn small${rzvDurationMin === 120 ? ' primary' : ''}" data-action="rzv-dur" data-min="120">2 hours</button>
       </div>
-      <button class="btn small primary" data-action="set-rzv">Set rendezvous</button>
+      <div class="row" style="gap:10px">
+        <button class="btn small primary" data-action="set-rzv">Set rendezvous</button>
+        <button class="btn small ghost" data-action="rzv-pick">📍 Pick on map</button>
+      </div>
     </div>`
 }
 
@@ -1546,6 +1621,9 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'rzv-dur': rzvDurationMin = Number(node.dataset.min); render(); break
     case 'rzv-mode': travelMode = node.dataset.mode as TravelMode; render(); break
     case 'copy-rzv': copyRzvForTaxi(); break
+    case 'rzv-pick': pickRzvOnMap(); break
+    case 'rzv-pick-set': void setRzvFromMap(); break
+    case 'rzv-pick-cancel': cancelRzvPick(); break
     case 'ask-dark': goingDark = true; render(); break
     case 'cancel-dark': goingDark = false; render(); break
     case 'dark-dur': {
@@ -2009,6 +2087,7 @@ function resetDevice(): void {
   stopInviteSub?.(); stopInviteSub = null
   inviteSubKey = ''
   if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = 0 }
+  if (rzvTicker) { clearInterval(rzvTicker); rzvTicker = 0 }
   sharing = false
   alertActive = false
   breachActive = false
