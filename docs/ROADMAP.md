@@ -206,6 +206,11 @@ Two halves that compose into one feature:
   - **Prod note:** venues need the `/overpass` **Caddy drop-in** applied on the host
     (`deploy/Caddyfile`, `sudo tee`); until then the app degrades gracefully to the
     centroid. See `docs/plans/2026-07-01-fair-meeting-point.md`.
+- [ ] **Precision ladder — generalise beyond the meeting point** *(deferred; no forcing
+  use yet)*. A per-**circle** default-precision setting (Town / Neighbourhood / Street /
+  Exact) + per-**person** overrides stored like petnames, applied to shares generally.
+  Slice 3c already proves the targeted-gift-wrap mechanism (exact to the proposer); this
+  widens it to "a chosen level, to a chosen person." See `2026-07-01-fair-meeting-point.md`.
 
 ## Phase G — Platform & release
 
@@ -227,6 +232,14 @@ Two halves that compose into one feature:
     kind:0 avatars still need `img-src https:`). Verified at the edge: `/tiles` + `/nominatim`
     200 same-origin, and the built app no longer references `tile.openstreetmap.org`. **The
     original launch-blocker (the map viewport leak) is closed in production.**
+  - [~] **Proxy Overpass venue search (meeting point) — code shipped, host step pending.**
+    `/overpass/*` reverse-proxies same-origin to OSM Overpass (Caddy `handle_path` + Vite
+    dev proxy, client-identifying headers stripped, `no-store`), mirroring the Stage 0
+    tiles/Nominatim proxy — `searchVenues` sends only a **bounding box**, never a
+    participant's coordinates. The **`deploy/Caddyfile` drop-in must be applied on the
+    host** (`sudo tee … && caddy validate && systemctl reload`) to light up prod venues;
+    until then the meeting-point flow degrades gracefully to the on-device centroid
+    (Phase F Slice 3a).
   - [~] **Local / offline vector basemap (Stage 1) — spiked & proven.** A vector PMTiles
     basemap (`app/src/basemap.ts`, behind `VITE_PMTILES=1` / `localStorage flock.pmtiles`)
     renders flock's **dusk palette** from a **single same-origin file** — a whole ~11 km
