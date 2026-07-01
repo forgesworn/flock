@@ -12,7 +12,7 @@ import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { geocode } from './geo'
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, precisionToRadius } from 'geohash-kit'
-import { shouldEmitBeacon, type BeaconCadence } from './cadence'
+import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
@@ -22,6 +22,7 @@ import { buildInviteWrap, buildReseedWraps, readInvite } from './invite'
 import {
   decideEmission,
   classifyContainment,
+  haversineMetres,
   signalTypeForReason,
   buildLocationSignal,
   buildHelpSignal,
@@ -82,6 +83,13 @@ const COARSE_MIN_INTERVAL = 45 // night-out: never faster than this
 const COARSE_HEARTBEAT = 300 //  …but re-affirm presence every 5 min when still
 const BREACH_MIN_INTERVAL = 30 // breach live-track floor
 const BREACH_HEARTBEAT = 180 //   heartbeat while stationary outside a fence
+// Adaptive sampling (night-out only): back off the GPS poll when stationary,
+// staying under the 600 s presence "stale" window so a still member never reads
+// as "gone home". Family keeps a continuous watch (see syncWatch).
+const SAMPLE_POLL_BOUNDS = { minSeconds: 30, maxSeconds: 180 }
+const SAMPLE_MOVE_FLOOR = 30 // metres of jitter to ignore before calling it movement
+let lastSampleFix: svc.Fix | null = null
+let stationaryStreak = 0
 let root: HTMLElement
 let toastTimer = 0
 
@@ -1610,16 +1618,36 @@ function desiredHighAccuracy(): boolean {
 }
 let watchHighAccuracy = true // accuracy tier the running watch was armed at
 
-/** Start or stop the location watch so it matches shouldSample() — and re-arm it if
- *  the accuracy tier changed (e.g. switching to a night-out circle). Idempotent; the
- *  single place the GPS watch is turned on or off. */
+function resetSampleCadence(): void { lastSampleFix = null; stationaryStreak = 0 }
+
+/** Next night-out poll delay (ms): tight while moving, backing off when stationary. */
+function sampleDelayMs(f: svc.Fix): number {
+  const prev = lastSampleFix
+  const moved = !prev || hasMoved(
+    haversineMetres({ lat: prev.lat, lon: prev.lon }, { lat: f.lat, lon: f.lon }),
+    prev.accuracy, f.accuracy, SAMPLE_MOVE_FLOOR,
+  )
+  stationaryStreak = moved ? 0 : stationaryStreak + 1
+  lastSampleFix = f
+  return nextPollDelaySeconds(stationaryStreak, SAMPLE_POLL_BOUNDS) * 1000
+}
+
+/** Start or stop location sampling to match shouldSample(), re-arming if the tier
+ *  changed (e.g. switching to a night-out circle). Family runs a continuous, tight
+ *  watch — a breach must be caught fast even for a fast exit, so it never backs off.
+ *  Night-out runs an adaptive poll that eases off when stationary (battery). The
+ *  single place sampling is turned on or off. */
 function syncWatch(): void {
   const want = shouldSample()
   const hi = desiredHighAccuracy()
   if (want && (!stopWatch || hi !== watchHighAccuracy)) {
     stopWatch?.()
     watchHighAccuracy = hi
-    stopWatch = svc.watchLocation(onFix, (msg) => { toast(msg); sharing = false; syncWatch(); render() }, { highAccuracy: hi })
+    resetSampleCadence()
+    const onErr = (msg: string): void => { toast(msg); sharing = false; syncWatch(); render() }
+    stopWatch = hi
+      ? svc.watchLocation(onFix, onErr, { highAccuracy: true })
+      : svc.pollLocation(onFix, onErr, { highAccuracy: false, nextDelayMs: sampleDelayMs })
   } else if (!want && stopWatch) {
     stopWatch()
     stopWatch = null

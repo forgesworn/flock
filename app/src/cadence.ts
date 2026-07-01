@@ -57,3 +57,39 @@ export function shouldEmitBeacon(
   // Same cell → only a periodic heartbeat, to keep presence fresh.
   return now - prev.lastSentAt >= opts.heartbeatSeconds
 }
+
+// ── Adaptive sampling cadence ────────────────────────────────────────────────
+// The sampling twin of the emission gate above: when a night-out share is
+// stationary, don't keep waking the GPS at full rate — back off the *poll*
+// interval, tightening again the moment the device moves. (Family breach stays on
+// a continuous watch: a breach must be caught fast even for a fast exit, so family
+// sampling must NOT back off — that's a safety line, not a battery one.)
+
+/** Bounds for {@link nextPollDelaySeconds} (seconds). */
+export interface PollBounds {
+  /** Sample at least this often — the rate while moving. */
+  minSeconds: number
+  /** Never wait longer than this — keep it under the presence "stale" window so a
+   *  still member never wrongly drops to "gone home". */
+  maxSeconds: number
+}
+
+/**
+ * Whether two consecutive fixes represent real movement rather than jitter. The
+ * threshold is the coarser of the two accuracies (a low-power network fix can
+ * wander tens–hundreds of metres while dead still) or a floor, whichever is larger.
+ */
+export function hasMoved(distanceMetres: number, accuracyA: number, accuracyB: number, floorMetres: number): boolean {
+  return distanceMetres > Math.max(floorMetres, accuracyA, accuracyB)
+}
+
+/**
+ * How long to wait before the next location poll, given how many consecutive
+ * samples have been stationary. Exponential back-off from `minSeconds` (just
+ * moved) toward `maxSeconds` (long settled), so battery use tapers while a moving
+ * device is still tracked closely. Pure and deterministic.
+ */
+export function nextPollDelaySeconds(stationaryStreak: number, bounds: PollBounds): number {
+  const streak = Math.max(0, Math.floor(stationaryStreak))
+  return Math.min(bounds.minSeconds * 2 ** streak, bounds.maxSeconds)
+}

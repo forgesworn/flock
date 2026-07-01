@@ -240,9 +240,16 @@ hardware cost to what we actually disclose. (Ordered biggest-win-first.)
   PWA can't sample in the background regardless), and resumes on come-back / auto-resume /
   return-to-foreground. A safe subset — **no change to accuracy, the emission decision, or
   the SOS path**; full e2e green plus a new "sampling suspends during a break, resumes on
-  return" test. **Still to do:** lengthen the interval when **stationary** (a self-scheduled
-  adaptive poll rather than a continuous watch) — now unblocked by the accuracy work above;
-  the poll's max interval just needs bounding so family breach-detection latency stays tight.
+  return" test.
+- [x] **Stationary back-off (night-out) — shipped.** A night-out share now samples via a
+  **self-scheduled poll** (`services.pollLocation`) that eases off when still — exponential
+  back-off 30 s → 180 s, reset the moment it moves (`hasMoved` ignores jitter up to the
+  coarser of the two fixes' accuracies) — instead of a continuous watch, letting the radio
+  sleep between samples. Capped under the 600 s "stale" window so a still member never reads
+  as "gone home". **Family deliberately stays on the continuous, tight watch:** a breach must
+  be caught fast even for a *fast* exit (a child driven off is exactly when it matters), so
+  family GPS must **not** back off — a safety line, not a battery one. Pure helpers TDD'd
+  (`hasMoved`, `nextPollDelaySeconds`); night-out share + family breach e2es both green.
 - [ ] **Battery-aware** *(nice-to-have)*: the Battery Status API — widen intervals / drop
   accuracy when the phone is low, **except** during an active alert (safety wins over
   battery).

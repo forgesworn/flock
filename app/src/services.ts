@@ -149,6 +149,36 @@ export function watchLocation(
 }
 
 /**
+ * Self-scheduled location poll (an alternative to the continuous watch) whose
+ * interval the caller sets per fix via `nextDelayMs` — so a stationary night-out
+ * share can back off and let the radio sleep between samples, tightening again the
+ * moment it moves. One-shot GPS calls power down between polls, unlike a watch.
+ * Returns a stop fn. (Family breach stays on the continuous `watchLocation`.)
+ */
+export function pollLocation(
+  onFix: (f: Fix) => void,
+  onError: (message: string) => void,
+  opts: { highAccuracy?: boolean; nextDelayMs: (f: Fix) => number },
+): () => void {
+  if (!('geolocation' in navigator)) {
+    onError('Location is not available on this device.')
+    return () => { /* noop */ }
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let stopped = false
+  const schedule = (ms: number): void => { if (!stopped) timer = setTimeout(tick, ms) }
+  function tick(): void {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { if (stopped) return; const f = toFix(pos); onFix(f); schedule(opts.nextDelayMs(f)) },
+      (err) => { if (stopped) return; onError(err.message || 'Could not get your location.') },
+      { enableHighAccuracy: opts.highAccuracy ?? false, maximumAge: 10_000, timeout: 20_000 },
+    )
+  }
+  tick() // sample immediately, then self-schedule
+  return () => { stopped = true; if (timer !== undefined) clearTimeout(timer) }
+}
+
+/**
  * One-shot foreground location — resolves to a Fix, or `null` if geolocation is
  * unavailable, denied, or times out. Never rejects, so callers can simply skip on
  * a null. Used for three things: centring the map (default, lenient), a **fresh fix
