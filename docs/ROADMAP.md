@@ -159,6 +159,20 @@ Two halves that compose into one feature:
     offline with **no asset 404s**. **Follow-ups:** an e2e (mock `/api/extract` — CI has no
     `go-pmtiles`); CJK/other-script glyph ranges if flock goes international; a per-IP
     rate-limit on `/api/extract`.
+  - [x] **Map labels — device locale + per-user "Local names" toggle (launch markets verified).**
+    The offline vector basemap labelled everything in English; now it follows each member's
+    **device locale** (`app/src/lang.ts` `preferredMapLang`, constrained to glyph-covered
+    Latin/Greek/Cyrillic → English otherwise, so never tofu), with a per-user **Map labels**
+    toggle on the offline control — **My language** (default) vs **Local names** (the tiles'
+    native `name`, matching street signs, identical on every member's map — for a
+    mixed-nationality group abroad, since each map renders per-device). Glyph coverage
+    **verified** for the initial markets (UK/DE/CZ/Mallorca/Madeira — all Latin) by rendering
+    real towns via `app/lang-proof.html`: München (ß ö ü), Praha (ě ř č ž ů — Latin Extended-A),
+    Palma (Catalan ç), Funchal (Portuguese ã ç). **Verified end-to-end on prod:** the toggle
+    flips, persists `flock.maplabels`, and re-inits the map cleanly. Deploy now excludes
+    prebuilt `*.pmtiles` from prod. **Follow-ups:** preserve the map camera on label switch
+    (currently re-centres); missing POI sprite icons (e.g. `townhall`) need a custom sprite;
+    whole-island saves exceed the 60 km extract cap (Mallorca ~90 km).
   - **Multi-relay fan-out** — now unblocked by gift-wrap-everything (Phase A `[~]`);
     single relay = single point of failure.
   - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".
