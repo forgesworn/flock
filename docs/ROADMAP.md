@@ -76,6 +76,17 @@ and a real launch.
   never false-alarms; carries an optional **"why"**; **cancellable** ("I'm back
   now") and **auto-resumes** when the timer ends. Members see "on a break · …".
   Verified in-browser (go dark → orb "Taking a break" → come back, 0 errors).
+- [x] **Live presence — rough-area pins + movement-gated cadence** (`app/src/cadence.ts`, `map.ts`). A night-out
+  coarse beacon (geohash-6, ±~600 m) now renders as a **translucent "rough area" halo** under the pin
+  (`precisionToRadius`), so a cloaked share reads as *"somewhere around here"* instead of a deceptively exact
+  point; a full-precision breach/pick-up collapses to the pin ("we know exactly"). Emission is now
+  **movement-aware, not time-only**: an **identical geohash cell is never re-broadcast** (standing still stops
+  waking the relays) — a beacon fires only on a **cell change** or a slow **heartbeat** (night-out 45 s floor /
+  5-min heartbeat; breach 30 s / 3-min), both under the 600 s "stale" window so a stationary member still reads as
+  "active". Explicit **SOS/pick-up bypass** the gate and always fire. Cadence is per-circle and reset on reseed.
+  The pure gate is unit-tested (7 cases: first-send, floor, cell-change, heartbeat, clock-skew); the night-out
+  map e2e asserts the halo renders. **Follow-ups:** friendlier pin labels (petname, not 2-char initials);
+  presence survives a refresh (beacons are in-memory only today).
 
 ## Phase D — Identity & social
 

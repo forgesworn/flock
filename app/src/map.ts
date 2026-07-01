@@ -18,7 +18,18 @@ export interface MapPoint {
   lon: number
   label: string
   status: 'active' | 'stale' | 'alert'
+  /**
+   * Disclosure uncertainty radius in metres (from the beacon's geohash
+   * precision). A coarse night-out beacon is ~600 m ("somewhere around here");
+   * a full-precision breach/pick-up is a few metres and collapses to the pin.
+   * Drives the translucent "rough area" halo. Omit/0 → no halo.
+   */
+  radiusMetres?: number
 }
+
+// Below this the halo is smaller than the pin itself, so it reads as a point —
+// don't draw one (breach / pick-up / help are full-precision "we know exactly").
+const HALO_MIN_METRES = 30
 
 // Same-origin by default (proxied → OSM); overridable at build time so
 // self-hosters can point at their own tile server.
@@ -79,6 +90,8 @@ export class MapView {
   private pendingFences: Geofence[] | null = null
   private pendingNoReport: NoReportZone[] | null = null
   private pendingPreview: CircleGeofence | null = null
+  private pendingMembers: MapPoint[] | null = null
+  private memberAreaFeatures = 0 // count of rough-area halos currently drawn (inspection/e2e)
 
   // Lazily resolve the basemap style, best first: (1) the circle's saved offline
   // area (OPFS vector — zero network at view time); (2) the bundled demo vector
@@ -130,9 +143,18 @@ export class MapView {
       this.map.addSource('preview', { type: 'geojson', data: fc([]) })
       this.map.addLayer({ id: 'preview-fill', type: 'fill', source: 'preview', paint: { 'fill-color': '#6ea8fe', 'fill-opacity': 0.16 } })
       this.map.addLayer({ id: 'preview-line', type: 'line', source: 'preview', paint: { 'line-color': '#6ea8fe', 'line-width': 2, 'line-dasharray': [2, 2] } })
+      // Presence "rough area" — a soft disc under each pin at the disclosed
+      // precision. Status-coloured: calm blue for a normal coarse share, red for
+      // an alert/breach. A solid (undashed) edge distinguishes it from the safe
+      // and no-report zones. Sits above the zones, beneath the DOM pin markers.
+      const statusColour = ['match', ['get', 'status'], 'alert', '#ff6b5e', 'stale', '#6b7888', /* active */ '#6ea8fe'] as unknown as maplibregl.ExpressionSpecification
+      this.map.addSource('members-area', { type: 'geojson', data: fc([]) })
+      this.map.addLayer({ id: 'members-area-fill', type: 'fill', source: 'members-area', paint: { 'fill-color': statusColour, 'fill-opacity': 0.15 } })
+      this.map.addLayer({ id: 'members-area-line', type: 'line', source: 'members-area', paint: { 'line-color': statusColour, 'line-width': 1.5, 'line-opacity': 0.4 } })
       this.ready = true
       if (this.pendingFences) this.setGeofences(this.pendingFences)
       if (this.pendingNoReport) this.setNoReportZones(this.pendingNoReport)
+      if (this.pendingMembers) this.setMembers(this.pendingMembers)
       this.setPreview(this.pendingPreview)
     })
   }
@@ -176,7 +198,22 @@ export class MapView {
       el.innerHTML = `<span class="tag">${p.label}</span><span class="dot"></span>`
       this.markers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(this.map))
     }
+    // "Rough area" halos — one per pin whose disclosed precision is coarse enough
+    // to be worth showing as an area rather than a point.
+    if (!this.ready) { this.pendingMembers = points; return }
+    const halos = points
+      .filter((p) => (p.radiusMetres ?? 0) >= HALO_MIN_METRES)
+      .map((p): PolyFeature => ({
+        type: 'Feature',
+        properties: { status: p.status },
+        geometry: { type: 'Polygon', coordinates: [ring(p.lat, p.lon, p.radiusMetres as number)] },
+      }))
+    this.memberAreaFeatures = halos.length
+    ;(this.map.getSource('members-area') as maplibregl.GeoJSONSource).setData(fc(halos))
   }
+
+  /** How many "rough area" halos are currently drawn. An inspection aid (used by the e2e). */
+  memberAreaCount(): number { return this.memberAreaFeatures }
 
   destroy(): void {
     this.markers.forEach((m) => m.remove())

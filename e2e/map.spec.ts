@@ -68,5 +68,12 @@ test.describe('map — safe & private places', () => {
     await gotoTab(B, 'map')
     await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
     await expect(B.locator('.map-pin')).toBeVisible()
+
+    // A shared coarsely (night-out geohash-6, ~600 m) — so the pin must carry a
+    // "rough area" halo, not a deceptively exact point. Poll the drawn halo count
+    // (the source may populate a beat after the marker on first style load).
+    await expect
+      .poll(() => B.evaluate(() => (window as unknown as { flockMapView?: { memberAreaCount(): number } }).flockMapView?.memberAreaCount() ?? 0), { timeout: 15_000 })
+      .toBeGreaterThan(0)
   })
 })

@@ -11,7 +11,8 @@ import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { geocode } from './geo'
 import { getProfile, fetchProfiles } from './profiles'
-import { encode, decode } from 'geohash-kit'
+import { encode, decode, precisionToRadius } from 'geohash-kit'
+import { shouldEmitBeacon, type BeaconCadence } from './cadence'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
@@ -24,7 +25,6 @@ import {
   buildLocationSignal,
   buildHelpSignal,
   classifyPresence,
-  isWithinAnyFence,
   buildCheckInSignal,
   decryptCheckIn,
   classifyCheckins,
@@ -71,7 +71,15 @@ let alertActive = false
 let breachActive = false
 let stopWatch: (() => void) | null = null
 const subs = new Map<string, () => void>() // circleId@relay@inboxPk → unsubscribe (one per circle)
-let lastSelfBeacon = 0
+// Last automatic beacon per circle — drives the movement-aware re-emit gate so a
+// stationary member (identical geohash cell) doesn't keep waking the relays.
+const beaconCadence = new Map<string, BeaconCadence>()
+// Automatic-emit cadence (seconds). Heartbeats stay well under the 600s presence
+// "stale" window, so a still member keeps reading as "active" without spamming.
+const COARSE_MIN_INTERVAL = 45 // night-out: never faster than this
+const COARSE_HEARTBEAT = 300 //  …but re-affirm presence every 5 min when still
+const BREACH_MIN_INTERVAL = 30 // breach live-track floor
+const BREACH_HEARTBEAT = 180 //   heartbeat while stationary outside a fence
 let root: HTMLElement
 let toastTimer = 0
 
@@ -149,6 +157,7 @@ function upsertCircle(c: store.Circle, makeActive = true): void {
 function removeCircle(id: string): void {
   persisted.circles = persisted.circles.filter((c) => c.id !== id)
   circleStates.delete(id)
+  beaconCadence.delete(id)
   if (persisted.activeCircleId === id) persisted.activeCircleId = persisted.circles[0]?.id ?? null
   store.save(persisted)
 }
@@ -157,7 +166,7 @@ function sweepExpired(): boolean {
   const now = nowSec()
   const live = persisted.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
   if (live.length === persisted.circles.length) return false
-  for (const c of persisted.circles) if (!live.includes(c)) circleStates.delete(c.id)
+  for (const c of persisted.circles) if (!live.includes(c)) { circleStates.delete(c.id); beaconCadence.delete(c.id) }
   persisted.circles = live
   if (!live.some((c) => c.id === persisted.activeCircleId)) persisted.activeCircleId = live[0]?.id ?? null
   store.save(persisted)
@@ -842,6 +851,7 @@ async function initMap(): Promise<void> {
   if (!container) return
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
   mapView = await MapView.create(container, fix ?? undefined, { circleId: activeCircle()?.id })
+  if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
   mapView.setGeofences(persisted.geofences)
   mapView.setNoReportZones(persisted.noReportZones)
   mapView.onMove(() => { if (addMode) updatePreview() })
@@ -948,12 +958,16 @@ function memberPoints(): MapPoint[] {
   if (!st) return []
   return classifyPresence([...st.beacons.values()], nowSec(), { staleAfterSeconds: 600 }).map((e) => {
     const d = decode(e.geohash)
+    const precision = st.beacons.get(e.member)?.precision
     return {
       member: e.member,
       lat: d.lat,
       lon: d.lon,
       label: e.member === me ? 'You' : initials(e.member),
       status: st.alerts.has(e.member) ? 'alert' as const : e.status,
+      // Show the disclosed area at its true precision, so a coarse share reads as
+      // "roughly here" rather than a deceptively exact pin.
+      ...(precision ? { radiusMetres: precisionToRadius(precision) } : {}),
     }
   })
 }
@@ -1109,6 +1123,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     patchCircleById(existing.id, { seedHex: payload.s })
     const st = cstate(existing.id)
     st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
+    beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     toast('Circle key was rotated')
     refresh()
   }
@@ -1149,6 +1164,7 @@ async function reseedCircle(removePk?: string): Promise<void> {
     patchCircleById(c.id, { seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) })
     const st = cstate(c.id)
     st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
+    beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     toast(removePk ? 'Member removed & key rotated' : 'Circle key rotated')
     render()
   } catch { toast('Reseed failed') }
@@ -1549,19 +1565,52 @@ function onFix(f: svc.Fix): void {
   fix = f
   if (isDark()) { refresh(); return } // on a break — emit nothing at all
   broadcastRzvStatus()
+  if (sharing) void autoEmit()
+  else refresh()
+}
+
+// Automatic, movement-driven emission for the active circle: a night-out coarse
+// beacon or a family breach disclosure. Unlike emit('pickup'|'help'), it is both
+// rate-limited AND movement-gated (see cadence.ts) — an identical geohash cell is
+// never re-sent, so standing still doesn't spam relays; only a slow heartbeat
+// keeps a stationary member reading as "active". Explicit SOS/pick-up bypass all
+// of this and always send.
+async function autoEmit(): Promise<void> {
   const c = activeCircle()
-  if (sharing && c?.mode === 'family' && persisted.geofences.length) {
-    breachActive = !isWithinAnyFence({ lat: f.lat, lon: f.lon }, persisted.geofences)
-    if (breachActive && nowSec() - lastSelfBeacon > 30) { lastSelfBeacon = nowSec(); void emit('none'); return }
-  } else if (sharing && c?.mode === 'nightout' && nowSec() - lastSelfBeacon > 45) {
-    lastSelfBeacon = nowSec()
-    void emit('none')
-    return
-  }
+  const id = persisted.identity
+  if (!c || !id || !fix) { refresh(); return }
+  const plan = decideEmission({
+    mode: c.mode,
+    position: { lat: fix.lat, lon: fix.lon },
+    trigger: 'none',
+    geofences: c.mode === 'family' ? persisted.geofences : undefined,
+    offGrid: isDark(),
+    noReportZones: persisted.noReportZones,
+  })
+  breachActive = plan.reason === 'breach'
+  const type = signalTypeForReason(plan.reason)
+  // Automatic path never carries 'help' (that's an explicit trigger); the guard
+  // also narrows `type` to a LocationSignalType for buildLocationSignal.
+  if (!type || type === 'help' || plan.action === 'withhold') { refresh(); return }
+  const geohash = encode(fix.lat, fix.lon, plan.precision)
+  const breach = plan.reason === 'breach'
+  const prev = beaconCadence.get(c.id) ?? { lastGeohash: null, lastSentAt: 0 }
+  if (!shouldEmitBeacon(geohash, prev, nowSec(), {
+    minIntervalSeconds: breach ? BREACH_MIN_INTERVAL : COARSE_MIN_INTERVAL,
+    heartbeatSeconds: breach ? BREACH_HEARTBEAT : COARSE_HEARTBEAT,
+  })) { refresh(); return }
+  try {
+    const template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision })
+    await publishSignal(template, c)
+    // Only record the send (local pin + cadence) once a relay has accepted it, so a
+    // transient failure is retried on the next fix rather than silently swallowed.
+    cstate(c.id).beacons.set(id.pk, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
+    beaconCadence.set(c.id, { lastGeohash: geohash, lastSentAt: nowSec() })
+  } catch { /* no relay accepted — leave cadence untouched so the next fix retries */ }
   refresh()
 }
 
-async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
+async function emit(trigger: 'pickup' | 'help'): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
@@ -1574,7 +1623,6 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
     offGrid: isDark(),
     noReportZones: persisted.noReportZones,
   })
-  if (plan.reason === 'breach') breachActive = true
   const type = signalTypeForReason(plan.reason)
   if (!type) {
     if (trigger === 'pickup') toast('Need your location first — start sharing.')
@@ -1599,7 +1647,7 @@ async function emit(trigger: 'none' | 'pickup' | 'help'): Promise<void> {
       cstate(c.id).beacons.set(id.pk, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
     }
     await publishSignal(template, c)
-    toast(trigger === 'help' ? 'Help sent to your circle' : trigger === 'pickup' ? 'Pick-up request sent' : 'Location shared')
+    toast(trigger === 'help' ? 'Help sent to your circle' : 'Pick-up request sent')
   } catch {
     toast('Could not send — check your relay and connection.')
   }
@@ -1712,6 +1760,7 @@ function resetDevice(): void {
   mapView = null
   fix = null
   circleStates.clear()
+  beaconCadence.clear()
   persisted = store.load()
   onboardStep = 'intro'
   tab = 'home'
