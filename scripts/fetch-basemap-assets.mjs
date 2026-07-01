@@ -24,6 +24,9 @@ const FONTSTACKS = ['Noto Sans Regular', 'Noto Sans Medium', 'Noto Sans Italic']
 // dashes, curly quotes, bullets, ellipsis, currency), which real labels use
 // constantly. CJK and other scripts fall back to boxes — add their ranges here if
 // flock ever targets those regions.
+// Verified rendering for the initial launch markets — UK, Germany, Czech, Mallorca
+// (Catalan/Spanish) and Madeira (Portuguese): all Latin, fully covered by the ranges
+// below. Re-check with app/lang-proof.html if these ranges or @protomaps/basemaps change.
 const RANGES = [
   ...Array.from({ length: 8 }, (_, i) => `${i * 256}-${i * 256 + 255}`), // 0–2047
   '8192-8447',

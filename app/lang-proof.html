@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- Market glyph/label proof for the offline vector basemap (src/basemap.ts).
+     Renders a bundled town PMTiles with the offline dusk style to confirm each
+     launch market's diacritics render — no tofu boxes, no font 404s. Served by Vite:
+       /lang-proof.html?src=<town>&c=<lon>,<lat>&z=15
+
+     Initial launch markets — all Latin-script, fully covered by the shipped glyph
+     ranges (0–2047 + 8192–8703; see scripts/fetch-basemap-assets.mjs). Verified:
+       UK   english                      — ASCII
+       DE   München  ß ö ü               — 0–255
+       CZ   Praha    ě ř č ž ů ň š        — 256–511 (Latin Extended-A)
+       ES   Palma    ç à í ó (Catalan)   — 0–255
+       PT   Funchal  ã õ ç ê (Portuguese)— 0–255
+
+     Extract the towns first (needs go-pmtiles + network) into app/public/basemap/:
+       B=https://build.protomaps.com/$(date -u +%Y%m%d).pmtiles
+       go-pmtiles extract $B app/public/basemap/munich.pmtiles  --bbox=11.52,48.11,11.63,48.18   --maxzoom=15
+       go-pmtiles extract $B app/public/basemap/prague.pmtiles  --bbox=14.40,50.06,14.46,50.10   --maxzoom=15
+       go-pmtiles extract $B app/public/basemap/palma.pmtiles   --bbox=2.63,39.56,2.68,39.59     --maxzoom=15
+       go-pmtiles extract $B app/public/basemap/funchal.pmtiles --bbox=-16.94,32.63,-16.88,32.66 --maxzoom=15 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>flock — glyph / language proof</title>
+    <style>html, body, #map { margin: 0; height: 100%; background: #0b0e12; }</style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script type="module">
+      import maplibregl from 'maplibre-gl'
+      import 'maplibre-gl/dist/maplibre-gl.css'
+      import { registerPmtilesProtocol, pmtilesStyle } from './src/basemap.ts'
+
+      const q = new URLSearchParams(location.search)
+      const src = q.get('src') || 'harrogate'
+      const [lon, lat] = (q.get('c') || '-1.54,53.99').split(',').map(Number)
+      const zoom = Number(q.get('z') || 14)
+
+      window.__errs = []
+      registerPmtilesProtocol()
+      const style = pmtilesStyle(`${location.origin}/basemap/${src}.pmtiles`)
+      const map = new maplibregl.Map({ container: 'map', style, center: [lon, lat], zoom })
+      map.on('error', (e) => window.__errs.push(String(e && e.error ? e.error : e)))
+      map.on('load', () => map.once('idle', () => { window.__ready = true }))
+    </script>
+  </body>
+</html>
