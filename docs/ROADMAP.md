@@ -10,6 +10,7 @@ and a real launch.
 
 - **Mobile-first** — phone-shaped, large touch targets, one-handed, installable PWA, offline-tolerant.
 - **Uber privacy** — the relay is untrusted; minimise all metadata (see `PRIVACY.md`).
+- **Minimal footprint (north star)** — flock must be nearly *free to run*: negligible **battery**, negligible **relay traffic**, negligible **metadata**. These are one idea, not three — disclosure-on-event (share only what a moment needs) is the same discipline as sample/emit-only-when-needed. The clean tell: **coarse sharing should use coarse, low-power location** (network/cell, not GPS) — a battery win that is *also* a privacy win (hardware that can't over-collect). Tracked in **Phase H**.
 - **Full e2e tests** — Playwright drives **two real browser contexts (two identities)** that talk to each other through `relay.trotters.cc`, so every assertion is on the *other* person's screen — the gift-wrap → relay → unwrap → decrypt → render path, proven between people. **No feature is "done" without an e2e.**
   - ✅ **Covered** (`e2e/`, `npm run test:e2e` — 22 specs, green with one occasional live-relay retry): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, and the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map). Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
   - ✅ **Regression backbone** — the security-critical `decideEmission` core has an **exhaustive truth-table** (`src/policy.matrix.test.ts`): every one of the 216 permutations of mode × trigger × off-grid × position × geofence × no-report, checked against a differential oracle **and** standalone safety invariants (an SOS always fires; nothing emits without a position; off-grid never silences a trigger; a no-report zone never pins a sensitive address). 344 unit tests total.
@@ -210,6 +211,36 @@ Two halves that compose into one feature:
   - **Key-at-rest** — localStorage isn't secure key storage (the in-app "preview"
     caveat is shown); harden via **keystore-kit** (Phase E) or lean on Sign-in-with-Signet.
 - [ ] **anvil** — release CI (like canary-kit).
+
+## Phase H — Minimal footprint (battery, bandwidth, metadata)
+
+The **north star**: flock should cost a phone almost nothing to carry. The
+movement-gated cadence (Phase C) throttles relay **publishes** — but *not* GPS
+**sampling**. A continuous `watchPosition({ enableHighAccuracy: true })` is the real
+battery drain, and it runs the whole time you're sharing. Close that gap, matching the
+hardware cost to what we actually disclose. (Ordered biggest-win-first.)
+
+- [ ] **Accuracy matched to disclosure precision** *(security-critical — touches the
+  shared location watch; design + buy-in before coding)*. A coarse night-out share
+  (geohash-6, ±~600 m) does **not** need GPS — `enableHighAccuracy: false` (network/cell,
+  ±100s m) is ample, saves the most power, and is **coarser by construction → more
+  private**. Family / breach / pick-up / SOS keep **high** accuracy (must catch a fence
+  crossing or pin precisely). The watch is shared across triggers, so accuracy is derived
+  from the circle's mode + proximity to a fence; the guard that matters is that a
+  low-accuracy fix must never cause a **false** breach or **miss** a real one.
+- [ ] **Back off sampling when it can't matter** *(safe, self-contained wins)*: **suspend
+  the GPS watch entirely while off-grid** (today `onFix` early-returns on `isDark()` but
+  the watch keeps burning) and resume on come-back; **pause / slow on page-hidden**
+  (`visibilitychange` — a foreground PWA can't sample in the background regardless);
+  **lengthen the interval when stationary** (we already know the cell hasn't changed —
+  the sampling twin of the cadence gate).
+- [ ] **Battery-aware** *(nice-to-have)*: the Battery Status API — widen intervals / drop
+  accuracy when the phone is low, **except** during an active alert (safety wins over
+  battery).
+- [ ] **Real validation needs hardware** — the functional path builds and tests in the
+  emulator, but true battery / Doze behaviour is a **Tier-2 (real GrapheneOS)**
+  measurement, gated exactly like the native background work (Phase 0 / no test devices
+  yet). Ship the foreground PWA wins now; measure on-device when hardware lands.
 
 ## Resolved inputs
 
