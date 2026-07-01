@@ -22,6 +22,10 @@ echo "→ building dist-app (offline map: ${VITE_OFFLINE_MAP})"
 npm run build:app
 
 echo "→ deploying to ${HOST}:${REMOTE_DIR}"
-rsync -az --delete dist-app/ "${HOST}:${REMOTE_DIR}/"
+# Never ship prebuilt basemap tiles (app/public/basemap/*.pmtiles) — those are
+# local dev/demo + market-proof extracts only. The real feature downloads each
+# circle's area to OPFS at runtime via the extract service; the self-hosted
+# glyphs/sprite under basemap/{fonts,sprite} DO ship.
+rsync -az --delete --exclude='*.pmtiles' dist-app/ "${HOST}:${REMOTE_DIR}/"
 
 echo "✓ deployed. https://flock.forgesworn.dev"
