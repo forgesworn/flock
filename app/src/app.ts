@@ -1243,7 +1243,7 @@ function wireApp(): void {
 }
 
 // ── Map controller ───────────────────────────────────────────────────────────
-async function initMap(): Promise<void> {
+async function initMap(camera?: { lng: number; lat: number; zoom: number }): Promise<void> {
   mapView?.destroy()
   const container = document.getElementById('map')
   if (!container) return
@@ -1256,8 +1256,9 @@ async function initMap(): Promise<void> {
   updateMapData()
   wireMapPanel()
   requestAnimationFrame(() => mapView?.map.resize())
+  if (camera) mapView.map.jumpTo({ center: [camera.lng, camera.lat], zoom: camera.zoom }) // a re-init (e.g. label switch) keeps the person's view
   if (offlineMapEnabled()) void refreshOfflineState()
-  if (!fix) void centreOnCurrentPosition() // no live share yet → actively locate for the map
+  if (!fix && !camera) void centreOnCurrentPosition() // no live share yet → actively locate for the map
 }
 
 // Centre the map on the user's current position without starting a share. Purely
@@ -1320,8 +1321,12 @@ async function setMapLabels(mode: MapLabelMode): Promise<void> {
   if (mode !== 'device' && mode !== 'local') return
   if (mapLabelMode() === mode) return
   setMapLabelMode(mode)
+  // Swapping the style re-creates the map — carry the camera across, or the
+  // toggle yanks you back to your own pin and reads as a glitch.
+  const c = mapView?.map.getCenter()
+  const camera = c && mapView ? { lng: c.lng, lat: c.lat, zoom: mapView.map.getZoom() } : undefined
   renderMapPanel()
-  await initMap()
+  await initMap(camera)
 }
 
 function wireMapPanel(): void {
