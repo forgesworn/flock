@@ -12,8 +12,8 @@ and a real launch.
 - **Uber privacy** — the relay is untrusted; minimise all metadata (see `PRIVACY.md`).
 - **Minimal footprint (north star)** — flock must be nearly *free to run*: negligible **battery**, negligible **relay traffic**, negligible **metadata**. These are one idea, not three — disclosure-on-event (share only what a moment needs) is the same discipline as sample/emit-only-when-needed. The clean tell: **coarse sharing should use coarse, low-power location** (network/cell, not GPS) — a battery win that is *also* a privacy win (hardware that can't over-collect). Tracked in **Phase H**.
 - **Full e2e tests** — Playwright drives **two real browser contexts (two identities)** that talk to each other through `relay.trotters.cc`, so every assertion is on the *other* person's screen — the gift-wrap → relay → unwrap → decrypt → render path, proven between people. **No feature is "done" without an e2e.**
-  - ✅ **Covered** (`e2e/`, `npm run test:e2e` — 40 flows across 23 spec files, green with one occasional live-relay retry): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace) + **custom cadence** + **self-reminder** (due-soon → overdue on A's own card) + **acknowledge** (3-person: miss → B "I've got this" → C sees "on it") + a **dying battery** riding the check-in (stubbed API → B reads "battery critical"), the **breadcrumb trail** (A moves under a fast-forwarded clock → SOS → B gets the alert + trail), the **decoy view** (hide → a fresh app that stays silent under B's buzz → a wrong phrase gets the genuine fresh-install error → the right one restores the circle; plus the decoy proven fully usable with reset-inside-decoy preserving the hidden state), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map), **rendezvous** (A map-picks a meeting point → B receives the flag pin **and** a live ticking countdown), and the **meeting point** end-to-end (A proposes → B **opts in** with a coarse spot → A's device computes a fair midpoint **on-device** → the pick lands on B as a rendezvous), plus its **Slice 3** enrichments — a **named venue** upgrade (Overpass mocked for determinism), the **fairness** toggle re-ranking in place, contributor **cells + the venue pin** on the proposer's map, and a **per-person exact** share reaching the proposer alone as a crisp dot while the group stays coarse. Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
-  - ✅ **Regression backbone** — the security-critical `decideEmission` core has an **exhaustive truth-table** (`src/policy.matrix.test.ts`): every one of the 216 permutations of mode × trigger × off-grid × position × geofence × no-report, checked against a differential oracle **and** standalone safety invariants (an SOS always fires; nothing emits without a position; off-grid never silences a trigger; a no-report zone never pins a sensitive address). 571 unit tests total.
+  - ✅ **Covered** (`e2e/`, `npm run test:e2e` — 42 flows across 24 spec files, green with one occasional live-relay retry): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace) + **custom cadence** + **self-reminder** (due-soon → overdue on A's own card) + **acknowledge** (3-person: miss → B "I've got this" → C sees "on it") + a **dying battery** riding the check-in (stubbed API → B reads "battery critical"), the **breadcrumb trail** (A moves under a fast-forwarded clock → SOS → B gets the alert + trail), the **decoy view** (hide → a fresh app that stays silent under B's buzz → a wrong phrase gets the genuine fresh-install error → the right one restores the circle; plus the decoy proven fully usable with reset-inside-decoy preserving the hidden state), the **app lock** (ciphertext at rest → grace-expired cold boot gated by the PIN → wrong PIN refused → unlock and B's live buzz still decrypts → grace reload skips the PIN; plus the lock × decoy composition — no PIN screen in the decoy, unhide → one-tap re-lock), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map), **rendezvous** (A map-picks a meeting point → B receives the flag pin **and** a live ticking countdown), and the **meeting point** end-to-end (A proposes → B **opts in** with a coarse spot → A's device computes a fair midpoint **on-device** → the pick lands on B as a rendezvous), plus its **Slice 3** enrichments — a **named venue** upgrade (Overpass mocked for determinism), the **fairness** toggle re-ranking in place, contributor **cells + the venue pin** on the proposer's map, and a **per-person exact** share reaching the proposer alone as a crisp dot while the group stays coarse. Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
+  - ✅ **Regression backbone** — the security-critical `decideEmission` core has an **exhaustive truth-table** (`src/policy.matrix.test.ts`): every one of the 216 permutations of mode × trigger × off-grid × position × geofence × no-report, checked against a differential oracle **and** standalone safety invariants (an SOS always fires; nothing emits without a position; off-grid never silences a trigger; a no-report zone never pins a sensitive address). 579 unit tests total.
   - 🐛 **Bug the e2e caught & fixed**: the 3-party test surfaced a roster-update race — `ensureMember` trusted a circle snapshot captured before an `await`, so two first-contact signals arriving together would let the later write clobber the earlier one, silently dropping a member (who'd then be skipped by reseeds and lists). Fixed to re-read the live roster.
   - 🐛 **Bug the e2e *missed* — and the guard that now catches it**: the map rendered **blank** on the live site. maplibre tags `#map` with `.maplibregl-map{position:relative}`, which (equal specificity, loaded later) beat the app's `.map-canvas{position:absolute;inset:0}` and collapsed the container to **height 0** — yet tiles still loaded and the canvas stayed "visible", so the e2e's visibility check passed while the map showed nothing. Fixed with a higher-specificity selector; `map.spec.ts` now asserts `#map` has real height. **And a release bug it exposed:** the service worker was serving returning users a **stale cached `index.html`** (pinning old hashed assets), so deploys silently didn't land — fixed by cache-busting the SW (`{ cache: 'reload' }` navigations + cache-name bump) and `Cache-Control: no-cache` on `index.html`. *Lesson: "canvas visible" ≠ "content rendered" — assert real dimensions.*
 - **ForgeSworn toolset** — use the real tools, don't hand-roll (see `FORGESWORN-TOOLKIT.md`).
@@ -130,7 +130,25 @@ and a real launch.
 
 - [ ] **shamir-words** (+ **cairn-kit**) — social / coercion-resistant circle recovery.
 - [ ] **stash** — encrypted-to-self vault; survive device loss.
-- [ ] **keystore-kit** — secure the local-signer key at rest (when published).
+- [x] **keystore-kit — the App lock (key-at-rest)**. Shipped: an opt-in PIN
+  (You → Advanced) puts the **whole persisted state** — identity key, circle
+  root, every seed, petnames, private places — behind AES-256-GCM at rest. A
+  random storage secret is PIN-wrapped by keystore-kit (PBKDF2-600k, namespace
+  `flockks`); every save writes `{locked:1, d:<envelope>}` via a **coalescing
+  async drain** (sync `save()` signature kept; kill-switch re-checks after
+  every await so a hide/disable can't be raced); a stray pre-unlock save can
+  **never clobber the ciphertext**. Boot: grace unlock inside a 15-min window
+  (kit grace + flock-owned TTL), else a PIN screen with a two-step forgot-PIN
+  wipe escape. Composes with the decoy: hiding seals the secret inside the
+  sealed state, the decoy shows **no PIN screen** (no tell), unhide boots
+  plaintext with a one-tap **re-confirm** card that re-wraps our secret even
+  over a keystore blob someone replaced inside the decoy. Excluded from
+  backups (device-specific). Consumed as a **vendored tarball**
+  (`vendor/keystore-kit-0.1.0.tgz`) until the kit is published — swap to a
+  version range after `npm publish`. 8 unit tests (`store.rest.test.ts`) +
+  2 e2es (PIN gate + live traffic after unlock; the full lock × decoy
+  composition). Design: `docs/plans/2026-07-02-app-lock.md`. WebAuthn-PRF
+  biometric unlock is wired in the kit but waits for real hardware (Tier 2).
 - [ ] **mesh-kit** / **mesh-webrtc-lan** — off-relay LAN transport (no internet).
 - [ ] **LoRa mesh transport** — phone ↔ a pocket LoRa device over **BLE**, via **Meshtastic** or **MeshCore**. flock signals ride as opaque **E2E-encrypted bytes** (already true post gift-wrap-everything) over the LoRa mesh → works **fully off-grid** (no relay, no cell, no internet) — the ultimate "the relay can't track you". Web Bluetooth (Android/GrapheneOS Chromium) for the PWA; **Capacitor BLE** for iOS. **Rides on the `intermesh-plans` Meshtastic↔MeshCore/MQTT substrate** (active spike). Slots behind the same transport seam (`services.ts`).
 
@@ -291,8 +309,10 @@ Two halves that compose into one feature:
     fix is to **stand up a second no-log relay we control** (infra: host + domain,
     mirror the trotters setup) and add it to `PRIVATE_RELAYS`, no code change.
   - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".
-  - **Key-at-rest** — localStorage isn't secure key storage (the in-app "preview"
-    caveat is shown); harden via **keystore-kit** (Phase E) or lean on Sign-in-with-Signet.
+  - [x] **Key-at-rest — closed by the App lock** (keystore-kit, Phase E): opt-in
+    PIN encrypts the whole persisted blob at rest; the in-app caveat copy now
+    points at the lock. Signet sign-in remains the stronger path (key never in
+    flock at all).
 - [~] **Release CI** — GitHub Actions gates live (`.github/workflows/ci.yml`: lint/
   typecheck/build/unit + the full two-person e2e suite, SHA-pinned actions, report
   artefact on failure). anvil publishing deliberately omitted while the library is
@@ -536,7 +556,10 @@ duress*, never on continuous tracking.
   two-person e2e (hide → silent under B's buzz → genuine error on a wrong
   phrase → restore intact) + a solo e2e (decoy fully usable; reset survives).
   Design + honest limits: `docs/plans/2026-07-02-decoy-view.md`, PRIVACY.md.
-  Key-at-rest hardening still pairs with keystore-kit (Phase E).
+  Key-at-rest hardening landed the same day — see the **App lock** (Phase E):
+  with it on, the "fresh install's" localStorage holds ciphertext, and the
+  decoy deliberately shows no PIN screen (a lock gate on a "brand new" app
+  would be the tell).
 
 **Explicit non-goals** (competitor features that conflict with the ethos —
 their absence is positioning, not a gap): crash/driving detection (continuous

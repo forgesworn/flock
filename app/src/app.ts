@@ -26,6 +26,7 @@ import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
 import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
+import { generateStorageSecret, setupPin, unlockWithPin, unlockWithGrace, burnLock } from './lock'
 import {
   decideEmission,
   classifyContainment,
@@ -409,6 +410,27 @@ const ICON = {
 // ── Mount / render ──────────────────────────────────────────────────────────
 export function mount(el: HTMLElement): void {
   root = el
+  // App lock: ciphertext at rest means no state may exist in memory until the
+  // PIN (or a live grace window) recovers the storage secret.
+  if (store.lockedAtRest()) { void bootLocked(); return }
+  bootUnlocked()
+}
+
+/** The locked boot: silent grace unlock inside the window, else the PIN screen. */
+async function bootLocked(): Promise<void> {
+  const secret = await unlockWithGrace()
+  if (secret) {
+    try {
+      persisted = await store.openRest(secret)
+      store.armRest(secret)
+      bootUnlocked()
+      return
+    } catch { /* a grace secret that no longer decrypts falls through to the PIN */ }
+  }
+  renderLockScreen()
+}
+
+function bootUnlocked(): void {
   // Pause sampling when the app is backgrounded, resume when it returns — a hidden PWA
   // can't sample reliably anyway, so this is pure battery saved. `hidden` starts false
   // and only flips on a real visibilitychange, so headless/normal foreground always samples.
@@ -907,7 +929,9 @@ function youView(): string {
       <button class="btn small ghost" data-action="copy-npub">Copy my invite key</button>
       <div class="note">${persisted.authMethod === 'signet'
         ? 'Signed in with Signet — your key lives in your signer and never touches flock.'
-        : 'Quick-start key, stored in this browser only — not secure key storage. Sign in with Signet for real use.'}</div>
+        : persisted.lock
+          ? 'Quick-start key, encrypted at rest by your App lock. Sign in with Signet to keep the key out of flock entirely.'
+          : 'Quick-start key, stored in this browser only. Turn on the App lock (Advanced) to encrypt it at rest, or sign in with Signet.'}</div>
     </div>
     <div class="section-title" style="margin-top:18px">Tips &amp; help</div>
     <div class="card stack">
@@ -978,6 +1002,24 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
              <button class="btn small ghost" data-action="cancel-disband">Cancel</button>
            </div>`
         : '<button class="btn small ghost" style="color:var(--alert)" data-action="ask-disband">Disband for everyone…</button>'}
+    </div>
+    <div class="section-title" style="margin-top:18px">App lock</div>
+    <div class="card stack">
+      ${!persisted.lock
+        ? `${hint('applock', 'With the lock on, everything flock keeps on this phone is encrypted — someone with the phone (or a copy of it) gets nothing without your PIN.')}
+           <div class="field"><label for="lock-pin">PIN</label><input class="input" id="lock-pin" type="password" autocomplete="new-password" placeholder="At least ${MIN_LOCK_PIN} characters" /></div>
+           <div class="field"><label for="lock-pin2">Same PIN again</label><input class="input" id="lock-pin2" type="password" autocomplete="new-password" /></div>
+           <button class="btn small" data-action="lock-enable">Turn on the lock</button>
+           <div class="note">You'll be asked for it after 15 minutes away. If you forget it, only a backup (the card above) gets you back in — make one first.</div>`
+        : store.restArmed()
+          ? `<div class="note">✓ Locked at rest. flock asks for your PIN after 15 minutes away; everything stored on this phone stays encrypted.</div>
+             <button class="btn small ghost" data-action="lock-off">Turn off</button>`
+          : `<div class="note" style="color:var(--warn, #d9a05b)">The lock is set up but storage is currently unlocked — that happens after bringing flock back from hiding. Re-enter a PIN to lock it again.</div>
+             <div class="field"><label for="lock-repin">PIN</label><input class="input" id="lock-repin" type="password" autocomplete="new-password" /></div>
+             <div class="row" style="gap:10px">
+               <button class="btn small" data-action="lock-reconfirm">Re-lock now</button>
+               <button class="btn small ghost" data-action="lock-off">Turn off</button>
+             </div>`}
     </div>
     <div class="section-title" style="margin-top:18px">If you're forced to unlock</div>
     <div class="card stack">
@@ -2457,6 +2499,9 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'decoy-enable': void enableDecoy(); break
     case 'decoy-hide': void hideNow(); break
     case 'decoy-off': delete persisted.decoy; store.save(persisted); toast('Hiding is off'); render(); break
+    case 'lock-enable': void enableLock(); break
+    case 'lock-off': void disableLock(); break
+    case 'lock-reconfirm': void reconfirmLock(); break
     case 'add-zone': addMode = true; addZoneKind = (node.dataset.kind as 'safe' | 'noreport') ?? 'safe'; newZonePolicy = 'withhold'; renderMapPanel(); updatePreview(); break
     case 'zone-kind': addZoneKind = node.dataset.kind as 'safe' | 'noreport'; renderMapPanel(); updatePreview(); break
     case 'zone-policy': newZonePolicy = node.dataset.policy as 'withhold' | 'coarse'; renderMapPanel(); updatePreview(); break
@@ -3152,6 +3197,99 @@ async function tryUnhide(pass: string): Promise<boolean> {
   } catch { return false }
 }
 
+// ── The app lock — key-at-rest (docs/plans/2026-07-02-app-lock.md) ──────────
+const MIN_LOCK_PIN = 6
+let lockForgotConfirm = false
+
+/** The gate a locked device boots into. Deliberately its own render path —
+ *  none of the normal machinery (subs, watch, invite sub) may start before
+ *  the state exists. */
+function renderLockScreen(err?: string): void {
+  root.innerHTML = `
+  <main class="screen onboard fade-in">
+    <img class="hero-logo" src="./icon.svg" alt="" />
+    <h1>Locked</h1>
+    <p class="tagline">Enter your PIN to open flock.</p>
+    <div class="field" style="text-align:left;margin-bottom:16px"><label for="lock-pin-entry">PIN</label><input class="input" id="lock-pin-entry" type="password" autocomplete="current-password" /></div>
+    ${err ? `<div class="note" style="color:var(--alert);margin-bottom:12px">${esc(err)}</div>` : ''}
+    <div class="actions">
+      <button class="btn primary" data-action="lock-unlock">Unlock</button>
+    </div>
+    ${lockForgotConfirm
+      ? `<div class="note" style="color:var(--alert);margin-top:16px">This wipes flock from this device — PIN, key and circles. A backup (or a fresh invite from your circle) is the way back in.</div>
+         <div class="row" style="gap:10px;justify-content:center;margin-top:8px">
+           <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="lock-wipe">Wipe this device</button>
+           <button class="btn small ghost" data-action="lock-forgot-cancel">Cancel</button>
+         </div>`
+      : '<button class="btn ghost" data-action="lock-forgot" style="margin-top:16px">I&#39;ve forgotten my PIN</button>'}
+  </main><div class="toast" id="toast"></div>`
+  root.querySelectorAll('[data-action]').forEach((node) => {
+    node.addEventListener('click', () => { void handleLockAction(node.getAttribute('data-action') as string) })
+  })
+  const input = document.getElementById('lock-pin-entry') as HTMLInputElement | null
+  input?.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') void handleLockAction('lock-unlock') })
+  input?.focus()
+}
+
+async function handleLockAction(action: string): Promise<void> {
+  if (action === 'lock-unlock') {
+    const pin = (document.getElementById('lock-pin-entry') as HTMLInputElement | null)?.value ?? ''
+    if (!pin) return
+    const secret = await unlockWithPin(pin)
+    if (!secret) { renderLockScreen("That's not it — try again"); return }
+    try {
+      persisted = await store.openRest(secret)
+    } catch { renderLockScreen("That's not it — try again"); return }
+    store.armRest(secret)
+    bootUnlocked()
+  } else if (action === 'lock-forgot') { lockForgotConfirm = true; renderLockScreen() }
+  else if (action === 'lock-forgot-cancel') { lockForgotConfirm = false; renderLockScreen() }
+  else if (action === 'lock-wipe') {
+    store.reset()
+    await burnLock()
+    location.reload()
+  }
+}
+
+/** Arm the lock: a random storage secret, PIN-wrapped; state encrypts from now on. */
+async function enableLock(): Promise<void> {
+  const p1 = (document.getElementById('lock-pin') as HTMLInputElement | null)?.value ?? ''
+  const p2 = (document.getElementById('lock-pin2') as HTMLInputElement | null)?.value ?? ''
+  if (p1.length < MIN_LOCK_PIN) { toast(`Pick a PIN of at least ${MIN_LOCK_PIN} characters`); return }
+  if (p1 !== p2) { toast("Those PINs don't match"); return }
+  const secret = generateStorageSecret()
+  await setupPin(p1, secret)
+  persisted.lock = { secret }
+  store.armRest(secret)
+  store.save(persisted)
+  toast('Lock is on')
+  render()
+}
+
+/** Turn the lock off: plaintext at rest again, keystore burned. */
+async function disableLock(): Promise<void> {
+  delete persisted.lock
+  store.sealOff(persisted)
+  await burnLock()
+  toast('Lock is off')
+  render()
+}
+
+/** After a decoy unhide the state boots plaintext with the lock config intact —
+ *  one PIN entry re-wraps OUR secret (healing even a keystore blob someone
+ *  overwrote inside the decoy) and re-encrypts the state. */
+async function reconfirmLock(): Promise<void> {
+  const cfg = persisted.lock
+  if (!cfg) return
+  const pin = (document.getElementById('lock-repin') as HTMLInputElement | null)?.value ?? ''
+  if (pin.length < MIN_LOCK_PIN) { toast(`Pick a PIN of at least ${MIN_LOCK_PIN} characters`); return }
+  await setupPin(pin, cfg.secret)
+  store.armRest(cfg.secret)
+  store.save(persisted)
+  toast('Locked again')
+  render()
+}
+
 /** The covert hide gesture — hold the topbar wordmark. Fires mid-hold at the
  *  covert threshold (like the duress-word reveal); no visible affordance. */
 function wireHideHold(node: HTMLElement): void {
@@ -3173,6 +3311,8 @@ function resetDevice(): void {
   if (persisted.authMethod === 'signet') { try { void signetLogout() } catch { /* ignore */ } }
   signetSigner = null
   store.reset()
+  store.disarmRest()
+  void burnLock()
   stopWatch?.(); stopWatch = null
   stopAllSubs()
   stopInviteSub?.(); stopInviteSub = null

@@ -124,9 +124,22 @@ safe places, alert history. The answer is the **decoy view** (Phase J; design in
 **Honest limits.** This defends the *application layer* — an unlocked phone in a
 coercer's hand. A forensic image of the browser profile still finds an opaque blob
 (and the saved offline map area, which is not moved); an examiner can demand the
-phrase. Key-at-rest hardening is keystore-kit's job (Phase E). Hiding never emits
-anything — under real duress, the silent long-press on "Stop sharing" alarms the
-circle first, then hide.
+phrase. Hiding never emits anything — under real duress, the silent long-press on
+"Stop sharing" alarms the circle first, then hide.
+
+## The device at rest — the App lock
+
+The complement to the decoy (keystore-kit, Phase E): an opt-in **PIN** puts the
+whole persisted state — identity key, circle root, every seed, petnames, private
+places — behind AES-256-GCM at rest. A random storage secret is PIN-wrapped
+(PBKDF2-600k); a grace key means no re-prompt within 15 minutes; a cold boot past
+that is a PIN screen holding **no state in memory at all**. With the lock on, a
+lifted phone, a synced browser profile, or a copied disk yields ciphertext.
+Composes with the decoy by design: the decoy shows **no PIN screen** (a lock gate
+on a "brand new" app would be a tell), and coming back from hiding re-locks with
+one PIN entry. Limits: a short PIN resists a snoop, not an offline PBKDF2 run —
+the card nudges toward 6+ characters; Signet sign-in remains stronger still (the
+key never enters flock).
 
 ## Captured requirements
 

@@ -1,7 +1,10 @@
-// Local state: identity, circle, persistence. localStorage is fine for an MVP
-// demo but is NOT secure key storage — flagged in the UI and DESIGN.
+// Local state: identity, circle, persistence. With the app lock OFF,
+// localStorage holds plaintext (flagged in the UI); with it ON, the blob is
+// AES-256-GCM ciphertext at rest — see the rest-encryption layer below and
+// docs/plans/2026-07-02-app-lock.md.
 
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { encryptEnvelope, decryptEnvelope } from 'canary-kit/sync'
 import { decode as nip19decode } from 'nostr-tools/nip19'
 import type { Geofence, NoReportZone, MemberBeacon } from '@forgesworn/flock'
 import { resolveRelays } from './relays'
@@ -87,6 +90,11 @@ export interface Persisted {
    *  instant. Lives inside the very blob it seals, so unhiding restores the
    *  protection still armed. See docs/plans/2026-07-02-decoy-view.md. */
   decoy?: { salt: string; key: string }
+  /** App lock (key-at-rest) — present = armed. The random storage secret that
+   *  encrypts this blob at rest; kept inside the blob it encrypts (free — you
+   *  can't read it without having decrypted) so a decoy unhide can re-lock.
+   *  Device-specific: excluded from backups, like the relay list. */
+  lock?: { secret: string }
 }
 
 /** Helper-hint state: small "what & why" explanations shown while learning the
@@ -156,30 +164,38 @@ export function load(): Persisted {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return fresh
-    const o = JSON.parse(raw) as Partial<Persisted> & { circle?: Circle | null; relayUrl?: string; geofences?: Geofence[] }
-    const state: Persisted = { ...fresh, ...o, circles: o.circles ?? [], noReportZones: o.noReportZones ?? [], petnames: o.petnames ?? {}, relayUrls: resolveRelays(o) }
-    // Migrate the legacy single-relay field into the fanned-out list (resolveRelays did the work).
-    delete (state as unknown as Record<string, unknown>).relayUrl
-    // Migrate the legacy single-circle shape.
-    if (o.circle && !state.circles.length) {
-      state.circles = [o.circle]
-      state.activeCircleId = o.circle.id
-    }
-    delete (state as unknown as Record<string, unknown>).circle
-    // Drop expired transient circles, then keep the active id valid.
-    const now = Math.floor(Date.now() / 1000)
-    state.circles = state.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
-    // Migrate legacy device-global safe places into each circle.
-    state.circles = adoptLegacyFences(state.circles, o.geofences)
-    delete (state as unknown as Record<string, unknown>).geofences
-    if (!state.circles.some((c) => c.id === state.activeCircleId)) {
-      state.activeCircleId = state.circles[0]?.id ?? null
-    }
-    // Rehydrate cached presence, but drop ancient pins and any circle we've since left.
-    state.presence = prunePresence(o.presence ?? {}, state.circles.map((c) => c.id), now, PRESENCE_MAX_AGE_SEC)
-    return state
+    const o = JSON.parse(raw) as Partial<Persisted> & { locked?: number }
+    // Locked at rest: ciphertext must never partially hydrate. The boot flow
+    // detects this via lockedAtRest() and goes through openRest() instead.
+    if (o.locked === 1) return fresh
+    return hydrate(o, fresh)
   } catch { /* ignore corrupt state */ }
   return fresh
+}
+
+/** Migrations + pruning over a parsed state — shared by load() and openRest(). */
+function hydrate(o: Partial<Persisted> & { circle?: Circle | null; relayUrl?: string; geofences?: Geofence[] }, fresh: Persisted): Persisted {
+  const state: Persisted = { ...fresh, ...o, circles: o.circles ?? [], noReportZones: o.noReportZones ?? [], petnames: o.petnames ?? {}, relayUrls: resolveRelays(o) }
+  // Migrate the legacy single-relay field into the fanned-out list (resolveRelays did the work).
+  delete (state as unknown as Record<string, unknown>).relayUrl
+  // Migrate the legacy single-circle shape.
+  if (o.circle && !state.circles.length) {
+    state.circles = [o.circle]
+    state.activeCircleId = o.circle.id
+  }
+  delete (state as unknown as Record<string, unknown>).circle
+  // Drop expired transient circles, then keep the active id valid.
+  const now = Math.floor(Date.now() / 1000)
+  state.circles = state.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
+  // Migrate legacy device-global safe places into each circle.
+  state.circles = adoptLegacyFences(state.circles, o.geofences)
+  delete (state as unknown as Record<string, unknown>).geofences
+  if (!state.circles.some((c) => c.id === state.activeCircleId)) {
+    state.activeCircleId = state.circles[0]?.id ?? null
+  }
+  // Rehydrate cached presence, but drop ancient pins and any circle we've since left.
+  state.presence = prunePresence(o.presence ?? {}, state.circles.map((c) => c.id), now, PRESENCE_MAX_AGE_SEC)
+  return state
 }
 
 /** Once hiding starts, nothing may write the real state back — a queued signal
@@ -188,8 +204,81 @@ export function load(): Persisted {
 let saveLocked = false
 export function lockSaves(): void { saveLocked = true }
 
+// ── At-rest encryption (the app lock — docs/plans/2026-07-02-app-lock.md) ────
+// save() stays synchronous (it is called everywhere); with a key armed, the
+// serialised state goes through a coalescing encrypt-then-write drain instead.
+let restKey: Uint8Array | null = null
+let pendingJson: string | null = null
+let drainPromise: Promise<void> | null = null
+
+/** Arm at-rest encryption — every subsequent save writes ciphertext. */
+export function armRest(secretHex: string): void { restKey = fromHex(secretHex) }
+
+/** Disarm without touching the blob (tests; hide/reset paths). */
+export function disarmRest(): void { restKey = null; pendingJson = null }
+
+/** Is a rest key armed this session? (Distinguishes a normal unlocked boot
+ *  from the plaintext-after-unhide state that needs the PIN re-confirmed.) */
+export function restArmed(): boolean { return restKey !== null }
+
+/** Is the persisted blob ciphertext right now? */
+export function lockedAtRest(): boolean {
+  try {
+    const raw = localStorage.getItem(KEY)
+    if (!raw) return false
+    return (JSON.parse(raw) as { locked?: number }).locked === 1
+  } catch { return false }
+}
+
 export function save(state: Persisted): void {
   if (saveLocked) return
+  if (restKey) {
+    pendingJson = JSON.stringify(state)
+    drainPromise = drainPromise ?? drainRest()
+    return
+  }
+  // SAFETY: with no key armed, a stray save while the blob is ciphertext must
+  // never clobber it with fresh plaintext — that would destroy the protected
+  // state. Unlock (openRest + armRest) or sealOff are the only ways past this.
+  if (lockedAtRest()) return
+  localStorage.setItem(KEY, JSON.stringify(state))
+}
+
+async function drainRest(): Promise<void> {
+  try {
+    while (pendingJson) {
+      const json = pendingJson
+      pendingJson = null
+      const key = restKey
+      if (!key) return
+      const d = await encryptEnvelope(key, json)
+      // Re-check the kill switches after the await — a hide or a disable that
+      // raced the encryption must win; resurrecting state here would leak.
+      if (saveLocked || !restKey) return
+      localStorage.setItem(KEY, JSON.stringify({ locked: 1, d }))
+    }
+  } finally { drainPromise = null }
+}
+
+/** Await any queued encrypted write (tests; belt-and-braces before a reload). */
+export async function flushRest(): Promise<void> { await drainPromise }
+
+/** Decrypt the at-rest blob with the storage secret and hydrate it exactly
+ *  like load(). Throws on a wrong secret or a blob that is not locked. */
+export async function openRest(secretHex: string): Promise<Persisted> {
+  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrls: resolveRelays(), noReportZones: [], petnames: {}, presence: {} }
+  const raw = localStorage.getItem(KEY)
+  const o = JSON.parse(raw ?? '{}') as { locked?: number; d?: string }
+  if (o.locked !== 1 || typeof o.d !== 'string') throw new Error('not locked')
+  const json = await decryptEnvelope(fromHex(secretHex), o.d)
+  return hydrate(JSON.parse(json) as Partial<Persisted>, fresh)
+}
+
+/** Deliberately rewrite the blob as plaintext — turning the lock off. The one
+ *  sanctioned way to go from ciphertext back to plaintext at rest. */
+export function sealOff(state: Persisted): void {
+  restKey = null
+  pendingJson = null
   localStorage.setItem(KEY, JSON.stringify(state))
 }
 

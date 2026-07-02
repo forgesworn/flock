@@ -58,7 +58,8 @@ Be extra careful when modifying:
 - `src/policy.ts` — the disclosure-on-event decision; a wrong default leaks or withholds location.
 - `src/signals.ts` — key domain separation (beacon key vs duress key) must hold.
 - `src/geofence.ts` — breach = outside *every* fence; getting this wrong mis-fires or misses alerts.
-- `app/src/store.ts` — identity + seed handling. **localStorage is NOT secure key storage** (MVP only).
+- `app/src/store.ts` — identity + seed handling, and the **at-rest encryption layer** (App lock): a stray save must never clobber the ciphertext; the drain's kill-switch re-checks must stay. Without the lock, localStorage is plaintext (the in-app note says so).
+- `app/src/lock.ts` / `app/src/decoy.ts` — the App lock (keystore-kit PIN wrap, grace window) and decoy sealing. The decoy must stay observationally identical to a fresh install — including **no PIN screen** and constant-work unlock failures.
 
 ## Privacy invariants (from FLOCK.md §6)
 

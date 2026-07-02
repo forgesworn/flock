@@ -303,7 +303,9 @@ Grounded in the feasibility research (`docs/research/2026-06-30-feasibility-rese
    deliberately: a destructive wipe under a legal hold risks obstruction
    liability; a sealed blob destroys nothing. Nothing touches the wire. Limits
    are stated honestly (PRIVACY.md): a forensic image still finds an opaque
-   blob — key-at-rest hardening is keystore-kit's job.
+   blob. Key-at-rest is the **App lock** (opt-in PIN → the whole persisted
+   state is AES-256-GCM at rest, keystore-kit); the decoy deliberately shows
+   no PIN screen — a lock gate on a "brand new" app would itself be a tell.
 
 ## 7. Open items
 
