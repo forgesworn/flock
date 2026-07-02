@@ -20,8 +20,10 @@ Facts an assistant needs before recommending or generating code:
   cadence, decoy view under compelled unlock (state sealed under a phrase; the
   app reboots as a genuinely fresh install), app lock (opt-in PIN — the whole
   persisted state is AES-256-GCM at rest, keystore-kit; both PWA-level, not
-  library modules). All foreground, via the PWA (live at
-  https://flock.forgesworn.dev/).
+  library modules), and remote signing via any NIP-46 signer (Signet, a NIP-07
+  extension, Amber, `bunker://` / `nostrconnect://` — the key stays in the
+  signer; nsec-paste is deliberately not offered). All foreground, via the PWA
+  (live at https://flock.forgesworn.dev/).
 - **Does not work yet:** background breach detection with the app closed. No
   web/PWA platform can do background geofencing (2026); it requires the native
   Capacitor shell, which is scaffold-only (`native/`), gated on a GrapheneOS

@@ -1,9 +1,11 @@
 // FlockSigner — the one signing/encryption seam.
 //
-// Today: LocalSigner (key in localStorage — preview only). Next: a SignetSigner
-// adapter over signet-login's `SignetSigner` (key in a NIP-46 bunker, never in
-// flock). All event signing + NIP-44 goes through this interface so swapping the
-// backend is a one-line change.
+// Two backends: LocalSigner (key in localStorage — quick-start, encrypted at
+// rest by the App lock) and makeSignetSigner over signet-login's `SignetSigner`
+// (key in a remote NIP-46 signer — Signet, a NIP-07 extension, Amber, or any
+// `bunker://` — never in flock; see app/src/signin.ts for the picker config).
+// All event signing + NIP-44 goes through this interface, so the whole app is
+// backend-agnostic and the gift-wrap path works identically either way.
 
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { getConversationKey, encrypt as nip44encrypt, decrypt as nip44decrypt } from 'nostr-tools/nip44'

@@ -6,6 +6,7 @@ import type { Mode } from './store'
 import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
+import { buildSignInOptions } from './signin'
 import { PRIVATE_RELAYS, parseRelayList } from './relays'
 import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
@@ -925,13 +926,13 @@ function youView(): string {
     <div class="section-title">Identity</div>
     <div class="card stack">
       <div class="kv"><span class="k">Your invite key</span><span>${shortNpub(me.pk)}</span></div>
-      <div class="kv"><span class="k">Sign-in</span><span>${persisted.authMethod === 'signet' ? 'Signed in with Signet' : 'Quick start (this device only)'}</span></div>
+      <div class="kv"><span class="k">Sign-in</span><span>${persisted.authMethod === 'signet' ? 'External signer' : 'Quick start (this device only)'}</span></div>
       <button class="btn small ghost" data-action="copy-npub">Copy my invite key</button>
       <div class="note">${persisted.authMethod === 'signet'
-        ? 'Signed in with Signet — your key lives in your signer and never touches flock.'
+        ? 'Your key lives in your signer (Signet, Amber, a bunker…) and never touches flock.'
         : persisted.lock
-          ? 'Quick-start key, encrypted at rest by your App lock. Sign in with Signet to keep the key out of flock entirely.'
-          : 'Quick-start key, stored in this browser only. Turn on the App lock (Advanced) to encrypt it at rest, or sign in with Signet.'}</div>
+          ? 'Quick-start key, encrypted at rest by your App lock. Sign in with a signer to keep the key out of flock entirely.'
+          : 'Quick-start key, stored in this browser only. Turn on the App lock (Advanced) to encrypt it at rest, or sign in with a signer.'}</div>
     </div>
     <div class="section-title" style="margin-top:18px">Tips &amp; help</div>
     <div class="card stack">
@@ -1249,8 +1250,9 @@ function onboardingView(): string {
   } else {
     const signedInSignet = persisted.authMethod === 'signet' && persisted.identity
     const signetRow = signedInSignet
-      ? '<div class="note" style="margin-top:16px">✓ Signed in with Signet — your key stays in your signer</div>'
-      : '<button class="btn ghost" data-action="signet" style="margin-top:10px">Sign in with Signet</button>'
+      ? '<div class="note" style="margin-top:16px">✓ Signed in with your signer — your key stays there, never in flock</div>'
+      : `<button class="btn ghost" data-action="signet" style="margin-top:10px">Sign in with a signer</button>
+         ${hint('signer', 'Use Signet, Amber (Android/GrapheneOS), nsec.app, or any Nostr signing app — your key stays in it, flock never holds it. The strongest option for real use.')}`
     inner = `
       <img class="hero-logo" src="./icon.svg" alt="" />
       <h1>Stay close,<br/>stay private.</h1>
@@ -1587,9 +1589,14 @@ function getSigner(): FlockSigner | null {
 
 async function doSignetLogin(): Promise<void> {
   try {
-    const session = await signetLogin({ appName: 'flock', relayUrl: PRIVATE_RELAYS[0] })
+    // The picker offers Signet, a browser extension (NIP-07), Amber, and any
+    // NIP-46 bunker / NostrConnect — every one keeps the key in the signer.
+    // nsec-paste is deliberately excluded (see signin.ts).
+    const session = await signetLogin(buildSignInOptions('flock', [...PRIVATE_RELAYS]))
     if (!session) { toast('Sign-in cancelled'); return }
-    if (!session.signer.capabilities.hasNip44) { toast("That sign-in app isn't compatible — try another"); return }
+    // Gift-wrap seals are nip44-encrypted, so a signer without NIP-44 can't
+    // drive flock at all — reject it here rather than fail on the first signal.
+    if (!session.signer.capabilities.hasNip44) { toast("That signer can't encrypt (needs NIP-44) — try another"); return }
     signetSigner = makeSignetSigner(session.signer)
     persisted.identity = { pk: session.pubkey }
     persisted.authMethod = 'signet'
@@ -1600,11 +1607,12 @@ async function doSignetLogin(): Promise<void> {
   } catch { toast('Sign-in failed') }
 }
 
-/** On reload, rehydrate the Signet signer from its stored session. */
+/** On reload, rehydrate the remote signer from its stored session — including
+ *  reconnecting a NIP-46 bunker over flock's own no-log relay. */
 async function restoreSignet(): Promise<void> {
   if (persisted.authMethod !== 'signet' || signetSigner) return
   try {
-    const session = await signetRestore()
+    const session = await signetRestore({ defaultRelay: PRIVATE_RELAYS[0] })
     if (session) { signetSigner = makeSignetSigner(session.signer); render() }
   } catch { /* leave unsigned; user can re-auth */ }
 }

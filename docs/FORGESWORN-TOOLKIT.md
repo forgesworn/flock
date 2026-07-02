@@ -11,8 +11,8 @@ yet, strong fit · 🤔 candidate / explore · 🔒 private repo (confirm scope)
 
 | flock need | Tool | Status / action |
 |---|---|---|
-| Sign events without holding the nsec | **signet-login** (+ **signet-lite** = `lite.mysignet.app`, **signet-app** = `mysignet.app`) | ✅ Shipped — `SignetSigner` (`signEvent` + `nip44`) behind the pluggable `Signer` interface (`app/src/signer.ts`). |
-| The actual remote signer | **heartwood** (NIP-46, built on nsec-tree; unlimited unlinkable personas from one mnemonic; runs on cheap ARM) | 🤔 Signet connects flock to a heartwood-class signer. flock just speaks NIP-46. |
+| Sign events without holding the nsec | **signet-login** (+ **signet-lite** = `lite.mysignet.app`, **signet-app** = `mysignet.app`) | ✅ Shipped — `SignetSigner` (`signEvent` + `nip44`) behind the pluggable `Signer` interface (`app/src/signer.ts`). The picker is configured (`app/src/signin.ts`) to offer **Signet, a browser extension (NIP-07), Amber, and any NIP-46 `bunker://` / `nostrconnect://`** — nsec-paste is deliberately off (it would put a raw key back in the app). NIP-46 transport + bunker reconnect ride flock's own no-log relay. |
+| The actual remote signer | **heartwood** (NIP-46, built on nsec-tree; unlimited unlinkable personas from one mnemonic; runs on cheap ARM) | ✅ Reachable now — flock speaks generic NIP-46, so a self-hosted heartwood (or Amber, nsec.app, nsecbunker) connects via the bunker path today. **Next:** per-circle heartwood personas so seals are unlinkable across circles (Phase A follow-up). |
 | Derive per-circle keys deterministically | **nsec-tree** (`derivePersona`, `deriveFromPersona`, epoch index) | ✅ Shipped — `app/src/keys.ts` derives `circleRoot → circleId → epoch` via `canary-kit/sync.deriveGroupIdentity`; reseed = epoch+1. |
 | Protect a *local* key at rest (fallback path) | **keystore-kit** (PIN / WebAuthn-PRF / grace, burn, zero-dep) | ✅ Shipped as the **App lock** — the whole persisted blob (key, root, seeds, places) is AES-256-GCM at rest behind a PIN, grace window for reloads. Vendored tarball until the kit is on npm; biometric waits for real hardware. |
 
