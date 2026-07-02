@@ -23,10 +23,18 @@ test.describe('remove member — cut someone off (3 people)', () => {
 
     // A sees both others (this also covers the concurrent-roster-update path).
     await gotoTab(A, 'you')
-    await expect(A.locator('[data-action="remove-member"]')).toHaveCount(2)
+    await expect(A.locator('[data-action="ask-remove"]')).toHaveCount(2)
 
     // A removes C — the new key is gift-wrapped to B only; C is stranded.
+    // Removal is a two-step inline confirm: first tap arms (nothing sent yet),
+    // Cancel disarms, arming again and confirming executes.
     const cPk = await myPubkey(C)
+    await A.click(`[data-action="ask-remove"][data-pk="${cPk}"]`)
+    await expect(A.locator(`[data-action="remove-member"][data-pk="${cPk}"]`)).toBeVisible()
+    await A.click('[data-action="cancel-remove"]')
+    await expect(A.locator('[data-action="remove-member"]')).toHaveCount(0)
+    await expect(A.locator('[data-action="ask-remove"]')).toHaveCount(2) // no one removed
+    await A.click(`[data-action="ask-remove"][data-pk="${cPk}"]`)
     await A.click(`[data-action="remove-member"][data-pk="${cPk}"]`)
     await settle(B, 3000) // B receives the reseed and resubscribes to the new inbox
 

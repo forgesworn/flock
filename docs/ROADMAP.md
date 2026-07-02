@@ -358,8 +358,17 @@ modes**. Plan with designs, decisions, and per-slice tests:
   is untouched. TDD +11 unit tests (incl. a SAFETY accuracy sweep on the SOS path); new
   e2e proves an imprecise near-edge SOS reaches B location-less. All 3 app call sites
   already passed `accuracyMetres`, so the fix is live with no app change.
-- [ ] **Slice 2 — confirm destructive actions** 🔴 — "Sign out & reset" and "Remove
-  member" execute on one tap; apply the disband two-step inline confirm idiom.
+- [x] **Slice 2 — confirm destructive actions** 🔴 — "Sign out & reset" and "Remove
+  member" executed on one tap; both now use the disband two-step inline confirm idiom
+  (arm → alert-coloured warning + Cancel), reset warns "no way back" (Slice 4 will link
+  the backup). E2e: a new `reset.spec.ts` (arm → cancel keeps the circle → confirm wipes
+  to onboarding) and the 3-party remove spec now drives arm → cancel → re-arm → execute.
+- [ ] **Follow-up (found during Batch 1) — typing is wiped by any inbound re-render** 🟡 —
+  render-on-state rebuilds the DOM when a signal arrives, so text a user is mid-typing
+  (buzz reason, petname, relay list…) is silently lost; for a buzz this made the send
+  no-op with an empty reason. Made the e2e fixture atomic as a workaround; the real fix
+  is input-preserving renders (skip re-render while an input is focused, or patch around
+  it). Surfaced by `remove-member.spec.ts` failing 5× in a row — not relay flake.
 - [ ] **Slice 3 — safe places sync across the circle** 🔴 — fences are device-local
   only, so a guardian's safe place does nothing on the child's phone (FLOCK.md §3.2
   unimplemented + stale). Gift-wrapped `t:'fences'` full-set signal, latest-wins,

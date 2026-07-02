@@ -296,6 +296,18 @@ config, `app/src/map.ts` defaults.
 
 ---
 
+## Discovered during implementation
+
+- **Typing is wiped by any inbound re-render** (found while shipping Slice 2). The
+  render-on-state controller rebuilds the DOM whenever a signal arrives, so text a
+  user is mid-typing (a buzz reason, a petname, the relay list…) is silently lost —
+  and a buzz submitted right after the wipe no-ops with "Pick or type a reason".
+  This made `remove-member.spec.ts` fail deterministically (C's buzz never
+  published → A's roster never learnt C). Workaround shipped: the `sendBuzz` e2e
+  fixture fills + clicks atomically in one in-page task. Real fix (own slice, 🟡):
+  input-preserving renders — skip the re-render while a form control is focused, or
+  preserve focused-input value/selection across renders. Tracked in ROADMAP Phase I.
+
 ## Explicitly deferred (tracked elsewhere, not re-planned here)
 
 - **Second no-log relay** + **`.onion` endpoint** — the highest-leverage fix for

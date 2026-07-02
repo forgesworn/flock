@@ -144,6 +144,8 @@ let onboardMode: Mode = 'family'
 let adding = false // adding another circle from within the app (not first-run onboarding)
 let ttlMode: 'ongoing' | 'today' | 'custom' = 'ongoing' // chosen lifetime for a new circle
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
+let resetConfirm = false // inline confirm for the destructive "sign out & reset this device"
+let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
 let goingDark = false // off-grid duration picker is open
 let darkDurSec = 3600 // chosen break length (sec); -1 = custom (read from input)
 let addZoneKind: 'safe' | 'noreport' = 'safe' // which kind of zone the map editor is adding
@@ -253,6 +255,8 @@ function switchCircle(id: string): void {
   breachActive = false
   alertActive = false
   disbandConfirm = false
+  resetConfirm = false
+  removeConfirmPk = null
   tab = 'home'
   syncWatch() // re-tier accuracy for the newly-focused circle's mode
   render()
@@ -704,7 +708,14 @@ function youView(): string {
     <div class="card stack">
       <button class="btn small" data-action="reseed">Rotate circle key (reseed)</button>
       <div class="note">Generates a new seed and sends it encrypted to current members. Do this if an invite code may have leaked.</div>
-      ${members().filter((pk) => pk !== me.pk).map((pk) => `<div class="row">${avatarHtml(pk, false, true)}<span class="who" style="font-size:14px">${esc(nameFor(pk))}</span><button class="btn small ghost" style="margin-left:auto" data-action="remove-member" data-pk="${pk}">Remove</button></div>`).join('') || '<div class="note">No other members yet.</div>'}
+      ${members().filter((pk) => pk !== me.pk).map((pk) => removeConfirmPk === pk
+        ? `<div class="row">${avatarHtml(pk, false, true)}<span class="who" style="font-size:14px">${esc(nameFor(pk))}</span></div>
+           <div class="note" style="color:var(--alert)">Removes ${esc(nameFor(pk))} and rotates the circle key — they're cut off straight away.</div>
+           <div class="row" style="gap:10px">
+             <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="remove-member" data-pk="${pk}">Remove</button>
+             <button class="btn small ghost" data-action="cancel-remove">Cancel</button>
+           </div>`
+        : `<div class="row">${avatarHtml(pk, false, true)}<span class="who" style="font-size:14px">${esc(nameFor(pk))}</span><button class="btn small ghost" style="margin-left:auto" data-action="ask-remove" data-pk="${pk}">Remove</button></div>`).join('') || '<div class="note">No other members yet.</div>'}
     </div>
     <div class="section-title" style="margin-top:18px">Names &amp; photos</div>
     <div class="card stack">
@@ -730,8 +741,14 @@ function youView(): string {
         : '<button class="btn small ghost" style="color:var(--alert)" data-action="ask-disband">Disband for everyone…</button>'}
     </div>
     <div class="card stack" style="margin-top:14px">
-      <button class="btn small ghost" data-action="reset-device">Sign out &amp; reset this device</button>
-      <div class="note">Wipes your key and every circle from this browser.</div>
+      ${resetConfirm
+        ? `<div class="note" style="color:var(--alert)">This wipes your key and every circle from this device. Without a backup there is <strong>no way back</strong>.</div>
+           <div class="row" style="gap:10px">
+             <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="reset-device">Wipe this device</button>
+             <button class="btn small ghost" data-action="cancel-reset">Cancel</button>
+           </div>`
+        : `<button class="btn small ghost" data-action="ask-reset">Sign out &amp; reset this device…</button>
+           <div class="note">Wipes your key and every circle from this browser.</div>`}
     </div>
     <div class="note" style="margin-top:16px;text-align:center">flock · disclosure-on-event location · built on canary-kit</div>`
 }
@@ -1948,7 +1965,9 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'copy-npub': copyNpub(); break
     case 'send-invite': void sendInvite(); break
     case 'reseed': void reseedCircle(); break
-    case 'remove-member': void reseedCircle(node.dataset.pk); break
+    case 'ask-remove': removeConfirmPk = node.dataset.pk ?? null; render(); break
+    case 'cancel-remove': removeConfirmPk = null; render(); break
+    case 'remove-member': removeConfirmPk = null; void reseedCircle(node.dataset.pk); break
     case 'checkin': void sendCheckIn(); break
     case 'buzz': void sendBuzz(node.dataset.reason ?? (document.getElementById('buzz-custom') as HTMLInputElement | null)?.value ?? ''); break
     case 'dismiss-buzz': activeBuzz = null; render(); break
@@ -1991,6 +2010,8 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'ask-disband': disbandConfirm = true; render(); break
     case 'cancel-disband': disbandConfirm = false; render(); break
     case 'disband': void disbandCircle(); break
+    case 'ask-reset': resetConfirm = true; render(); break
+    case 'cancel-reset': resetConfirm = false; render(); break
     case 'reset-device': resetDevice(); break
     case 'add-zone': addMode = true; addZoneKind = (node.dataset.kind as 'safe' | 'noreport') ?? 'safe'; newZonePolicy = 'withhold'; renderMapPanel(); updatePreview(); break
     case 'zone-kind': addZoneKind = node.dataset.kind as 'safe' | 'noreport'; renderMapPanel(); updatePreview(); break
@@ -2397,6 +2418,8 @@ function leave(): void {
   breachActive = false
   alertActive = false
   disbandConfirm = false
+  resetConfirm = false
+  removeConfirmPk = null
   tab = 'home'
   toast(`Left ${c.name}`)
   render()
@@ -2413,6 +2436,8 @@ async function disbandCircle(): Promise<void> {
   const name = c.name
   removeCircle(c.id)
   disbandConfirm = false
+  resetConfirm = false
+  removeConfirmPk = null
   breachActive = false
   alertActive = false
   tab = 'home'
@@ -2439,6 +2464,9 @@ function resetDevice(): void {
   armingCheckin = false
   adding = false
   addMode = false
+  disbandConfirm = false
+  resetConfirm = false
+  removeConfirmPk = null
   mapView?.destroy()
   mapView = null
   fix = null
