@@ -102,6 +102,22 @@ describe('buildCheckInSignal / decryptCheckIn', () => {
   it('rejects a malformed member', async () => {
     await expect(buildCheckInSignal({ groupId: 'g', seedHex: SEED, member: 'nope', intervalSeconds: 1800 })).rejects.toThrow()
   })
+
+  it('round-trips the optional battery state', async () => {
+    const event = await buildCheckInSignal({ groupId: 'g', seedHex: SEED, member: A, intervalSeconds: 1800, timestamp: 12_345, battery: 'critical' })
+    const back = await decryptCheckIn(SEED, event.content)
+    expect(back.battery).toBe('critical')
+  })
+
+  it('omits battery when not supplied (no wire difference)', async () => {
+    const event = await buildCheckInSignal({ groupId: 'g', seedHex: SEED, member: A, intervalSeconds: 1800, timestamp: 12_345 })
+    const back = await decryptCheckIn(SEED, event.content)
+    expect('battery' in back).toBe(false)
+  })
+
+  it('rejects an unknown battery value', async () => {
+    await expect(buildCheckInSignal({ groupId: 'g', seedHex: SEED, member: A, intervalSeconds: 1800, battery: 'flat' as 'low' })).rejects.toThrow()
+  })
 })
 
 describe('classifyCheckins — missedAt', () => {

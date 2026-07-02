@@ -100,8 +100,9 @@ not stored by relays. Core types (`t` → payload / key / trigger):
 | `pickup` | `BeaconPayload` | beacon key | "pick me up" pressed |
 | `help`  | `DuressAlert`  | duress key | SOS / duress |
 | `allclear` | `AllClear {member, timestamp, coerced?}` | group envelope key | "I'm safe now" — stands down the member's `help` alert. A **coerced** all-clear (flag inside the encryption, long-press to send) is IGNORED by receivers: the sender's screen shows a normal stand-down while the circle stays alarmed (§6.1) |
-| `checkin` | `CheckIn {member, timestamp, intervalSeconds}` | group envelope key (`deriveGroupKey`) | dead-man's-switch heartbeat |
+| `checkin` | `CheckIn {member, timestamp, intervalSeconds, battery?}` | group envelope key (`deriveGroupKey`) | dead-man's-switch heartbeat; optional `battery: low\|critical` so a dead phone and deliberate silence don't read alike (§3.5) |
 | `ack` | `CheckInAck {member, target, timestamp}` | group envelope key | "I've got this" — a watcher claims a missed check-in; other watchers stand their repeat alerts down (§3.5) |
+| `trail` | `Trail {member, reason, crumbs[], timestamp}` | **duress key** | rides with `help`/`breach` — where the member had been (§3.6) |
 | `fences` | `FenceSet {fences, updatedAt, by}` | group envelope key | someone edits the circle's safe places (full-set, latest-wins — §3.2) |
 | `rzv` | `Rendezvous {id, place, deadline, mode, setBy, createdAt}` | group envelope key | someone sets "be at a place by a time" |
 | `rzv-status` | `RendezvousStatus {rendezvousId, member, status, etaSeconds, timestamp}` | group envelope key | a member's en-route / arrived / at-risk update |
@@ -170,6 +171,11 @@ A stand-down is a final check-in with `intervalSeconds <= 0`. **Auto-sending is
 deliberately not done** — the user must actively check in, so incapacitation
 surfaces as a missed check-in.
 
+**Battery context.** A check-in MAY carry `battery: 'low' | 'critical'`
+(absent = fine; only when discharging). It rides inside the encryption — no
+wire tell — so a later missed check-in can be read in context: a phone that
+was at 3% and a deliberate silence must not look identical to guardians.
+
 **Self-reminder (local only).** Before the deadline the member's own device
 nudges them (`selfCheckInStatus`: `due-soon` → `overdue` → `missed`). The
 reminder emits **no traffic** — a nudge that published anything would be a tell
@@ -185,6 +191,28 @@ check-in), so a stale ack can never silence a *new* miss. Only the responder's
 own key can claim (sender pubkey must match `member` — mirrors `allclear`).
 Escalation stays **peer-to-peer through the circle**: there is deliberately no
 monitoring centre — a paid custodian would be a centralised, subpoenable party.
+
+### 3.6 Breadcrumb trail (pre-trigger history)
+
+A `help`/`breach` signal carries one point-in-time fix — not enough to find
+someone who kept moving. The device keeps a short rolling buffer of recent
+fixes (`pushCrumb`: max **12** crumbs, max **15 min** old, ≥ **60 s** apart) —
+**in memory only**, never persisted, never emitted. When a help/breach fires,
+the buffer rides out as a `trail` signal (`Trail {member, reason: help|breach,
+crumbs[], timestamp}`), encrypted with the **duress key**: trail data exists
+only because a trigger fired, so it lives in the duress domain, never the
+beacon domain (§6 invariant 3). Rules:
+
+- **No-report zones apply at RECORD time** — a fix inside (or uncertainly near)
+  a no-report zone never enters the buffer, so a trail can never pin a
+  sensitive address (fail-safe, mirrors §4).
+- Only the member's own key can publish their trail (sender pubkey must match
+  `member`) — nobody can plant a fake history for someone else.
+- A genuine `allclear` deletes the member's trail on every device — the
+  emergency is over, the history goes with it. Receivers also age trails out
+  of the map after 30 minutes.
+- The trail is **best-effort**: a lost trail must never fail or delay the
+  alert it accompanies.
 
 ## 4. Disclosure-on-event policy
 

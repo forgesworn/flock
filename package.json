@@ -40,6 +40,10 @@
       "types": "./dist/checkin.d.ts",
       "import": "./dist/checkin.js"
     },
+    "./trail": {
+      "types": "./dist/trail.d.ts",
+      "import": "./dist/trail.js"
+    },
     "./buzz": {
       "types": "./dist/buzz.d.ts",
       "import": "./dist/buzz.js"
@@ -55,6 +59,10 @@
     "./rendezvous": {
       "types": "./dist/rendezvous.d.ts",
       "import": "./dist/rendezvous.js"
+    },
+    "./meeting": {
+      "types": "./dist/meeting.d.ts",
+      "import": "./dist/meeting.js"
     },
     "./disband": {
       "types": "./dist/disband.d.ts",

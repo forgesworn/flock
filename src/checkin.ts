@@ -30,6 +30,13 @@ export interface CheckIn {
   timestamp: number
   /** Expected cadence in seconds; `<= 0` means stood down (no longer monitored). */
   intervalSeconds: number
+  /**
+   * Battery standing at check-in time; absent = fine. Rides inside the
+   * encryption (no wire tell) so a later missed check-in can be read in
+   * context — a phone that was at 3% and a deliberate silence should not
+   * look identical to guardians.
+   */
+  battery?: 'low' | 'critical'
 }
 
 export type CheckInStatus = 'ok' | 'overdue' | 'missed'
@@ -267,7 +274,15 @@ function validateCheckIn(o: Record<string, unknown>): CheckIn {
   if (typeof o.intervalSeconds !== 'number' || !Number.isFinite(o.intervalSeconds)) {
     throw new Error('Invalid check-in: intervalSeconds must be a number')
   }
-  return { member: o.member, timestamp: o.timestamp, intervalSeconds: o.intervalSeconds }
+  if (o.battery !== undefined && o.battery !== 'low' && o.battery !== 'critical') {
+    throw new Error("Invalid check-in: battery must be 'low' or 'critical' when present")
+  }
+  return {
+    member: o.member,
+    timestamp: o.timestamp,
+    intervalSeconds: o.intervalSeconds,
+    ...(o.battery !== undefined && { battery: o.battery }),
+  }
 }
 
 /**
@@ -280,14 +295,19 @@ export async function buildCheckInSignal(params: {
   member: string
   intervalSeconds: number
   timestamp?: number
+  battery?: 'low' | 'critical'
 }): Promise<UnsignedEvent> {
   if (!HEX_64_RE.test(params.member)) {
     throw new Error('member must be a 64-character lowercase hex pubkey')
+  }
+  if (params.battery !== undefined && params.battery !== 'low' && params.battery !== 'critical') {
+    throw new Error("battery must be 'low' or 'critical' when present")
   }
   const payload: CheckIn = {
     member: params.member,
     timestamp: params.timestamp ?? Math.floor(Date.now() / 1000),
     intervalSeconds: params.intervalSeconds,
+    ...(params.battery !== undefined && { battery: params.battery }),
   }
   const encryptedContent = await encryptEnvelope(deriveGroupKey(params.seedHex), JSON.stringify(payload))
   return buildSignalEvent({ groupId: params.groupId, signalType: CHECKIN_SIGNAL_TYPE, encryptedContent })

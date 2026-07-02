@@ -80,7 +80,8 @@ encryption stay at the edge.
 | `policy` | Disclosure-on-event decision: withhold \| coarse \| full, by mode/trigger/breach | ✅ tested |
 | `signals` | `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078 events | ✅ tested |
 | `nightout` | Ephemeral groups (NIP-40), presence ("still out / gone home"), separation ("lost") | ✅ tested |
-| `checkin` | Dead-man's-switch — encrypted "I'm OK" heartbeats (custom cadence); `ok`/`overdue`/`missed`, local self-reminders, "I've got this" ack + escalation | ✅ tested |
+| `checkin` | Dead-man's-switch — encrypted "I'm OK" heartbeats (custom cadence, battery context); `ok`/`overdue`/`missed`, local self-reminders, "I've got this" ack + escalation | ✅ tested |
+| `trail` | Pre-SOS breadcrumbs — on-device rolling buffer, disclosed (duress-keyed) only with a `help`/`breach` | ✅ tested |
 | `noreport` | Inverse fences — cap disclosure over sensitive addresses (withhold \| coarse) | ✅ tested |
 | `buzz` | Encrypted "look at your phone" ping with reason vocabulary | ✅ tested |
 | `allclear` | Stand-down signal, with a coerced flag | ✅ tested |

@@ -61,6 +61,21 @@ test.describe('check-in — dead-man\'s-switch', () => {
     await expect(A.locator('.checkin-armed')).toContainText('Overdue — check in now')
   })
 
+  test('a dying phone rides the check-in: B sees A\'s battery was critical', async ({ browser }) => {
+    const A = await newPerson(browser, undefined, { battery: { level: 0.05, charging: false } })
+    const B = await newPerson(browser)
+    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    const code = await inviteCode(A)
+    await joinByCode(B, code)
+
+    await armCheckin(A, 900)
+    await gotoTab(B, 'circle')
+    await expect(memberPill(B, /checked in/)).toBeVisible()
+    // A dead phone and deliberate silence must not read alike: the standing is
+    // inside the encryption, and B sees it on A's row.
+    await expect(B.locator('.member .when', { hasText: 'battery critical' })).toBeVisible()
+  })
+
   test('A misses → B says "I\'ve got this" → C sees it\'s being handled (3 people)', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser, undefined, { clock: true })

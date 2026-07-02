@@ -30,11 +30,12 @@ export async function settle(page: Page, ms = 1500): Promise<void> {
 
 /** Open a brand-new device: isolated storage, geolocation + clipboard granted.
  *  `opts.clock` installs Playwright's clock control before load, so a spec can
- *  fast-forward this device's time (e.g. to fire a dead-man's-switch). */
+ *  fast-forward this device's time (e.g. to fire a dead-man's-switch).
+ *  `opts.battery` stubs the Battery Status API before load (e.g. a dying phone). */
 export async function newPerson(
   browser: Browser,
   geolocation = LONDON,
-  opts: { clock?: boolean } = {},
+  opts: { clock?: boolean; battery?: { level: number; charging: boolean } } = {},
 ): Promise<Page> {
   const context = await browser.newContext({
     baseURL: BASE_URL,
@@ -42,6 +43,14 @@ export async function newPerson(
     geolocation,
     locale: 'en-GB',
   })
+  if (opts.battery) {
+    await context.addInitScript((b) => {
+      Object.defineProperty(navigator, 'getBattery', {
+        configurable: true,
+        value: async () => ({ level: b.level, charging: b.charging, addEventListener: () => { /* static stub */ } }),
+      })
+    }, opts.battery)
+  }
   const page = await context.newPage()
   if (opts.clock) await page.clock.install({ time: new Date() })
   await page.goto('/')

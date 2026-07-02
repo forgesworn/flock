@@ -42,6 +42,11 @@ import {
   classifyEscalation,
   CHECKIN_SIGNAL_TYPE,
   ACK_SIGNAL_TYPE,
+  pushCrumb,
+  buildTrailSignal,
+  decryptTrail,
+  TRAIL_SIGNAL_TYPE,
+  noReportPolicyAt,
   buildBuzzSignal,
   decryptBuzz,
   DEFAULT_BUZZ_REASONS,
@@ -91,6 +96,8 @@ import {
   type Geofence,
   type CheckIn,
   type CheckInAck,
+  type Breadcrumb,
+  type Trail,
 } from '@forgesworn/flock'
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -143,6 +150,9 @@ const AWAIT_GUIDE_MS = 60_000
 let armingCheckin = false
 let checkinAlert = false
 let checkinAlertSub = '' // orb subtitle when every missed check-in is being handled
+// Pre-SOS breadcrumbs: a short rolling buffer of my own recent fixes. Memory
+// ONLY — never persisted, never transmitted except inside a help/breach trail.
+let myCrumbs: Breadcrumb[] = []
 const escNotified = new Map<string, number>() // `${cid}:${member}:${missedAt}` → highest escalation level already toasted
 const selfNudged = new Map<string, string>() // circleId → `${lastCheckIn}:${status}` already nudged (self-reminder)
 let monitorTimer = 0
@@ -188,6 +198,8 @@ interface CircleState {
   checkins: Map<string, CheckIn>
   /** First responder per missed member (keyed by target); pruned on their next check-in. */
   acks: Map<string, CheckInAck>
+  /** Latest disclosed breadcrumb trail per member (arrives only with help/breach). */
+  trails: Map<string, Trail>
   rzvStatuses: Map<string, RendezvousStatus>
   rendezvous: Rendezvous | null
   offgrid: Map<string, OffGrid>
@@ -202,7 +214,7 @@ interface CircleState {
 const circleStates = new Map<string, CircleState>()
 function cstate(id: string): CircleState {
   let s = circleStates.get(id)
-  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), acks: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null, meetingGen: 0, meetingVenues: [] }; circleStates.set(id, s) }
+  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), acks: new Map(), trails: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null, meetingGen: 0, meetingVenues: [] }; circleStates.set(id, s) }
   return s
 }
 // Meeting-point requests I've declined to contribute to (by requestId). Declining
@@ -752,7 +764,10 @@ function circleMemberRow(pk: string, mePk: string): string {
     : `<span class="pill stale">home · ${fmtAgo(presence.ageSeconds)}</span>`
   else pill = '<span class="pill">no activity</span>'
 
-  const sub = beacon ? (isMe ? 'you · on the map' : 'location on the map') : isMe ? 'you' : 'in this circle'
+  const trail = st?.trails.get(pk)
+  const trailNote = trail && nowSec() - trail.timestamp <= 1800 ? ' · recent trail on the map' : ''
+  const battNote = ci?.battery ? ` · battery ${ci.battery}` : ''
+  const sub = (beacon ? (isMe ? 'you · on the map' : 'location on the map') : isMe ? 'you' : 'in this circle') + trailNote + battNote
   const edit = isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`
   const isNew = (activeCircle()?.unseenMembers ?? []).includes(pk)
   return `<div class="member${isNew ? ' unseen' : ''}">
@@ -1417,6 +1432,12 @@ function updateMapData(): void {
   const pts = runningMeeting ? [] : memberPoints()
   mapView?.setMembers(pts)
   mapView?.setRendezvous(r ? { lat: r.place.lat, lon: r.place.lon, label: r.place.label || r.place.address?.split(',')[0] } : null)
+  // Breadcrumb trails — where an alerted member had been. Only ever present
+  // after a help/breach disclosure; fades out of relevance after 30 minutes.
+  const trailPts = st ? [...st.trails.values()]
+    .filter((t) => nowSec() - t.timestamp <= 1800)
+    .flatMap((t) => t.crumbs.map((cr) => { const d = decode(cr.geohash); return { lat: d.lat, lon: d.lon } })) : []
+  mapView?.setTrail(trailPts)
   // Meeting-point overlays — each contributor's cell at its disclosed precision + the
   // suggested venue, so the proposer can eyeball the inputs and the pick on the map.
   let shown = pts
@@ -1622,7 +1643,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     if (!existing) return
     patchCircleById(existing.id, { seedHex: payload.s })
     const st = cstate(existing.id)
-    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
+    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.trails.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
     beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(existing.id) // old-key pins are meaningless under the new seed
@@ -1681,7 +1702,7 @@ async function reseedCircle(removePk?: string): Promise<void> {
     }
     patchCircleById(c.id, { seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) })
     const st = cstate(c.id)
-    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
+    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.trails.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
     beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(c.id) // old-key pins are meaningless under the new seed
@@ -1701,10 +1722,13 @@ async function sendCheckIn(): Promise<void> {
   if (!c || !id) return
   const interval = c.checkinInterval ?? 0
   try {
-    const tmpl = await buildCheckInSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, intervalSeconds: interval })
+    // A guardian reading a later missed check-in should know the phone was
+    // already dying — a dead battery and deliberate silence must not read alike.
+    const battery = batteryState()
+    const tmpl = await buildCheckInSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, intervalSeconds: interval, ...(battery ? { battery } : {}) })
     await publishSignal(tmpl, c)
     const ck = cstate(c.id).checkins
-    if (interval > 0) ck.set(id.pk, { member: id.pk, timestamp: nowSec(), intervalSeconds: interval })
+    if (interval > 0) ck.set(id.pk, { member: id.pk, timestamp: nowSec(), intervalSeconds: interval, ...(battery ? { battery } : {}) })
     else ck.delete(id.pk)
     cstate(c.id).acks.delete(id.pk) // my fresh check-in resolves any episode being handled
     toast(interval > 0 ? "Checked in — you're OK" : 'Checked out')
@@ -1749,9 +1773,13 @@ function evaluateCheckinAlarm(): void {
       if (e.level > (escNotified.get(key) ?? -1)) {
         escNotified.set(key, e.level)
         const name = nameFor(e.member)
-        toast(e.level === 0 ? `⚠ ${name} missed a check-in`
-          : e.level === 1 ? `⚠ Still no word from ${name} — can anyone check on them?`
-          : `🚨 No word from ${name} for a while — someone step in`)
+        // Context matters: a phone that was already dying reads very differently
+        // from silence with a full battery.
+        const batt = st.checkins.get(e.member)?.battery
+        const battNote = batt === 'critical' ? ' — their battery was critical' : batt === 'low' ? ' — their battery was low' : ''
+        toast(e.level === 0 ? `⚠ ${name} missed a check-in${battNote}`
+          : e.level === 1 ? `⚠ Still no word from ${name}${battNote} — can anyone check on them?`
+          : `🚨 No word from ${name} for a while${battNote} — someone step in`)
         if (e.level > 0) { try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ } }
       }
     }
@@ -2534,17 +2562,27 @@ function resetSampleCadence(): void { lastSampleFix = null; stationaryStreak = 0
 // continuous watch is untouched — a safety line, not a battery one. Where the
 // Battery Status API doesn't exist (iOS/Firefox) we simply never conserve.
 const CONSERVE_BELOW = 0.2
+const BATTERY_CRITICAL_BELOW = 0.08
 let batteryLow = false
 let batteryCharging = true
+let batteryLevel = 1
 function watchBattery(): void {
   type BatteryManager = { level: number; charging: boolean; addEventListener: (t: string, f: () => void) => void }
   const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryManager> }
   nav.getBattery?.().then((b) => {
-    const update = (): void => { batteryLow = b.level <= CONSERVE_BELOW; batteryCharging = b.charging }
+    const update = (): void => { batteryLevel = b.level; batteryLow = b.level <= CONSERVE_BELOW; batteryCharging = b.charging }
     update()
     b.addEventListener('levelchange', update)
     b.addEventListener('chargingchange', update)
   }).catch(() => { /* no API → never conserve */ })
+}
+
+/** Battery standing to ride inside a check-in — absent unless discharging low/critical. */
+function batteryState(): 'low' | 'critical' | undefined {
+  if (batteryCharging) return undefined
+  if (batteryLevel <= BATTERY_CRITICAL_BELOW) return 'critical'
+  if (batteryLevel <= CONSERVE_BELOW) return 'low'
+  return undefined
 }
 
 function conserveNow(): boolean {
@@ -2622,10 +2660,34 @@ function stopSharing(): void {
 function onFix(f: svc.Fix): void {
   fix = f
   geoIssue = null // any successful fix clears the location-trouble card
+  recordCrumb(f) // local rolling buffer — recording emits nothing, ever
   if (isDark()) { refresh(); return } // on a break — emit nothing at all
   broadcastRzvStatus()
   if (sharing) void autoEmit()
   else refresh()
+}
+
+// ── Pre-SOS breadcrumb trail ─────────────────────────────────────────────────
+// The buffer lives in memory only: it must never touch localStorage (location
+// at rest is a coercion target) and never leaves the device except inside an
+// encrypted trail after a help/breach trigger.
+function recordCrumb(f: svc.Fix): void {
+  // A sensitive address must never enter the buffer — no-report zones apply at
+  // RECORD time (fail-safe: an uncertain fix near a zone is skipped too).
+  if (noReportPolicyAt({ lat: f.lat, lon: f.lon }, persisted.noReportZones ?? [], f.accuracy ?? 0) !== null) return
+  try {
+    myCrumbs = pushCrumb(myCrumbs, { geohash: encode(f.lat, f.lon, 9), precision: 9, timestamp: nowSec() })
+  } catch { /* malformed fix — skip */ }
+}
+
+/** Best-effort: the alert itself has already gone out; a lost trail must not fail it. */
+async function sendTrail(c: store.Circle, reason: 'help' | 'breach'): Promise<void> {
+  const id = persisted.identity
+  if (!id || myCrumbs.length === 0) return
+  try {
+    const tmpl = await buildTrailSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, reason, crumbs: myCrumbs })
+    await publishSignal(tmpl, c)
+  } catch { /* best-effort */ }
 }
 
 // Automatic, movement-driven emission for the active circle: a night-out coarse
@@ -2675,6 +2737,7 @@ async function autoEmit(): Promise<void> {
     // transient failure is retried on the next fix rather than silently swallowed.
     saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
     beaconCadence.set(c.id, { lastGeohash: geohash, lastSentAt: nowSec() })
+    if (breach) void sendTrail(c, 'breach') // where I'd been before leaving the safe place
   } catch { /* no relay accepted — leave cadence untouched so the next fix retries */ }
   refresh()
 }
@@ -2725,7 +2788,10 @@ async function emit(trigger: 'pickup' | 'help'): Promise<void> {
     await publishSignal(template, c)
     // "Help sent" only AFTER a confirmed publish — the orb must never claim an
     // alert went out when it didn't (the most dangerous lie the UI could tell).
-    if (type === 'help') { alertActive = true; alertFailed = false; alertCircleId = c.id }
+    if (type === 'help') {
+      alertActive = true; alertFailed = false; alertCircleId = c.id
+      void sendTrail(c, 'help') // where I'd been — for a guardian if I keep moving
+    }
     toast(trigger === 'help' ? 'Help sent to your circle' : 'Pick-up request sent')
   } catch {
     // A failed SOS gets a PERSISTENT retry state on the orb, not a vanishing toast.
@@ -3120,6 +3186,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       // screen already shows a normal stand-down, but the circle stays alarmed.
       if (ac.coerced) return
       st.alerts.delete(ac.member)
+      st.trails.delete(ac.member) // the emergency is over — stop showing where they'd been
       if (me && ac.member === me.pk) { alertActive = false; alertFailed = false }
       else toast(`${nameFor(ac.member)} is safe — alert stood down`)
     } else if (t === CHECKIN_SIGNAL_TYPE) {
@@ -3127,6 +3194,14 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       st.checkins.set(ci.member, ci)
       st.acks.delete(ci.member) // their fresh check-in resolves the episode the ack was for
       evaluateCheckinAlarm()
+    } else if (t === TRAIL_SIGNAL_TYPE) {
+      const tr = await decryptTrail(c.seedHex, e.content)
+      // Only your own trail — nobody can plant a fake history for someone else.
+      if (tr.member !== e.pubkey) return
+      const prev = st.trails.get(tr.member)
+      if (prev && prev.timestamp > tr.timestamp) return // keep the newer disclosure
+      st.trails.set(tr.member, tr)
+      updateMapData()
     } else if (t === ACK_SIGNAL_TYPE) {
       const ack = await decryptAck(c.seedHex, e.content)
       // Only the responder themselves can claim they're on it (mirrors all-clear).

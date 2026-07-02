@@ -95,6 +95,8 @@ export class MapView {
   private pendingPreview: CircleGeofence | null = null
   private pendingMembers: MapPoint[] | null = null
   private pendingContrib: MapPoint[] | null = null
+  private pendingTrail: { lat: number; lon: number }[] | null = null
+  private trailPoints = 0 // count of breadcrumb dots currently drawn (inspection/e2e)
   private memberAreaFeatures = 0 // count of rough-area halos currently drawn (inspection/e2e)
   private contribAreaFeatures = 0 // count of contributor halos currently drawn (inspection/e2e)
 
@@ -162,11 +164,17 @@ export class MapView {
       this.map.addSource('contrib-area', { type: 'geojson', data: fc([]) })
       this.map.addLayer({ id: 'contrib-area-fill', type: 'fill', source: 'contrib-area', paint: { 'fill-color': '#a78bfa', 'fill-opacity': 0.16 } })
       this.map.addLayer({ id: 'contrib-area-line', type: 'line', source: 'contrib-area', paint: { 'line-color': '#a78bfa', 'line-width': 1.5, 'line-opacity': 0.5, 'line-dasharray': [2, 2] } })
+      // Breadcrumb trail — where an alerted member had been. Alert-red like the
+      // member pin it belongs to; dotted so it reads as history, not presence.
+      this.map.addSource('trail', { type: 'geojson', data: fc([]) })
+      this.map.addLayer({ id: 'trail-line', type: 'line', source: 'trail', filter: ['==', ['geometry-type'], 'LineString'] as unknown as maplibregl.FilterSpecification, paint: { 'line-color': '#ff6b5e', 'line-width': 2, 'line-opacity': 0.55, 'line-dasharray': [1, 2] } })
+      this.map.addLayer({ id: 'trail-dots', type: 'circle', source: 'trail', filter: ['==', ['geometry-type'], 'Point'] as unknown as maplibregl.FilterSpecification, paint: { 'circle-color': '#ff6b5e', 'circle-radius': 4, 'circle-opacity': 0.85, 'circle-stroke-color': '#1a1d27', 'circle-stroke-width': 1 } })
       this.ready = true
       if (this.pendingFences) this.setGeofences(this.pendingFences)
       if (this.pendingNoReport) this.setNoReportZones(this.pendingNoReport)
       if (this.pendingMembers) this.setMembers(this.pendingMembers)
       if (this.pendingContrib) this.setContributorPins(this.pendingContrib)
+      if (this.pendingTrail) this.setTrail(this.pendingTrail)
       this.setPreview(this.pendingPreview)
     })
   }
@@ -229,6 +237,30 @@ export class MapView {
 
   /** How many "rough area" halos are currently drawn. An inspection aid (used by the e2e). */
   memberAreaCount(): number { return this.memberAreaFeatures }
+
+  /**
+   * Draw (or clear) a disclosed breadcrumb trail: a dot per crumb plus a dotted
+   * connecting line, oldest → newest. Only ever fed from a help/breach trail
+   * disclosure — routine presence never reaches this layer.
+   */
+  setTrail(points: { lat: number; lon: number }[]): void {
+    if (!this.ready) { this.pendingTrail = points; return }
+    this.trailPoints = points.length
+    const features: unknown[] = points.map((p) => ({
+      type: 'Feature', properties: {},
+      geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+    }))
+    if (points.length >= 2) {
+      features.push({
+        type: 'Feature', properties: {},
+        geometry: { type: 'LineString', coordinates: points.map((p) => [p.lon, p.lat]) },
+      })
+    }
+    ;(this.map.getSource('trail') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features } as unknown as FeatureCollection)
+  }
+
+  /** How many breadcrumb dots are currently drawn. An inspection aid (used by the e2e). */
+  trailPointCount(): number { return this.trailPoints }
 
   /**
    * Show (or clear) the rendezvous place as a distinct flag pin. Kept apart from
