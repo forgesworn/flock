@@ -2,9 +2,13 @@
 
 Single source of truth so we ship **full features with no bugs**. Live preview:
 **https://flock.forgesworn.dev/**. The privacy-by-architecture foundation (Phase A;
-see `PRIVACY.md`) is largely in place — **go-live hardening** (Phase G) and the
-**native background-geofencing gate** (Phase 0 spike) are what stand between here
-and a real launch.
+see `PRIVACY.md`) is in place, the coercion-resistance set (Phase J + the decoy
+view + the App lock) is **complete**, and the foreground go-live hardening list
+(Phase G) is done bar two items that need things code can't provide: **relay #2**
+(runbook ready — `docs/runbooks/second-relay.md`, blocked only on a host) and the
+**native background-geofencing gate** (Phase 0 spike, blocked on real GrapheneOS
+hardware). Those two, plus publishing `keystore-kit` to npm, are the standing
+Darren-side actions.
 
 ## Cross-cutting (apply to everything)
 
@@ -149,6 +153,10 @@ and a real launch.
   2 e2es (PIN gate + live traffic after unlock; the full lock × decoy
   composition). Design: `docs/plans/2026-07-02-app-lock.md`. WebAuthn-PRF
   biometric unlock is wired in the kit but waits for real hardware (Tier 2).
+  - [ ] **Publish keystore-kit to npm** (Darren: `npm login && npm publish` in
+    the kit repo — its gates are green; consider flipping the repo public to
+    match the sibling kits) → then swap flock's vendored
+    `vendor/keystore-kit-0.1.0.tgz` dep to a version range and delete `vendor/`.
 - [ ] **mesh-kit** / **mesh-webrtc-lan** — off-relay LAN transport (no internet).
 - [ ] **LoRa mesh transport** — phone ↔ a pocket LoRa device over **BLE**, via **Meshtastic** or **MeshCore**. flock signals ride as opaque **E2E-encrypted bytes** (already true post gift-wrap-everything) over the LoRa mesh → works **fully off-grid** (no relay, no cell, no internet) — the ultimate "the relay can't track you". Web Bluetooth (Android/GrapheneOS Chromium) for the PWA; **Capacitor BLE** for iOS. **Rides on the `intermesh-plans` Meshtastic↔MeshCore/MQTT substrate** (active spike). Slots behind the same transport seam (`services.ts`).
 
@@ -308,6 +316,10 @@ Two halves that compose into one feature:
     private set has >1 relay** (add a trusted one in settings) — the real out-of-box
     fix is to **stand up a second no-log relay we control** (infra: host + domain,
     mirror the trotters setup) and add it to `PRIVATE_RELAYS`, no code change.
+    **Runbook ready** (`docs/runbooks/second-relay.md`): bare host → serving
+    traffic, nostr-rs-relay for verified NIP-40 parity, no-log OS posture, Tor
+    v3 onion, verification checklist + the NIP-40 probe (`scripts/nip40-probe.mjs`).
+    **Blocked only on a host** (VPS in a different failure domain + DNS + root SSH).
   - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".
   - [x] **Key-at-rest — closed by the App lock** (keystore-kit, Phase E): opt-in
     PIN encrypts the whole persisted blob at rest; the in-app caveat copy now
@@ -504,12 +516,12 @@ modes**. Plan with designs, decisions, and per-slice tests:
   card consolidation deferred — meeting/rendezvous cards are already mutually
   exclusive in practice.)*
 
-## Phase J — Safety-loop features (from the 2026-07-02 competitive audit)
+## Phase J — Safety-loop features (from the 2026-07-02 competitive audit) — ✅ COMPLETE
 
 Gaps identified by auditing flock against the safety-app landscape (Kitestring,
 GetHomeSafe, bSafe, Life360, GrapheneOS duress PIN). All four fit the
 coercion-resistant, disclosure-on-event ethos — they trigger on *inaction or
-duress*, never on continuous tracking.
+duress*, never on continuous tracking. **All four shipped 2026-07-02.**
 
 - [x] **Check-in self-reminders + escalation-until-acknowledged.** Shipped:
   `selfCheckInStatus` (local-only nudge: due-soon → overdue → missed; a reminder
