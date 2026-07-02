@@ -578,9 +578,10 @@ function circleMemberRow(pk: string, mePk: string): string {
 
   const sub = beacon ? `~${esc(beacon.geohash)}` : isMe ? 'you' : 'in this circle'
   const edit = isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`
-  return `<div class="member">
+  const isNew = (activeCircle()?.unseenMembers ?? []).includes(pk)
+  return `<div class="member${isNew ? ' unseen' : ''}">
     ${avatarHtml(pk, isMe)}
-    <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}</div><div class="when">${sub}</div></div>
+    <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}${isNew ? ' <span class="pill new">new</span>' : ''}</div><div class="when">${sub}</div></div>
     ${pill}${edit}
   </div>`
 }
@@ -614,9 +615,18 @@ function circleView(): string {
   const lead = alone
     ? `<div class="card invite-lead"><div class="cta-emoji">👋</div><div class="cta-text"><strong>Add your people</strong><span>Share a code in person, or send an invite to someone's key.</span></div></div>${inviteSections()}`
     : ''
+  const unseen = c.unseenMembers ?? []
+  const joinNotice = unseen.length
+    ? `<div class="card new-member-notice" role="alert">
+        <div><strong>〰️ ${unseen.length === 1 ? 'A new phone' : `${unseen.length} new phones`} joined ${esc(c.name)}</strong>
+        <div class="note">Anyone holding the invite code can join. Not expecting this? Remove them under You → Circle security — removal rotates the key, cutting them off.</div></div>
+        <button class="btn small ghost" data-action="ack-new-members">Got it</button>
+      </div>`
+    : ''
   return `
     ${topbar(false)}
     <h2 style="margin-bottom:14px">${esc(c.name)}</h2>
+    ${joinNotice}
     ${lead}
     <div class="section-title"${alone ? ' style="margin-top:22px"' : ''}>Members</div>
     <div class="list">${rows}</div>
@@ -1341,15 +1351,23 @@ async function publishFences(c: store.Circle): Promise<void> {
   } catch { toast("Couldn't sync safe places — they're saved here and will sync on your next edit") }
 }
 
-function ensureMember(circle: store.Circle, pk: string): void {
+function ensureMember(circle: store.Circle, pk: string, expected = false): void {
   // Re-read the live roster rather than trusting the captured `circle`: two
   // first-contact signals arriving together each `await` decryption, and a stale
   // members snapshot would let the later write clobber the earlier one — silently
   // dropping a member (who would then be skipped by reseeds and lists).
   const current = persisted.circles.find((c) => c.id === circle.id)
   if (!current) return
-  const m = current.members ?? []
-  if (!m.includes(pk)) patchCircleById(circle.id, { members: [...m, pk] })
+  const patch = store.withNewMember(current, pk, nowSec(), { expected: expected || pk === persisted.identity?.pk })
+  if (!patch) return
+  patchCircleById(circle.id, patch)
+  // Seed possession = membership, so a leaked invite code grants a SILENT member.
+  // Surface every unexpected roster addition until it's acknowledged (FLOCK §6).
+  if (patch.unseenMembers) toast(`〰️ A new phone joined ${current.name}`)
+  // Bounded retention (FLOCK §6.6): stored wraps expire, so a newcomer may never
+  // get the fence set from relay replay — its author starts a fresh window for them.
+  const live = persisted.circles.find((c) => c.id === circle.id)
+  if (live?.fencesBy && live.fencesBy === persisted.identity?.pk) void publishFences(live)
 }
 
 function ensureInviteSub(): void {
@@ -1377,7 +1395,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     if (persisted.circles.some((c) => c.id === payload.id)) return // already a member
     upsertCircle({
       id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m,
-      members: [signer.pubkey], checkinInterval: 0, ...(payload.x ? { expiresAt: payload.x } : {}),
+      members: [signer.pubkey], checkinInterval: 0, joinedAt: nowSec(), ...(payload.x ? { expiresAt: payload.x } : {}),
     }, true)
     awaitingInvite = false
     onboardStep = 'intro'
@@ -1427,7 +1445,7 @@ async function sendInvite(): Promise<void> {
   try {
     const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
     await svc.publishSigned(persisted.relayUrls, wrap as never)
-    ensureMember(c, pk)
+    ensureMember(c, pk, true) // I sent this invite — their arrival is not news to me
     toast('Secure invite sent')
     render()
   } catch { toast('Could not send invite') }
@@ -2035,6 +2053,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'reseed': void reseedCircle(); break
     case 'ask-remove': removeConfirmPk = node.dataset.pk ?? null; render(); break
     case 'cancel-remove': removeConfirmPk = null; render(); break
+    case 'ack-new-members': patchActive({ unseenMembers: [] }); render(); break
     case 'remove-member': removeConfirmPk = null; void reseedCircle(node.dataset.pk); break
     case 'checkin': void sendCheckIn(); break
     case 'buzz': void sendBuzz(node.dataset.reason ?? (document.getElementById('buzz-custom') as HTMLInputElement | null)?.value ?? ''); break
@@ -2172,6 +2191,7 @@ function doJoin(): void {
     persisted.identity ??= store.createIdentity()
     if (persisted.circles.some((c) => c.id === circle.id)) { switchCircle(circle.id); adding = false; return }
     circle.members = [persisted.identity.pk]
+    circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
     upsertCircle(circle, true)
     onboardStep = 'intro'
     adding = false

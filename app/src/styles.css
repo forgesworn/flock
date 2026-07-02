@@ -275,6 +275,22 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .pill.active { color: var(--safe); border-color: var(--safe-dim); background: var(--safe-dim); }
 .pill.stale  { color: var(--faint); }
 .pill.alert  { color: var(--alert); border-color: var(--alert-dim); background: var(--alert-dim); }
+/* An unacknowledged roster addition — inline "new" badge, not the status slot. */
+.pill.new {
+  margin-left: 6px;
+  font-size: 10.5px; padding: 2px 8px;
+  color: var(--calm); border-color: rgba(110, 168, 254, 0.3); background: rgba(110, 168, 254, 0.14);
+  vertical-align: 2px;
+}
+.member.unseen { border-color: rgba(110, 168, 254, 0.3); }
+
+/* "A new phone joined" — stays until acknowledged; the remedy is one tab away. */
+.new-member-notice {
+  display: flex; align-items: center; gap: 12px;
+  border-color: rgba(110, 168, 254, 0.3);
+  margin-bottom: 14px;
+}
+.new-member-notice .btn { width: auto; flex-shrink: 0; }
 
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn {

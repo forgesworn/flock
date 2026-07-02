@@ -30,6 +30,29 @@ export interface Circle {
   fencesUpdatedAt?: number
   /** Who made that edit (pubkey hex) — the deterministic tie-break for equal clocks. */
   fencesBy?: string
+  /** Roster additions not yet acknowledged — drives the "new phone joined" notice. */
+  unseenMembers?: string[]
+  /** When THIS device joined (unix sec) — see JOIN_GRACE_SEC. Unset for circles we created. */
+  joinedAt?: number
+}
+
+/** Right after we join, relay replay delivers the existing members' history —
+ *  discovering THEM is not news to us. Additions within this window of joinedAt
+ *  are adopted silently. It only blinds the freshly joined device: every member
+ *  that already held the roster still notices anyone who joins during it. */
+export const JOIN_GRACE_SEC = 10 * 60
+
+/** Roster addition with join-notice semantics: returns the circle patch for a
+ *  genuinely new member, or null when already known — a reseed re-add or a
+ *  signal echo must NOT re-fire the notice. `expected` adds silently (your own
+ *  key, or an invite you sent yourself). */
+export function withNewMember(c: Circle, pk: string, now: number, opts?: { expected?: boolean }): Partial<Circle> | null {
+  const m = c.members ?? []
+  if (m.includes(pk)) return null
+  const inJoinGrace = c.joinedAt !== undefined && now - c.joinedAt < JOIN_GRACE_SEC
+  const patch: Partial<Circle> = { members: [...m, pk] }
+  if (!opts?.expected && !inJoinGrace) patch.unseenMembers = [...(c.unseenMembers ?? []), pk]
+  return patch
 }
 export interface Persisted {
   identity: Identity | null
