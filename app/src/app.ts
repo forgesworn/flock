@@ -40,6 +40,10 @@ import {
   buildBuzzSignal,
   decryptBuzz,
   DEFAULT_BUZZ_REASONS,
+  buildFencesSignal,
+  decryptFences,
+  isNewerFenceSet,
+  FENCES_SIGNAL_TYPE,
   buildDisbandSignal,
   decryptDisband,
   DISBAND_SIGNAL_TYPE,
@@ -830,8 +834,10 @@ function mapPanelInner(): string {
     : '<div class="note">None yet. A private place (like home) stays hidden — even in an emergency.</div>'
   return `
     <div class="row" style="justify-content:space-between;margin-bottom:8px"><strong>Safe places</strong><button class="btn small" data-action="add-zone" data-kind="safe">＋ Add</button></div>
+    <div class="note" style="margin-bottom:6px">Shared with everyone in ${esc(activeCircle()?.name ?? 'this circle')} — one person sets them up, every phone uses them.</div>
     <div class="zone-list">${safeList}</div>
     <div class="row" style="justify-content:space-between;margin:16px 0 8px"><strong>Private places</strong><button class="btn small" data-action="add-zone" data-kind="noreport">＋ Add</button></div>
+    <div class="note" style="margin-bottom:6px">Yours alone — never leave this phone, apply in every circle.</div>
     <div class="zone-list">${privList}</div>
     ${offlineMapControl()}`
 }
@@ -1281,12 +1287,29 @@ async function publishSignal(unsigned: { kind: number; content: string; tags: st
 // ── Members, invites & reseed ────────────────────────────────────────────────
 function members(): string[] { return activeCircle()?.members ?? [] }
 
-// ── Safe places (per-circle) ─────────────────────────────────────────────────
+// ── Safe places (per-circle, synced) ─────────────────────────────────────────
 function activeFences(): Geofence[] { return activeCircle()?.geofences ?? [] }
+
+/** Apply a local safe-place edit and sync the full set to the circle.
+ *  The clock is forced strictly past the last applied edit, so two same-second
+ *  edits by the same person still read as newer on every other device. */
 function setActiveFences(fences: Geofence[]): void {
   const c = activeCircle()
   if (!c) return
-  patchCircleById(c.id, { geofences: fences })
+  const by = persisted.identity?.pk
+  const updatedAt = Math.max(nowSec(), (c.fencesUpdatedAt ?? 0) + 1)
+  patchCircleById(c.id, { geofences: fences, fencesUpdatedAt: updatedAt, ...(by ? { fencesBy: by } : {}) })
+  if (by) void publishFences({ ...c, geofences: fences, fencesUpdatedAt: updatedAt, fencesBy: by })
+}
+
+/** Broadcast a circle's current safe-place set (group-envelope + gift wrap). */
+async function publishFences(c: store.Circle): Promise<void> {
+  const by = c.fencesBy ?? persisted.identity?.pk
+  if (!by || c.fencesUpdatedAt === undefined) return
+  try {
+    const set = { fences: c.geofences ?? [], updatedAt: c.fencesUpdatedAt, by }
+    await publishSignal(await buildFencesSignal({ groupId: c.id, seedHex: c.seedHex, set }), c)
+  } catch { toast("Couldn't sync safe places — they're saved here and will sync on your next edit") }
 }
 
 function ensureMember(circle: store.Circle, pk: string): void {
@@ -1400,6 +1423,10 @@ async function reseedCircle(removePk?: string): Promise<void> {
     st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
     beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(c.id) // old-key pins are meaningless under the new seed
+    // Replay the safe-place set under the new key (same clock — an echo to current
+    // members, but anyone joining after the reseed finds it on the new inbox).
+    const reseeded = persisted.circles.find((x) => x.id === c.id)
+    if (reseeded && reseeded.fencesUpdatedAt !== undefined) void publishFences(reseeded)
     toast(removePk ? 'Member removed & key rotated' : 'Circle key rotated')
     render()
   } catch { toast('Reseed failed') }
@@ -2586,6 +2613,16 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
         else if (!nowDark && wasDark) toast(`${nameFor(o.from)} is back`)
       }
       evaluateCheckinAlarm() // a planned break clears any false missed-check-in alarm
+    } else if (t === FENCES_SIGNAL_TYPE) {
+      const fs = await decryptFences(c.seedHex, e.content)
+      // Latest-wins against the LIVE circle, not the pre-await snapshot — an edit
+      // applied while we were decrypting must not be clobbered by this older set.
+      const live = persisted.circles.find((x) => x.id === c.id)
+      if (live && isNewerFenceSet(fs, live)) {
+        patchCircleById(c.id, { geofences: fs.fences, fencesUpdatedAt: fs.updatedAt, fencesBy: fs.by })
+        if (c.id === persisted.activeCircleId) mapView?.setGeofences(fs.fences)
+        if (!me || fs.by !== me.pk) toast(`Safe places updated in ${c.name}`)
+      }
     } else if (t === DISBAND_SIGNAL_TYPE) {
       const d = await decryptDisband(c.seedHex, e.content)
       const name = c.name

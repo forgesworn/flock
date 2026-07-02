@@ -11,12 +11,14 @@ test.describe('geofence breach', () => {
     await joinByCode(B, code)
 
     // A marks "home" (current spot, London) as a safe place, then shares.
+    // (The safe place itself syncs to the circle, so A appears in B's roster —
+    // but with NO location: sharing inside a safe place stays withheld.)
     await addZoneOnMap(A, 'safe')
     await startSharing(A)
 
-    // Inside the safe place → withheld: B has received nothing, sees only itself.
+    // Inside the safe place → withheld: no location has ever been disclosed.
     await gotoTab(B, 'circle')
-    await expect(B.locator('.member')).toHaveCount(1)
+    await expect(B.locator('.member .when', { hasText: '~' })).toHaveCount(0)
 
     // A steps well outside (Paris). Breach → full disclosure crosses the relay.
     await moveAndReshare(A, PARIS)
@@ -37,16 +39,16 @@ test.describe('geofence breach', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    await addZoneOnMap(A, 'safe') // "home" at London, ~300 m radius
+    await addZoneOnMap(A, 'safe') // "home" at London, ~300 m radius (syncs to B)
     await gotoTab(B, 'circle')
-    await expect(B.locator('.member')).toHaveCount(1) // B has heard nothing from A
+    await expect(B.locator('.member .when', { hasText: '~' })).toHaveCount(0) // no location from A
 
     // A sits ~350 m east — just past the 300 m edge — but the fix is only ±300 m,
     // so we cannot be sure A actually left. A confident-only breach must NOT fire.
     await A.context().setGeolocation({ latitude: 51.5074, longitude: -0.12275, accuracy: 300 })
     await startSharing(A)
     await B.waitForTimeout(3000) // a false breach would publish on the first fix (~1 s)
-    await expect(B.locator('.member')).toHaveCount(1) // still nothing disclosed
+    await expect(B.locator('.member .when', { hasText: '~' })).toHaveCount(0) // still nothing disclosed
 
     // Step well outside with a confident (exact) fix → a real breach still crosses.
     await moveAndReshare(A, PARIS)

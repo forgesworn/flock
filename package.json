@@ -43,6 +43,10 @@
       "types": "./dist/buzz.d.ts",
       "import": "./dist/buzz.js"
     },
+    "./fences": {
+      "types": "./dist/fences.d.ts",
+      "import": "./dist/fences.js"
+    },
     "./rendezvous": {
       "types": "./dist/rendezvous.d.ts",
       "import": "./dist/rendezvous.js"

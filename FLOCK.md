@@ -51,12 +51,30 @@ labels, and optionally `rotation`, `tolerance`, and **`expiration`** (NIP-40).
 Member roles (`guardian` | `child` | `peer`) are part of the encrypted config
 payload (not a public tag).
 
-### 3.2 Geofence definition — kind `30078` (stored signal, replaceable)
+### 3.2 Safe-place (geofence) sync — `t = "fences"` signal
 
-`buildStoredSignalEvent` with `signalType = "geofence"`. `content` is an
-AES-256-GCM envelope of the fence set, encrypted to the group. Each device
-fetches, decrypts, and evaluates membership **locally**; raw coordinates never
-leave the device.
+A circle's safe places are shared as an ordinary encrypted signal — **not** a
+replaceable kind-30078 stored event, whose stable `d`-tag would hand the relay a
+long-lived correlator. Post gift-wrap-everything, the fence set rides the same
+opaque `kind:1059` path as every other signal. `buildFencesSignal`
+(`src/fences.ts`) encrypts the **complete** set with the group envelope key:
+
+```jsonc
+{ "fences": [ /* Geofence[] */ ], "updatedAt": 1781913600, "by": "<editor pubkey hex>" }
+```
+
+Semantics: idempotent full-replacement, **latest-wins**. A receiver applies a set
+only when it is newer — higher `updatedAt`; equal clocks tie-break to the
+lexicographically smaller `by`, so concurrent edits converge on every device; an
+exact echo is a no-op. Every edit publishes the whole set, and an **empty set is
+valid** (deleting the last fence must sync too). After a reseed, any member
+holding the set replays it verbatim under the new key so later joiners find it.
+Receivers **strictly re-validate** every fence on decrypt — a malformed set
+throws rather than replacing a good one and silently disabling breach detection.
+
+Each device still decrypts and evaluates membership **locally**; raw coordinates
+never leave the device as plaintext. No-report zones are the deliberate opposite:
+**never transmitted** at all (see `docs/PRIVACY.md`).
 
 Fence shapes (`src/geofence.ts`):
 
@@ -82,6 +100,7 @@ not stored by relays. Core types (`t` → payload / key / trigger):
 | `pickup` | `BeaconPayload` | beacon key | "pick me up" pressed |
 | `help`  | `DuressAlert`  | duress key | SOS / duress |
 | `checkin` | `CheckIn {member, timestamp, intervalSeconds}` | group envelope key (`deriveGroupKey`) | dead-man's-switch heartbeat |
+| `fences` | `FenceSet {fences, updatedAt, by}` | group envelope key | someone edits the circle's safe places (full-set, latest-wins — §3.2) |
 | `rzv` | `Rendezvous {id, place, deadline, mode, setBy, createdAt}` | group envelope key | someone sets "be at a place by a time" |
 | `rzv-status` | `RendezvousStatus {rendezvousId, member, status, etaSeconds, timestamp}` | group envelope key | a member's en-route / arrived / at-risk update |
 | `mtg-req` | `MeetingRequest {id, setBy, mode, maxTimeMinutes, createdAt}` | group envelope key | propose finding a fair meeting point |

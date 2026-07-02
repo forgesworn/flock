@@ -369,10 +369,22 @@ modes**. Plan with designs, decisions, and per-slice tests:
   no-op with an empty reason. Made the e2e fixture atomic as a workaround; the real fix
   is input-preserving renders (skip re-render while an input is focused, or patch around
   it). Surfaced by `remove-member.spec.ts` failing 5× in a row — not relay flake.
-- [ ] **Slice 3 — safe places sync across the circle** 🔴 — fences are device-local
-  only, so a guardian's safe place does nothing on the child's phone (FLOCK.md §3.2
-  unimplemented + stale). Gift-wrapped `t:'fences'` full-set signal, latest-wins,
-  per-circle model + migration; private places stay device-only by design. 3 sub-slices.
+- [x] **Slice 3 — safe places sync across the circle** 🔴 — fences were device-local
+  only, so a guardian's safe place did nothing on the child's phone. Shipped in three
+  sub-slices: **3a** — fences move onto the `Circle` (per-circle), legacy device-global
+  sets migrated into every circle (behaviour-preserving; 4 unit tests); **3b** — new
+  lib module `src/fences.ts` (`t:'fences'`, group-envelope, gift-wrapped like every
+  signal): idempotent **full-replacement set, latest-wins** (`updatedAt`, equal-clock
+  tie-break on the smaller `by` → convergent; echoes are no-ops; **empty set is valid**
+  so deletes sync; strict re-validation on decrypt so a malformed set can never
+  silently disable breach detection; 14 unit tests), publish-on-edit with a
+  monotonic clock, relay replay covers late joiners, reseed replays the set under the
+  new key; **3c** — map-panel copy tells the truth ("Shared with everyone in <circle>" /
+  "Yours alone — never leave this phone"), FLOCK.md §3.2 rewritten for the shipped
+  design (the old kind-30078 stored-signal spec would have leaked a stable d-tag).
+  E2e (`fences.spec.ts`): **B breaches a fence only A drew** — drawn on A, lands on
+  B's map with zero setup, B leaving alerts A over the live relay — plus delete-syncs.
+  Private places stay device-only by design. *(Role-gated editing waits for dominion.)*
 - [ ] **Slice 4 — circle-root backup & restore** 🟠 — no export of `circleRootHex`
   exists; device loss destroys every circle. Passphrase-encrypted export/import
   (PBKDF2 → canary-kit envelope, no new crypto) as the stopgap before shamir-words.
