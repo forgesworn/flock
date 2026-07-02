@@ -9,6 +9,9 @@ test.describe('truthful SOS states (audit Slice 11)', () => {
     await gotoTab(A, 'you')
     await A.fill('#relay', 'wss://127.0.0.1:9')
     await A.click('[data-action="save-relay"]')
+    // Let the (failing) resubscription settle: a re-render mid-hold replaces the
+    // SOS node between pointerdown and pointerup and the hold never fires.
+    await A.waitForTimeout(2000)
 
     await sendSOS(A)
     await expect(A.locator('.orb-wrap.state-alert')).toContainText("Help didn't send")
