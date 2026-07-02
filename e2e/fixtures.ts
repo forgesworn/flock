@@ -201,8 +201,8 @@ export async function addZoneOnMap(page: Page, kind: 'safe' | 'noreport' = 'safe
   await page.click('[data-action="save-zone"]')
 }
 
-/** Move this device to a new emulated position. */
-export async function setLocation(page: Page, pos: { latitude: number; longitude: number }): Promise<void> {
+/** Move this device to a new emulated position (optionally with a GPS accuracy radius in metres). */
+export async function setLocation(page: Page, pos: { latitude: number; longitude: number; accuracy?: number }): Promise<void> {
   await page.context().setGeolocation(pos)
   await settle(page)
 }

@@ -55,10 +55,12 @@ export interface EmissionContext {
   trigger?: EmissionTrigger
   /**
    * Positional uncertainty of `position`, in metres (the fix's accuracy radius).
-   * A geofence breach fires only when the fix is *confidently* outside every safe
-   * zone (`classifyContainment` → 'outside'), so an imprecise fix near a fence edge
-   * never triggers a **false** breach. Defaults to 0 (treat the fix as exact),
-   * which preserves the crisp inside/outside behaviour.
+   * Fails safe in both directions: a geofence breach fires only when the fix is
+   * *confidently* outside every safe zone (`classifyContainment` → 'outside'),
+   * so an imprecise fix near a fence edge never triggers a **false** breach; and
+   * the no-report cap applies unless the fix is confidently outside the zone, so
+   * a noisy fix that *might* be over a sensitive address never pins it. Defaults
+   * to 0 (treat the fix as exact), preserving crisp inside/outside behaviour.
    */
   accuracyMetres?: number
   /**
@@ -119,9 +121,10 @@ export function decideEmission(
   const base = decideBase(ctx, p, position)
 
   // No-report cap — applies last, after the base decision, so even a triggered
-  // full disclosure is suppressed over a sensitive address.
+  // full disclosure is suppressed over a sensitive address. Accuracy-aware in
+  // the fail-safe direction: possibly inside the zone ⇒ capped.
   if (position && ctx.noReportZones?.length) {
-    const cap = noReportPolicyAt(position, ctx.noReportZones)
+    const cap = noReportPolicyAt(position, ctx.noReportZones, ctx.accuracyMetres ?? 0)
     if (cap) return applyNoReportCap(base, cap, p)
   }
   return base

@@ -48,7 +48,7 @@ describe('decideEmission — accuracy-aware family breach', () => {
   })
 })
 
-describe('decideEmission — accuracy is scoped to family breach only', () => {
+describe('decideEmission — accuracy never suppresses an explicit trigger', () => {
   it('never changes an explicit SOS (fires regardless of accuracy)', () => {
     const plan = decideEmission({ mode: 'family', position: LONDON, trigger: 'help', geofences: [fence], accuracyMetres: 5000 })
     expect(plan).toEqual({ action: 'full', precision: P.help, reason: 'help' })
@@ -57,5 +57,48 @@ describe('decideEmission — accuracy is scoped to family breach only', () => {
   it('never changes a night-out coarse share (no fences involved)', () => {
     const plan = decideEmission({ mode: 'nightout', position: LONDON, accuracyMetres: 5000 })
     expect(plan).toEqual({ action: 'coarse', precision: P.coarse, reason: 'nightout' })
+  })
+})
+
+// The no-report cap fails safe in the OPPOSITE direction to breach: a fix that
+// might be over a sensitive address (uncertain) must be capped; only a fix
+// confidently outside the zone escapes. A noisy GPS fix at home during an SOS
+// must never pin the address.
+describe('decideEmission — accuracy-aware no-report cap (possibly inside ⇒ capped)', () => {
+  const home: LatLng = { lat: 51.5074, lon: -0.1278 }
+  const withholdZone = { area: { kind: 'circle', centre: home, radiusMetres: 100 } as CircleGeofence }
+  const coarseZone = { area: { kind: 'circle', centre: home, radiusMetres: 100 } as CircleGeofence, policy: 'coarse' as const }
+
+  it('an SOS on an uncertain fix near a withhold zone still fires, but location-less', () => {
+    // 150 m from home, ±80 m — cannot rule out being at home → withhold the address.
+    const plan = decideEmission({ mode: 'family', position: east(home, 150), trigger: 'help', noReportZones: [withholdZone], accuracyMetres: 80 })
+    expect(plan).toEqual({ action: 'withhold', precision: 0, reason: 'help' })
+  })
+
+  it('a pick-up on an uncertain fix near a coarse zone is downgraded to coarse', () => {
+    const plan = decideEmission({ mode: 'family', position: east(home, 150), trigger: 'pickup', noReportZones: [coarseZone], accuracyMetres: 80 })
+    expect(plan).toEqual({ action: 'coarse', precision: P.coarse, reason: 'pickup' })
+  })
+
+  it('confidently outside the zone → no cap, full precision', () => {
+    const plan = decideEmission({ mode: 'family', position: east(home, 300), trigger: 'help', noReportZones: [withholdZone], accuracyMetres: 20 })
+    expect(plan).toEqual({ action: 'full', precision: P.help, reason: 'help' })
+  })
+
+  it('a night-out coarse share on an uncertain fix near a withhold zone emits nothing', () => {
+    const plan = decideEmission({ mode: 'nightout', position: east(home, 150), noReportZones: [withholdZone], accuracyMetres: 80 })
+    expect(plan).toEqual({ action: 'withhold', precision: 0, reason: 'nightout' })
+  })
+
+  it('SAFETY: a fix not confidently outside a withhold zone never discloses, at any accuracy', () => {
+    // Just outside the edge (110 m); sweep the uncertainty from tiny to huge.
+    const nearEdge = east(home, 110)
+    for (const acc of [0, 5, 9, 10, 11, 50, 200, 1000]) {
+      const plan = decideEmission({ mode: 'family', position: nearEdge, trigger: 'help', noReportZones: [withholdZone], accuracyMetres: acc })
+      // With acc < 10 the fix is confidently outside (full disclosure is fine);
+      // at acc >= 10 it straddles the edge → the address must be withheld.
+      if (plan.action === 'full') expect(acc).toBeLessThan(10)
+      else expect(plan).toEqual({ action: 'withhold', precision: 0, reason: 'help' })
+    }
   })
 })

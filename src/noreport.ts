@@ -9,9 +9,15 @@
  *
  * Pure and on-device: zones never leave the phone and are evaluated locally
  * (see {@link decideEmission}, which applies the cap these helpers describe).
+ *
+ * Accuracy fails safe in the OPPOSITE direction to breach detection: a breach
+ * fires only when the fix is *confidently outside* every safe zone, but the
+ * no-report cap applies unless the fix is confidently outside the zone — a fix
+ * whose uncertainty disc *might* cover a sensitive address is treated as inside
+ * it, so a noisy GPS fix at home never pins the building.
  */
 
-import { isInside } from './geofence.js'
+import { classifyContainment } from './geofence.js'
 import type { LatLng, Geofence } from './geofence.js'
 
 /**
@@ -31,20 +37,25 @@ export interface NoReportZone {
   label?: string
 }
 
-/** True if `point` falls inside at least one no-report zone. */
-export function inNoReportZone(point: LatLng, zones: NoReportZone[]): boolean {
-  return zones.some((z) => isInside(point, z.area))
+/**
+ * True if `point` — with its uncertainty radius — is *possibly* inside at least
+ * one no-report zone. Only a fix confidently outside every zone returns false
+ * (the fail-safe direction for redaction). Accuracy 0 is the crisp check.
+ */
+export function inNoReportZone(point: LatLng, zones: NoReportZone[], accuracyMetres = 0): boolean {
+  return classifyContainment(point, accuracyMetres, zones.map((z) => z.area)) !== 'outside'
 }
 
 /**
- * The strictest suppression policy among the zones containing `point`, or
- * `null` when the point is in no zone. `withhold` is stricter than `coarse`,
- * and an unspecified zone policy defaults to `withhold`.
+ * The strictest suppression policy among the zones `point` is possibly inside
+ * (given its uncertainty radius), or `null` when confidently outside them all.
+ * `withhold` is stricter than `coarse`, and an unspecified zone policy defaults
+ * to `withhold`. Accuracy 0 collapses to the crisp containment check.
  */
-export function noReportPolicyAt(point: LatLng, zones: NoReportZone[]): NoReportPolicy | null {
+export function noReportPolicyAt(point: LatLng, zones: NoReportZone[], accuracyMetres = 0): NoReportPolicy | null {
   let strictest: NoReportPolicy | null = null
   for (const z of zones) {
-    if (!isInside(point, z.area)) continue
+    if (classifyContainment(point, accuracyMetres, [z.area]) === 'outside') continue
     const p = z.policy ?? 'withhold'
     if (p === 'withhold') return 'withhold' // strictest possible — short-circuit
     strictest = 'coarse'

@@ -349,10 +349,15 @@ domain separation holds — and the gaps clustered around the **human failure
 modes**. Plan with designs, decisions, and per-slice tests:
 `docs/plans/2026-07-02-product-audit-hardening.md`. In priority order:
 
-- [ ] **Slice 1 — no-report zones fail-safe under GPS noise** 🔴 — the cap uses crisp
-  `isInside` while breach uses accuracy-aware `classifyContainment`; a noisy fix near a
-  private place during an SOS can pin the exact address. Treat `uncertain` as inside
-  (capped); extend the truth-table.
+- [x] **Slice 1 — no-report zones fail-safe under GPS noise** 🔴 — the cap used crisp
+  `isInside` while breach used accuracy-aware `classifyContainment`; a noisy fix near a
+  private place during an SOS could pin the exact address. `inNoReportZone`/
+  `noReportPolicyAt` now take the fix's accuracy and treat `uncertain` as inside (capped)
+  — only a *confident* outside escapes, the exact mirror of breach flipped to the
+  redaction-safe direction. Accuracy 0 stays crisp, so the 216-permutation truth-table
+  is untouched. TDD +11 unit tests (incl. a SAFETY accuracy sweep on the SOS path); new
+  e2e proves an imprecise near-edge SOS reaches B location-less. All 3 app call sites
+  already passed `accuracyMetres`, so the fix is live with no app change.
 - [ ] **Slice 2 — confirm destructive actions** 🔴 — "Sign out & reset" and "Remove
   member" execute on one tap; apply the disband two-step inline confirm idiom.
 - [ ] **Slice 3 — safe places sync across the circle** 🔴 — fences are device-local
