@@ -408,11 +408,26 @@ modes**. Plan with designs, decisions, and per-slice tests:
   On the wire the extra wrap is indistinguishable from any signal. FLOCK.md §6.1 marked
   implemented. E2e: normal tap-stop reaches nobody; long-press stop alarms B while A's
   screen stays clean. *(Deliberately NOT on SOS — that's an overt action by design.)*
-- [ ] **Slice 6 — uniform NIP-40 expiry on every gift wrap** 🟠 — wraps are retained by
-  relays forever; a future root compromise decrypts a family's whole history. One
-  uniform window (16 d, derived from the backdated `created_at` so no new metadata).
-- [ ] **Slice 7 — "joined the circle" notice** 🟡 — `ensureMember` adds seed-holders
-  silently; surface a banner so a leaked invite code is visible, not invisible.
+- [x] **Slice 6 — uniform NIP-40 expiry on every gift wrap** 🟠 — every wrap now carries
+  `expiration = created_at + 16 d` (85f5cb0): one window for ALL types (a per-type
+  window would be a type-tell), derived from the backdated `created_at` so the tag adds
+  zero information. relay.trotters.cc verified behaviourally (rejects expired at
+  publish, suppresses on read). FLOCK.md §6.6 bounded-retention invariant; PRIVACY.md
+  retention row. Consequence handled in Slice 7: replay only covers the window, so the
+  fence author republishes when a newcomer appears.
+- [x] **Slice 7 — "a new phone joined" notice** 🟡 — `ensureMember` routes through pure
+  `store.withNewMember`: unexpected roster additions land in `unseenMembers` → toast +
+  persistent banner + "new" badge until acknowledged, remedy signposted (You → remove,
+  which reseeds). Silent when expected (self, invites I sent) or within a 10-min join
+  grace (the roster replaying to a fresh joiner isn't news — every OTHER device still
+  notices the joiner). Fence author republishes on any addition (Slice 6 consequence).
+  E2e: join → buzz → banner on A, none on B, "Got it" sticks.
+- [x] **QR invite leak (found by Darren in real use)** 🔴 — scanning the invite QR
+  offered "Search Google for this text": the code, SEED INCLUDED, went to a search
+  engine. Fixed: QR + copy button now carry `origin/#join=<code>` — camera apps open
+  links; the fragment never reaches any server (not ours, not Cloudflare) and is
+  scrubbed from the address bar on consumption, including fragment-only navigation
+  while flock is already open. Pasted bare codes and full links both join.
 - [ ] **Slice 8 — permission-denied guidance + invite-wait feedback** 🟡 — denying
   geolocation is a silent dead end (raw error toast, toggle reverts unexplained);
   remote-invite wait spins forever with no timeout copy.
@@ -422,6 +437,21 @@ modes**. Plan with designs, decisions, and per-slice tests:
   terminates TLS in front of the same-origin proxies (sees IP + viewports/bboxes ≈
   home); grey-cloud or document honestly, and flip the proven offline/vector basemap
   to default.
+- [ ] **Slice 11 — truthful SOS states** 🔴 — from the UX deep-dive (verified):
+  `alertActive` is set before the publish, so a failed SOS still shows "Help sent";
+  the receiver of an alert sees sender's-perspective copy; no "I'm safe now"
+  stand-down. Fix all three (stand-down gets the Slice-5 covert long-press treatment:
+  coerced all-clear keeps other devices alarmed).
+- [ ] **Slice 12 — helper hints + settings switch** 🟠 — Darren's ask: one reusable
+  `hint(id, text)` with per-hint dismiss, "Show helper tips" toggle (default on) +
+  "bring tips back" on You; initial placements on mode/watch/SOS/invite/relays/zones.
+- [ ] **Slice 13 — jargon & copy pass** 🟠 — nothing Nostr-shaped reaches a user:
+  npub → invite key/code (npub never shown as a member name — placeholder + nickname
+  prompt), ~geohash → human presence, reseed → "reset security", dead-man's-switch →
+  "automatic check-in", transient → temporary, Rendezvous unified with Meeting point.
+- [ ] **Slice 14 — structure & flow simplification** 🟡 — You-tab Advanced disclosure
+  (relays/security/disband/reset collapsed), Circle-tab decluttering, remote-invite
+  reframe + await-QR becomes a prefill link (same class of fix as the join QR).
 
 ## Resolved inputs
 

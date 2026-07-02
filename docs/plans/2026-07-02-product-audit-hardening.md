@@ -296,6 +296,83 @@ config, `app/src/map.ts` defaults.
 
 ---
 
+# UX deep-dive slices (2026-07-02, after the QR incident)
+
+A dedicated UX audit (every view, every toast, grandparent lens) followed
+Darren's real-world catch: the invite QR encoded bare text, so his camera
+offered "Search Google" on the seed. Findings verified against the code; the
+top three are safety-critical, not polish. Full report notes: jargon must never
+surface without plain-English framing, and every secret-bearing artefact is
+tested against what the OS does with it.
+
+## Slice 11 — Truthful SOS states 🔴 the orb lies in the moments that matter
+
+**Findings (all verified).**
+- `emit()` sets `alertActive = true` (`app.ts:2411`) *before* the publish
+  (`:2421`). If publishing throws, the catch toasts for 2.8 s — and the orb is
+  left saying **"Help sent / Your circle has been alerted"** when nothing went
+  out. The most dangerous copy in the app.
+- The *receiver* of someone else's SOS sets the same global flag
+  (`onIncoming` help branch), so a parent receiving their child's alert also
+  sees the sender's-perspective "Help sent". It never names who needs help.
+- No stand-down: `alertActive` has no "I'm safe now" affordance — an accidental
+  SOS leaves the circle alarmed with no way to call it off.
+
+**Change.**
+1. Set `alertActive` only after a confirmed publish; on failure render a
+   *persistent* failed state on the orb — "Help didn't send / Tap to try
+   again — check your signal" — a retry button, not a vanishing toast.
+2. Split sender/receiver: receiver orb shows "[Name] needs help / Tap to see
+   where", linking to the member on the map; track alerts per member (already
+   in `st.alerts`), not one global boolean.
+3. "I'm safe now" on Home while alerting: broadcasts a stand-down signal
+   (new `t:'allclear'`, same wrap path — indistinguishable on the wire) and
+   clears the alert for every member. **Spec note:** a *coerced* stand-down is
+   a real threat — the covert long-press (Slice 5 pattern) applies here too:
+   normal tap = genuine all-clear; long-press = visible all-clear that KEEPS
+   the alert live on other devices.
+
+**Tests.** Unit: policy of alert lifecycle. E2e: failed-relay SOS shows retry
+(route-block the relay); B raising help shows "[B] needs help" on A; stand-down
+clears A's pill on B; covert stand-down doesn't.
+
+**Size:** medium. **Files:** `app/src/app.ts`, `src/signals.ts` (allclear),
+`FLOCK.md` §3.3/§6.
+
+## Slice 12 — Helper hints with a settings switch 🟠 Darren's direct ask
+
+One reusable `hint(id, text)` component (dismiss ✕ per hint), persisted
+`hints: { on: boolean; dismissed: string[] }`, a "Show helper tips" switch +
+"Bring all tips back" on the You tab, default ON. Initial placements: mode
+toggle, start-watch, SOS/pick-up pair, remote invite, pick-up check, relays,
+zones. Calm-accent styling mirrors the "new" badge. All vanilla TS in the
+existing render-on-state loop.
+
+## Slice 13 — Jargon & copy pass 🟠 nothing Nostr-shaped reaches a user
+
+Apply the audit's inventory table end-to-end. Highlights: npub → "invite key/
+code" (+ human placeholder "New member" — never an npub as a name — and a
+nickname prompt on adoption); `~geohash` sub-line → human presence ("out ·
+4 m ago"); "Rotate circle key (reseed)" → "Reset this circle's security";
+"Dead-man's-switch" → "Automatic check-in"; "transient" → "temporary"; unify
+"Rendezvous" → "Meeting point" everywhere; footer → plain words; "Start watch"
+→ action-what-it-does label. British English throughout.
+
+## Slice 14 — Structure & flow simplification 🟡 progressive disclosure
+
+- You tab: relays, circle security (reseed/remove), disband, reset collapse
+  under **Advanced**, default closed.
+- Circle tab: order = members → invite (when alone, as now) → buzz; meeting
+  point/rendezvous fold into one card.
+- Remote invite reframed in plain language; the await-screen npub QR becomes a
+  link (`origin/#invite=<npub>`) that *prefills the sender's form* when opened
+  — the same open-a-link-not-search-it fix as the join QR; "Copy failed —
+  select it manually" fallback actually renders selectable text.
+- Fold with Slice 8's permission card + invite-wait timeout (same "no dead
+  ends" theme).
+
+---
+
 ## Discovered during implementation
 
 - **Typing is wiped by any inbound re-render** (found while shipping Slice 2). The
@@ -307,6 +384,16 @@ config, `app/src/map.ts` defaults.
   fixture fills + clicks atomically in one in-page task. Real fix (own slice, 🟡):
   input-preserving renders — skip the re-render while a form control is focused, or
   preserve focused-input value/selection across renders. Tracked in ROADMAP Phase I.
+
+- **The invite QR leaked the seed to Google** (found by Darren in real use, during
+  Batch 4). The QR encoded the bare base64 invite code; a phone camera treats
+  non-URL text as a search query, so "scan to join" became "Search Google for
+  <the secret>". **Fixed immediately**: QR + copy button now carry
+  `origin/#join=<code>` — a camera app opens flock and auto-joins; the fragment
+  never reaches any server and is scrubbed from the address bar on consumption
+  (including fragment-only navigation with flock already open). Lesson folded into
+  Slice 9 (invite hygiene) and the UX audit: every secret-bearing artefact must be
+  tested against what the OS *does* with it, not just what the app intends.
 
 ## Explicitly deferred (tracked elsewhere, not re-planned here)
 
@@ -324,8 +411,11 @@ config, `app/src/map.ts` defaults.
 
 | Batch | Slices | Theme |
 |---|---|---|
-| 1 | 1, 2 | Small security-critical + the trap, both quick |
-| 2 | 3 (a→c) | The flagship gap — fence sync |
-| 3 | 4, 5 | Recovery + duress cover (the human failure modes) |
-| 4 | 6, 7 | Wire hardening (retention, join notice) |
-| 5 | 8, 9, 10 | Polish + infra/docs honesty |
+| 1 | 1, 2 | Small security-critical + the trap, both quick | ✅ |
+| 2 | 3 (a→c) | The flagship gap — fence sync | ✅ |
+| 3 | 4, 5 | Recovery + duress cover (the human failure modes) | ✅ |
+| 4 | 6, 7 (+ QR link fix) | Wire hardening (retention, join notice) | ✅ |
+| 5 | 11 | Truthful SOS states — jumps the queue: safety-critical | |
+| 6 | 12, 13 | Darren's UX ask: hints system + jargon/copy pass | |
+| 7 | 8, 14 | No dead ends: permission card, invite wait, structure | |
+| 8 | 9, 10 | Invite share-sheet + infra/docs honesty | |
