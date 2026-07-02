@@ -484,6 +484,42 @@ modes**. Plan with designs, decisions, and per-slice tests:
   card consolidation deferred — meeting/rendezvous cards are already mutually
   exclusive in practice.)*
 
+## Phase J — Safety-loop features (from the 2026-07-02 competitive audit)
+
+Gaps identified by auditing flock against the safety-app landscape (Kitestring,
+GetHomeSafe, bSafe, Life360, GrapheneOS duress PIN). All four fit the
+coercion-resistant, disclosure-on-event ethos — they trigger on *inaction or
+duress*, never on continuous tracking.
+
+- [ ] **Check-in self-reminders + escalation-until-acknowledged.** The
+  dead-man's-switch (`checkin.ts`) classifies others as overdue/missed, but
+  nothing prompts the *user themselves* to check in before going overdue, and a
+  missed check-in alerts the circle once with no escalation chain. Dedicated
+  check-in apps (Kitestring, GetHomeSafe) are built entirely on this loop.
+  Escalation stays peer-to-peer through the circle — no monitoring centre.
+  Design note: in a serverless design the watch must run on *other members'*
+  devices (they already classify); "acknowledged" is a new signal type.
+- [ ] **Pre-SOS breadcrumb trail.** A help signal carries one point-in-time
+  fix; keep a short rolling buffer of recent fixes **on-device** and include it
+  (encrypted, inside the wrap) with a help/breach signal so a guardian can find
+  someone who kept moving. Discloses nothing until a trigger fires.
+- [ ] **Guardian-visible battery health.** Phase H already reads the Battery
+  API for self-conservation — but to guardians a dead phone is
+  indistinguishable from deliberate silence (an ambiguity invariant 1 shouldn't
+  leave open in practice). A tiny, infrequent "battery critical" state in
+  existing signals resolves it with negligible metadata.
+- [ ] **Decoy/duress app view.** If a coercer compels an unlock, flock itself
+  is evidence of circles, fences, and past alerts. A sanitised decoy view
+  (GrapheneOS duress-PIN / PanicKit precedent) — **decoy over wipe**: a
+  destructive wipe risks obstruction liability under a legal hold; a decoy
+  doesn't. Pairs with keystore-kit's burn-on-duress (Phase E).
+
+**Explicit non-goals** (competitor features that conflict with the ethos —
+their absence is positioning, not a gap): crash/driving detection (continuous
+sensor sampling), crowdsourced area-safety maps (creates the location-linked
+metadata pool we exist to avoid), professional monitoring dispatch (a
+centralised, subpoenable custodian).
+
 ## Resolved inputs
 
 - **Relay set** ✅ — adopted from `pallasite/src/credits.ts` into `app/src/relays.ts`:

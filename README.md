@@ -3,15 +3,21 @@
 > Coercion-resistant family & friends safety and privacy-preserving location sharing.
 
 **Status:** 🛠️ Preview live at **https://flock.forgesworn.dev/**. The
-`@forgesworn/flock` library (geofence, policy, signals, night-out, check-in) and
-the PWA (onboarding, status orb, SOS/pick-me-up, map+geofences, secure invites,
-reseed, dead-man's-switch) are built and tested. **Next: a privacy-by-architecture
-foundation rework** (gift-wrap-everything, nsec-tree personas/epochs, multi-circle)
-— see [`docs/PRIVACY.md`](docs/PRIVACY.md). Start with [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-(the stack & why), [`docs/FORGESWORN-TOOLKIT.md`](docs/FORGESWORN-TOOLKIT.md)
-(how flock uses the ForgeSworn freedom-tech toolset),
-[`docs/plans/DESIGN.md`](docs/plans/DESIGN.md), the protocol spec
-[`FLOCK.md`](FLOCK.md), and the
+`@forgesworn/flock` library (14 modules — see the table below) and the PWA
+(onboarding, status orb, SOS/pick-me-up, map+geofences, secure invites, reseed,
+dead-man's-switch) are built and tested, on a **shipped privacy-by-architecture
+foundation** (gift-wrap-everything, nsec-tree personas/epochs, multi-circle —
+see [`docs/PRIVACY.md`](docs/PRIVACY.md)). **Works today (foreground):** SOS /
+pick-me-up, night-out sharing, check-ins, geofences on a live map, meeting
+points. **Not yet:** background breach alerts with the app closed — that needs
+the native shell, gated on the Phase 0 GrapheneOS spike. Start with
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the stack & why),
+[`docs/FORGESWORN-TOOLKIT.md`](docs/FORGESWORN-TOOLKIT.md) (how flock uses the
+ForgeSworn freedom-tech toolset), [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md),
+the protocol spec [`FLOCK.md`](FLOCK.md), the tracked backlog
+[`docs/ROADMAP.md`](docs/ROADMAP.md), [`llms.txt`](llms.txt) (AI-facing summary
++ exact API signatures), the runnable
+[`examples/quickstart.ts`](examples/quickstart.ts), and the
 [feasibility research](docs/research/2026-06-30-feasibility-research.md).
 
 `flock` extends [`canary-kit`](https://github.com/forgesworn/canary-kit) (which itself
@@ -75,6 +81,15 @@ encryption stay at the edge.
 | `signals` | `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078 events | ✅ tested |
 | `nightout` | Ephemeral groups (NIP-40), presence ("still out / gone home"), separation ("lost") | ✅ tested |
 | `checkin` | Dead-man's-switch — encrypted "I'm OK" heartbeats; `ok`/`overdue`/`missed` classifier | ✅ tested |
+| `noreport` | Inverse fences — cap disclosure over sensitive addresses (withhold \| coarse) | ✅ tested |
+| `buzz` | Encrypted "look at your phone" ping with reason vocabulary | ✅ tested |
+| `allclear` | Stand-down signal, with a coerced flag | ✅ tested |
+| `fences` | Circle-wide safe-place sync (latest-wins, capped set) | ✅ tested |
+| `rendezvous` | "Be back by / meet at" — ETA + at-risk arrival assessment | ✅ tested |
+| `meeting` | Fair meeting-point request/share (midpoint computed on-device) | ✅ tested |
+| `disband` | Circle dissolution signal | ✅ tested |
+| `offgrid` | Deliberate "going dark" — pre-announced; never suppresses help/pickup | ✅ tested |
+| `spokenverify` | Face-to-face pick-up verification words + silent duress word | ✅ tested |
 | `app/` (PWA) | Foreground UI — onboarding, status orb, SOS/pick-me-up, circle invites + presence; real Nostr publish/subscribe + geolocation | ✅ MVP |
 | `native/` (Capacitor) | Background geofencing + UnifiedPush — config + bridge scaffolded, reuses the same policy/transport | 🧱 scaffold |
 

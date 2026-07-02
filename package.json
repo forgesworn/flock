@@ -2,6 +2,7 @@
   "name": "@forgesworn/flock",
   "version": "0.0.0",
   "description": "Coercion-resistant family & friends safety and privacy-preserving location sharing. Built on canary-kit over Nostr.",
+  "homepage": "https://flock.forgesworn.dev/",
   "type": "module",
   "private": true,
   "main": "./dist/index.js",

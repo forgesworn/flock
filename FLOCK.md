@@ -1,6 +1,6 @@
 # FLOCK Protocol
 
-**Status:** Draft · **Version:** 0.1 · **Date:** 2026-06-30
+**Status:** Draft · **Version:** 0.2 · **Date:** 2026-07-02
 
 Coercion-resistant family & friends safety and privacy-preserving location
 sharing. FLOCK is a thin application layer over **canary-kit** (which extends
@@ -85,8 +85,8 @@ Fence shapes (`src/geofence.ts`):
 { "kind": "polygon", "vertices": [ { "lat": …, "lon": … }, … ] }
 ```
 
-A **breach** is being outside *every* fence in the set (`isBreach` /
-`isWithinAnyFence`).
+A **breach** is being outside *every* fence in the set (`isWithinAnyFence` =
+false; the per-fence check is `isBreach`).
 
 ### 3.3 Signals — kind `20078` (ephemeral)
 
@@ -137,11 +137,10 @@ participant's coordinates — and the chosen point is published as an ordinary `
 locationSource, timestamp, scope, originGroupId? }`, with `scope ∈ {group,
 persona, master}` for propagation and `precision` upgraded toward 11.
 
-> Builders return **unsigned** events. The caller signs (NIP-01) and MAY
-> additionally NIP-59 gift-wrap (kind 1059) `help` and `breach` signals to hide
-> sender + event kind from relays — recommended for family mode; optional for
-> consensual night-out. (Gift-wrapping live signals is a forward step from
-> canary-kit's current AES-GCM envelope path.)
+> Builders return **unsigned** events. The caller signs (NIP-01) and gift-wraps:
+> flock NIP-59 gift-wraps (kind 1059) **every** signal — unconditionally, in
+> both modes — hiding sender + event kind from relays (see `docs/PRIVACY.md`).
+> Wrapping is not a per-mode option: an unwrapped signal would itself be a tell.
 
 ### 3.4 Secure onboarding & reseed (NIP-59)
 
@@ -248,7 +247,6 @@ Grounded in the feasibility research (`docs/research/2026-06-30-feasibility-rese
 
 ## 7. Open items
 
-- NIP-59 gift-wrap migration for live `help`/`breach` signals (per-mode).
 - Formal geo-indistinguishability (planar-Laplace) for night-out beacons.
 - Background delivery on GrapheneOS without Google APIs — **unproven**, must be
   prototyped before the native path is locked (see DESIGN Phase 0).

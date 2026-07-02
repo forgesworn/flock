@@ -11,9 +11,9 @@ yet, strong fit · 🤔 candidate / explore · 🔒 private repo (confirm scope)
 
 | flock need | Tool | Status / action |
 |---|---|---|
-| Sign events without holding the nsec | **signet-login** (+ **signet-lite** = `lite.mysignet.app`, **signet-app** = `mysignet.app`) | 🔜 The agreed next step. `SignetSigner` (`signEvent` + `nip44`) behind a pluggable `Signer` interface. |
+| Sign events without holding the nsec | **signet-login** (+ **signet-lite** = `lite.mysignet.app`, **signet-app** = `mysignet.app`) | ✅ Shipped — `SignetSigner` (`signEvent` + `nip44`) behind the pluggable `Signer` interface (`app/src/signer.ts`). |
 | The actual remote signer | **heartwood** (NIP-46, built on nsec-tree; unlimited unlinkable personas from one mnemonic; runs on cheap ARM) | 🤔 Signet connects flock to a heartwood-class signer. flock just speaks NIP-46. |
-| Derive per-circle keys deterministically | **nsec-tree** (`derivePersona`, `deriveFromPersona`, epoch index) | 🔧 **Biggest correction.** flock uses a *flat random seed* per circle. Should derive `persona → circle purpose → epoch`; reseed = epoch+1. `canary-kit/sync.deriveGroupIdentity(persona, groupId, epoch)` already wraps this. |
+| Derive per-circle keys deterministically | **nsec-tree** (`derivePersona`, `deriveFromPersona`, epoch index) | ✅ Shipped — `app/src/keys.ts` derives `circleRoot → circleId → epoch` via `canary-kit/sync.deriveGroupIdentity`; reseed = epoch+1. |
 | Protect a *local* key at rest (fallback path) | **keystore-kit** (PIN / WebAuthn-PRF / grace, burn, zero-dep) | 🔧 Fixes the `localStorage` nsec caveat for the LocalSigner — key behind WebAuthn/PIN with burn-on-duress. |
 
 ## Access control & membership
@@ -37,7 +37,7 @@ yet, strong fit · 🤔 candidate / explore · 🔒 private repo (confirm scope)
 | flock need | Tool | Status / action |
 |---|---|---|
 | Silent duress alarm + location | **canary-kit** duress (`buildDuressAlert`) | ✅ Using. |
-| "Is this *really* my parent picking me up?" | **canary-kit** spoken verification (`deriveVerificationWord`, `verifyWord`, `deriveDirectionalPair`, session) + **spoken-token** | 🔜 The deepfake-proof spoken token applied to **pick-up confirmation**. Already in flock's barrel — wire it to the UI. |
+| "Is this *really* my parent picking me up?" | **canary-kit** spoken verification (`deriveVerificationWord`, `verifyWord`, `deriveDirectionalPair`, session) + **spoken-token** | ✅ Shipped — wired to the UI: verification words + silent duress word (`src/spokenverify.ts`, `app/src/app.ts`). |
 | Encrypted location beacons / envelopes | **canary-kit** beacons + `canary-kit/sync` envelope | ✅ Using (beacons, duress, check-in envelope). |
 
 ## Transport (freedom from the internet)
@@ -52,7 +52,7 @@ yet, strong fit · 🤔 candidate / explore · 🔒 private repo (confirm scope)
 
 | flock need | Tool | Status / action |
 |---|---|---|
-| "Where do we meet to pick you up / regroup?" | **rendezvous-kit** — "fair meeting points for N participants — isochrone intersection, venue search, fairness scoring" | 🔜 Strong feature for both modes (family pick-up halfway; night-out regroup point). |
+| "Where do we meet to pick you up / regroup?" | **rendezvous-kit** — "fair meeting points for N participants — isochrone intersection, venue search, fairness scoring" | ✅ Shipped (Phase F) — set-rendezvous + fair meeting point with venues + fairness scoring (`src/rendezvous.ts`, `src/meeting.ts`). |
 
 ## Trust
 
@@ -71,14 +71,14 @@ yet, strong fit · 🤔 candidate / explore · 🔒 private repo (confirm scope)
 
 Each step exercises one tool and replaces a hand-rolled or weaker part of flock:
 
-1. **`Signer` abstraction → signet-login** — key out of the app. *(agreed; in progress)*
-2. **nsec-tree key derivation** — replace the flat circle seed with `persona → circle → epoch`. Foundational; unlocks proper reseed.
+1. **`Signer` abstraction → signet-login** — key out of the app. ✅ *done*
+2. **nsec-tree key derivation** — replace the flat circle seed with `persona → circle → epoch`. Foundational; unlocks proper reseed. ✅ *done*
 3. **dominion** — adopt epoch-based access control for membership/rotation/tiers (retire the hand-rolled reseed-via-gift-wrap).
 4. **keystore-kit** — secure the local fallback key at rest.
 5. **shamir-words (+ cairn-kit)** — circle/identity recovery.
-6. **canary-kit spoken verification** — pick-up identity confirmation.
+6. **canary-kit spoken verification** — pick-up identity confirmation. ✅ *done*
 7. **mesh-kit** — offline/LAN transport seam.
-8. **rendezvous-kit** — fair meeting/pick-up points.
+8. **rendezvous-kit** — fair meeting/pick-up points. ✅ *done*
 9. **stash** — cross-device encrypted-to-self state.
 10. **anvil** — release CI.
 
