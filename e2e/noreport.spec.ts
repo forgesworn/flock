@@ -18,7 +18,7 @@ test.describe('no-report (Private place) — caps disclosure even on an SOS', ()
     // The alert reaches B…
     await expect(memberPill(B, 'help')).toBeVisible()
     // …but no location is ever pinned (no "~geohash" sub on any member row).
-    await expect(B.locator('.member .when', { hasText: '~' })).toHaveCount(0)
+    await expect(B.locator('.member .when', { hasText: 'on the map' })).toHaveCount(0)
   })
 
   // The fail-safe direction under GPS noise: a fix just OUTSIDE the zone edge
@@ -43,6 +43,6 @@ test.describe('no-report (Private place) — caps disclosure even on an SOS', ()
     // The alarm still fires…
     await expect(memberPill(B, 'help')).toBeVisible()
     // …but the uncertain fix is never disclosed — the address stays hidden.
-    await expect(B.locator('.member .when', { hasText: '~' })).toHaveCount(0)
+    await expect(B.locator('.member .when', { hasText: 'on the map' })).toHaveCount(0)
   })
 })

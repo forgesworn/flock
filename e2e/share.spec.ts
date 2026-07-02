@@ -16,7 +16,7 @@ test.describe('location disclosure — between people', () => {
     await gotoTab(B, 'circle')
     await expect(memberPill(B, /out/)).toBeVisible()
     // A's member row shows a geohash (a real disclosed location), not "in this circle".
-    await expect(B.locator('.member .when', { hasText: '~' })).toBeVisible()
+    await expect(B.locator('.member .when', { hasText: 'on the map' })).toBeVisible()
   })
 
   // Share-live (night-out) mode: a coarse location streams continuously so the

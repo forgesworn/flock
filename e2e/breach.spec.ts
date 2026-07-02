@@ -18,7 +18,7 @@ test.describe('geofence breach', () => {
 
     // Inside the safe place → withheld: no location has ever been disclosed.
     await gotoTab(B, 'circle')
-    await expect(B.locator('.member .when', { hasText: '~' })).toHaveCount(0)
+    await expect(B.locator('.member .when', { hasText: 'on the map' })).toHaveCount(0)
 
     // A steps well outside (Paris). Breach → full disclosure crosses the relay.
     await moveAndReshare(A, PARIS)
@@ -26,7 +26,7 @@ test.describe('geofence breach', () => {
     // In Private mode, an automatic location disclosure happens ONLY on a breach,
     // so A appearing on B's screen with a location IS the breach, proven across the relay.
     await expect(memberPill(B, /out/)).toBeVisible()
-    await expect(B.locator('.member .when', { hasText: '~' })).toBeVisible()
+    await expect(B.locator('.member .when', { hasText: 'on the map' })).toBeVisible()
   })
 
   // Safety (Phase H): a breach must be CONFIDENT. An imprecise fix that reads just
@@ -41,18 +41,18 @@ test.describe('geofence breach', () => {
 
     await addZoneOnMap(A, 'safe') // "home" at London, ~300 m radius (syncs to B)
     await gotoTab(B, 'circle')
-    await expect(B.locator('.member .when', { hasText: '~' })).toHaveCount(0) // no location from A
+    await expect(B.locator('.member .when', { hasText: 'on the map' })).toHaveCount(0) // no location from A
 
     // A sits ~350 m east — just past the 300 m edge — but the fix is only ±300 m,
     // so we cannot be sure A actually left. A confident-only breach must NOT fire.
     await A.context().setGeolocation({ latitude: 51.5074, longitude: -0.12275, accuracy: 300 })
     await startSharing(A)
     await B.waitForTimeout(3000) // a false breach would publish on the first fix (~1 s)
-    await expect(B.locator('.member .when', { hasText: '~' })).toHaveCount(0) // still nothing disclosed
+    await expect(B.locator('.member .when', { hasText: 'on the map' })).toHaveCount(0) // still nothing disclosed
 
     // Step well outside with a confident (exact) fix → a real breach still crosses.
     await moveAndReshare(A, PARIS)
     await expect(memberPill(B, /out/)).toBeVisible()
-    await expect(B.locator('.member .when', { hasText: '~' })).toBeVisible()
+    await expect(B.locator('.member .when', { hasText: 'on the map' })).toBeVisible()
   })
 })

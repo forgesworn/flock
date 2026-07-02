@@ -284,6 +284,28 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 }
 .member.unseen { border-color: rgba(110, 168, 254, 0.3); }
 
+/* ── Helper tips — "what & why" while learning; a switch in settings ──────── */
+.tip {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px; border-radius: 12px;
+  background: rgba(110, 168, 254, 0.10);
+  border: 1px solid rgba(110, 168, 254, 0.28);
+  font-size: 12.5px; color: var(--text); line-height: 1.5;
+  text-align: left;
+}
+.tip-i {
+  flex: none; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; font-style: italic;
+  color: var(--calm); border: 1px solid rgba(110, 168, 254, 0.5);
+}
+.tip-text { flex: 1; }
+.tip-x {
+  margin-left: auto; flex: none;
+  background: transparent; border: 0; padding: 0 2px;
+  color: var(--muted); font-size: 12px; cursor: pointer;
+}
+
 /* "A new phone joined" — stays until acknowledged; the remedy is one tab away. */
 .new-member-notice {
   display: flex; align-items: center; gap: 12px;

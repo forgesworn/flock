@@ -354,6 +354,19 @@ function toast(msg: string): void {
   toastTimer = window.setTimeout(() => t.classList.remove('show'), 2800)
 }
 
+/** A small "what & why" helper shown while learning the app. Each hint is
+ *  dismissible (✕) and the whole set has a switch in settings — the calm way to
+ *  explain without cluttering a practised user's screen. */
+function hint(id: string, text: string): string {
+  if (!store.hintShown(persisted.hints, id)) return ''
+  // Class is "tip", not "hint" — .sos already uses a .hint span for its hold label.
+  return `<div class="tip">
+    <span class="tip-i">i</span>
+    <span class="tip-text">${esc(text)}</span>
+    <button class="tip-x" data-action="dismiss-hint" data-hint="${id}" aria-label="Got it">✕</button>
+  </div>`
+}
+
 // ── Icons ──────────────────────────────────────────────────────────────────
 const ICON = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>',
@@ -519,14 +532,18 @@ function homeView(): string {
     <div class="actions">
       ${alertActive ? '<button class="btn primary" data-action="im-safe">I\'m safe now</button>' : ''}
       <button class="btn ${sharing ? 'ghost' : 'primary'}" data-action="toggle-share">
-        ${sharing ? 'Stop sharing' : (isLive(c.mode) ? 'Start sharing' : 'Start watch')}
+        ${sharing ? 'Stop sharing' : (isLive(c.mode) ? 'Start sharing' : 'Start safety watch')}
       </button>
+      ${hint('home-watch', isLive(c.mode)
+        ? 'Sharing live lets your circle see roughly where you are — a neighbourhood, never your exact address.'
+        : 'Keeps an eye on your safe places and stands ready for a pick-up or SOS. Your exact spot stays hidden until you need it.')}
       <button class="btn warn" data-action="pickup">Pick me up</button>
       <div class="sos" data-action="sos-hold" data-armed="false" role="button" tabindex="0" aria-label="Hold to send help">
         <div class="fill"></div>
         <span class="label">Hold for help</span>
         <span class="hint">Press and hold to send an SOS</span>
       </div>
+      ${hint('home-sos', 'Pick me up asks your circle to come and get you. Hold for help is an emergency SOS — it alerts everyone and shares where you are.')}
     </div>
     ${inviteCta()}
     <div style="margin-top:14px">${breakCard()}</div>
@@ -582,7 +599,7 @@ function checkinCard(): string {
   const interval = c.checkinInterval ?? 0
   if (armingCheckin) {
     return `<div class="card stack">
-      <div class="row" style="justify-content:space-between"><strong>Check-in cadence</strong><button class="btn small ghost" data-action="cancel-arm">Cancel</button></div>
+      <div class="row" style="justify-content:space-between"><strong>How often to check in</strong><button class="btn small ghost" data-action="cancel-arm">Cancel</button></div>
       <div class="note">You'll be expected to tap “I'm OK” within this window. Miss it and your circle is alerted.</div>
       <div class="chip-row">
         <button class="btn small" data-action="arm" data-interval="900">15 min</button>
@@ -598,7 +615,7 @@ function checkinCard(): string {
     const overdue = dueIn <= 0
     return `<div class="card stack checkin-armed${overdue ? ' overdue' : ''}">
       <div class="row" style="justify-content:space-between">
-        <div><strong>Dead-man's-switch</strong><div class="note">${overdue ? 'Overdue — check in now' : `Next check-in in ${fmtMins(dueIn)}`}</div></div>
+        <div><strong>Automatic check-in</strong><div class="note">${overdue ? 'Overdue — check in now' : `Next check-in in ${fmtMins(dueIn)}`}</div></div>
         <button class="btn small ghost" data-action="disarm-checkin">Turn off</button>
       </div>
       <button class="btn primary" data-action="checkin">I'm OK — check in</button>
@@ -638,7 +655,7 @@ function circleMemberRow(pk: string, mePk: string): string {
     : `<span class="pill stale">home · ${fmtAgo(presence.ageSeconds)}</span>`
   else pill = '<span class="pill">no activity</span>'
 
-  const sub = beacon ? `~${esc(beacon.geohash)}` : isMe ? 'you' : 'in this circle'
+  const sub = beacon ? (isMe ? 'you · on the map' : 'location on the map') : isMe ? 'you' : 'in this circle'
   const edit = isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`
   const isNew = (activeCircle()?.unseenMembers ?? []).includes(pk)
   return `<div class="member${isNew ? ' unseen' : ''}">
@@ -660,9 +677,10 @@ function inviteSections(): string {
 
     <div class="section-title" style="margin-top:22px">Send to their key (remote)</div>
     <div class="card stack">
-      <div class="field"><label for="invite-npub">Their key (npub)</label><input class="input" id="invite-npub" placeholder="npub1…" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      ${hint('invite-remote', "In person? Show them the QR above. Far away? Ask them to open flock, tap 'Join remotely', and send you the key it shows.")}
+      <div class="field"><label for="invite-npub">Their invite key</label><input class="input" id="invite-npub" placeholder="npub1…" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
       <button class="btn small primary" data-action="send-invite">Send encrypted invite</button>
-      <div class="note">Gift-wrapped to their key (NIP-59) — safe over any channel. Ask them to tap “Join remotely” and share their key.</div>
+      <div class="note">Encrypted just for them — safe to send through any chat. Ask them to tap “Join remotely” and send you the key it shows.</div>
     </div>`
 }
 
@@ -725,7 +743,8 @@ function pickupCard(): string {
     <div class="card stack">
       ${pickupPanel === 'show' ? pickupShowInner()
         : pickupPanel === 'check' ? pickupCheckInner()
-        : `<div class="note">Confirm who's collecting — face to face, no signal needed. An impostor can't fake the word.</div>
+        : `${hint('pickup-check', "Confirm a person face-to-face with a secret word only your circle knows — for school pick-ups or meeting up in a crowd.")}
+           <div class="note">Confirm who's collecting — face to face, no signal needed. An impostor can't fake the word.</div>
            <div class="row" style="gap:10px">
              <button class="btn small primary" data-action="pickup-show">Prove it's me</button>
              <button class="btn small" data-action="pickup-check">Check someone</button>
@@ -769,26 +788,36 @@ function youView(): string {
     <h2 style="margin-bottom:14px">You &amp; settings</h2>
     <div class="section-title">Identity</div>
     <div class="card stack">
-      <div class="kv"><span class="k">Your key</span><span>${shortNpub(me.pk)}</span></div>
-      <div class="kv"><span class="k">Signer</span><span>${persisted.authMethod === 'signet' ? 'Signet (key in your signer)' : 'Local key (preview)'}</span></div>
-      <button class="btn small ghost" data-action="copy-npub">Copy my key (npub)</button>
+      <div class="kv"><span class="k">Your invite key</span><span>${shortNpub(me.pk)}</span></div>
+      <div class="kv"><span class="k">Sign-in</span><span>${persisted.authMethod === 'signet' ? 'Signed in with Signet' : 'Quick start (this device only)'}</span></div>
+      <button class="btn small ghost" data-action="copy-npub">Copy my invite key</button>
       <div class="note">${persisted.authMethod === 'signet'
         ? 'Signed in with Signet — your key lives in your signer and never touches flock.'
         : 'Quick-start key, stored in this browser only — not secure key storage. Sign in with Signet for real use.'}</div>
     </div>
-    <div class="section-title" style="margin-top:18px">Relays</div>
+    <div class="section-title" style="margin-top:18px">Tips &amp; help</div>
     <div class="card stack">
-      <div class="field"><label for="relay">Nostr relays (one per line)</label><textarea class="input" id="relay" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false">${esc(persisted.relayUrls.join('\n'))}</textarea></div>
-      <div class="note">Alerts go to every relay here, so one being down can't swallow an SOS. Add a backup you trust — even encrypted, a public relay still sees the timing of your traffic.</div>
-      <button class="btn small" data-action="save-relay">Save relays</button>
+      <div class="row" style="justify-content:space-between">
+        <span>Show helper tips</span>
+        <button class="switch${(persisted.hints?.on ?? true) ? ' on' : ''}" data-action="toggle-hints" role="switch" aria-checked="${persisted.hints?.on ?? true}"><span class="knob"></span></button>
+      </div>
+      <div class="note">Small explanations appear around the app while you're learning. Turn them off once you're comfortable.</div>
+      ${persisted.hints?.dismissed.length ? '<button class="btn small ghost" data-action="reset-hints">Bring all tips back</button>' : ''}
+    </div>
+    <div class="section-title" style="margin-top:18px">Delivery servers</div>
+    <div class="card stack">
+      ${hint('relays', "flock sends your encrypted alerts through these servers. More than one means an alert can't be lost if one is down.")}
+      <div class="field"><label for="relay">Server addresses (one per line)</label><textarea class="input" id="relay" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false">${esc(persisted.relayUrls.join('\n'))}</textarea></div>
+      <div class="note">Alerts go to every server here, so one being down can't swallow an SOS. Add a backup you trust — even encrypted, a public server still sees the timing of your traffic.</div>
+      <button class="btn small" data-action="save-relay">Save servers</button>
     </div>
     <div class="section-title" style="margin-top:18px">Circle security</div>
     <div class="card stack">
-      <button class="btn small" data-action="reseed">Rotate circle key (reseed)</button>
-      <div class="note">Generates a new seed and sends it encrypted to current members. Do this if an invite code may have leaked.</div>
+      <button class="btn small" data-action="reseed">Reset this circle's security</button>
+      <div class="note">Creates a fresh secret and hands it privately to the members you keep. Do this if an invite may have leaked.</div>
       ${members().filter((pk) => pk !== me.pk).map((pk) => removeConfirmPk === pk
         ? `<div class="row">${avatarHtml(pk, false, true)}<span class="who" style="font-size:14px">${esc(nameFor(pk))}</span></div>
-           <div class="note" style="color:var(--alert)">Removes ${esc(nameFor(pk))} and rotates the circle key — they're cut off straight away.</div>
+           <div class="note" style="color:var(--alert)">Removes ${esc(nameFor(pk))} and resets the circle's security — they're cut off straight away.</div>
            <div class="row" style="gap:10px">
              <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="remove-member" data-pk="${pk}">Remove</button>
              <button class="btn small ghost" data-action="cancel-remove">Cancel</button>
@@ -807,7 +836,7 @@ function youView(): string {
     <div class="card stack">
       <div class="kv"><span class="k">Name</span><span>${esc(c.name)}</span></div>
       <div class="kv"><span class="k">Sharing</span><span>${behaviourLabel(c.mode)}</span></div>
-      <div class="kv"><span class="k">Lifetime</span><span>${c.expiresAt ? `transient · ends in ${fmtTtl(c.expiresAt)}` : 'long-lived'}</span></div>
+      <div class="kv"><span class="k">Lifetime</span><span>${c.expiresAt ? `temporary · ends in ${fmtTtl(c.expiresAt)}` : 'ongoing'}</span></div>
       <button class="btn ghost" data-action="leave">Leave this circle</button>
       <div class="note">Leaving removes it from this device only. Your other circles and your key stay put.</div>
       ${disbandConfirm
@@ -837,7 +866,7 @@ function youView(): string {
         : `<button class="btn small ghost" data-action="ask-reset">Sign out &amp; reset this device…</button>
            <div class="note">Wipes your key and every circle from this browser.</div>`}
     </div>
-    <div class="note" style="margin-top:16px;text-align:center">flock · disclosure-on-event location · built on canary-kit</div>`
+    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose</div>`
 }
 
 function navView(): string {
@@ -870,7 +899,7 @@ function mapPanelInner(): string {
       <div class="row" style="justify-content:space-between"><strong>Meeting point</strong></div>
       <div class="note">Pan the map so the crosshair sits where you'll meet, then set it.</div>
       <div class="row" style="gap:10px">
-        <button class="btn small primary" data-action="rzv-pick-set">Set rendezvous here</button>
+        <button class="btn small primary" data-action="rzv-pick-set">Set meeting point here</button>
         <button class="btn small ghost" data-action="rzv-pick-cancel">Cancel</button>
       </div>`
   }
@@ -1359,7 +1388,7 @@ async function doSignetLogin(): Promise<void> {
   try {
     const session = await signetLogin({ appName: 'flock', relayUrl: PRIVATE_RELAYS[0] })
     if (!session) { toast('Sign-in cancelled'); return }
-    if (!session.signer.capabilities.hasNip44) { toast('That signer lacks NIP-44 — pick another'); return }
+    if (!session.signer.capabilities.hasNip44) { toast("That sign-in app isn't compatible — try another"); return }
     signetSigner = makeSignetSigner(session.signer)
     persisted.identity = { pk: session.pubkey }
     persisted.authMethod = 'signet'
@@ -1477,7 +1506,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
     beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(existing.id) // old-key pins are meaningless under the new seed
-    toast('Circle key was rotated')
+    toast("This circle's security was reset")
     refresh()
   }
 }
@@ -1502,10 +1531,10 @@ async function sendInvite(): Promise<void> {
   const signer = getSigner()
   if (!c || !signer) return
   const raw = (document.getElementById('invite-npub') as HTMLInputElement | null)?.value?.trim()
-  if (!raw) { toast('Paste an npub to invite'); return }
+  if (!raw) { toast('Paste their invite key first'); return }
   let pk: string
-  try { pk = raw.startsWith('npub') ? store.npubToHex(raw) : raw } catch { toast('Invalid npub'); return }
-  if (!/^[0-9a-f]{64}$/.test(pk)) { toast('Invalid key'); return }
+  try { pk = raw.startsWith('npub') ? store.npubToHex(raw) : raw } catch { toast("That doesn't look like an invite key — ask them to copy it again"); return }
+  if (!/^[0-9a-f]{64}$/.test(pk)) { toast("That doesn't look like an invite key"); return }
   if (pk === signer.pubkey) { toast("That's your own key"); return }
   try {
     const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
@@ -1539,9 +1568,9 @@ async function reseedCircle(removePk?: string): Promise<void> {
     // members, but anyone joining after the reseed finds it on the new inbox).
     const reseeded = persisted.circles.find((x) => x.id === c.id)
     if (reseeded && reseeded.fencesUpdatedAt !== undefined) void publishFences(reseeded)
-    toast(removePk ? 'Member removed & key rotated' : 'Circle key rotated')
+    toast(removePk ? 'Member removed — circle security reset' : 'Circle security reset')
     render()
-  } catch { toast('Reseed failed') }
+  } catch { toast("Couldn't reset security — try again") }
 }
 
 // ── Check-in / dead-man's-switch ─────────────────────────────────────────────
@@ -1605,7 +1634,7 @@ function startMonitor(): void {
     }
     const expired = sweepExpired()
     evaluateCheckinAlarm()
-    if (expired && !adding) { toast('A transient circle ended'); render(); return }
+    if (expired && !adding) { toast('A temporary circle ended'); render(); return }
     if (!isEditing()) refresh()
   }, 30_000)
 }
@@ -1710,9 +1739,9 @@ async function shareRendezvous(place: Rendezvous['place']): Promise<void> {
     const cs = cstate(c.id)
     cs.rendezvous = r
     cs.rzvStatuses.clear()
-    toast('Rendezvous set')
+    toast('Meeting point set')
     render()
-  } catch { toast('Could not set rendezvous') }
+  } catch { toast("Couldn't set the meeting point") }
 }
 
 async function setRendezvous(): Promise<void> {
@@ -2031,7 +2060,7 @@ function meetingCard(): string {
     suggestion = `<div class="note" style="margin-top:6px">${heading}</div>
       <div class="list">${etas}</div>
       ${fairness}
-      <button class="btn small primary" data-action="set-meeting-rzv">Set this as the rendezvous</button>`
+      <button class="btn small primary" data-action="set-meeting-rzv">Set this as the meeting point</button>`
   } else if (iProposed) {
     suggestion = `<div class="note">Waiting for a second spot to work out a fair place…</div>`
   }
@@ -2063,7 +2092,7 @@ function rzvCard(): string {
     }).join('')
     const modes = (['walk', 'cycle', 'drive', 'transit'] as const)
       .map((m) => `<button class="btn small${travelMode === m ? ' primary' : ''}" data-action="rzv-mode" data-mode="${m}">${m}</button>`).join('')
-    return `<div class="section-title" style="margin-top:22px">Rendezvous</div>
+    return `<div class="section-title" style="margin-top:22px">Meeting point</div>
       <div class="card stack">
         <div class="row" style="justify-content:space-between"><strong>${r.mode === 'be-back' ? 'Be back' : 'Meet'} <span id="rzv-countdown" class="rzv-countdown${dueIn <= 0 ? ' overdue' : ''}">${countdownLabel(dueIn)}</span></strong><span class="muted">by ${at}</span></div>
         <div class="note" style="margin-top:-2px">📍 ${esc(r.place.label || r.place.address || 'a set spot')}</div>
@@ -2071,12 +2100,12 @@ function rzvCard(): string {
         <div class="list">${rows}</div>
         <div class="note">How you're getting there</div>
         <div class="chip-row">${modes}</div>
-        ${r.setBy === me ? '<button class="btn small ghost" data-action="clear-rzv">Clear rendezvous</button>' : ''}
+        ${r.setBy === me ? '<button class="btn small ghost" data-action="clear-rzv">Clear meeting point</button>' : ''}
       </div>`
   }
   // While a meeting-point search is live, the meeting card stands in for the setup.
   if (cs?.meeting) return ''
-  return `<div class="section-title" style="margin-top:22px">Rendezvous</div>
+  return `<div class="section-title" style="margin-top:22px">Meeting point</div>
     <div class="card stack">
       <div class="field"><input class="input" id="rzv-place" placeholder="The Crown, or an address — blank for here" autocapitalize="words" autocorrect="off" /></div>
       <div class="note">A place or address (taxi-friendly), or leave blank to use your spot. ETAs are as-the-crow-flies.</div>
@@ -2086,7 +2115,7 @@ function rzvCard(): string {
         <button class="btn small${rzvDurationMin === 120 ? ' primary' : ''}" data-action="rzv-dur" data-min="120">2 hours</button>
       </div>
       <div class="row" style="gap:10px">
-        <button class="btn small primary" data-action="set-rzv">Set rendezvous</button>
+        <button class="btn small primary" data-action="set-rzv">Set meeting point</button>
         <button class="btn small ghost" data-action="rzv-pick">📍 Pick on map</button>
       </div>
       <div class="note" style="margin-top:2px">Not sure where? Everyone shares a rough spot and flock picks a fair place.</div>
@@ -2122,6 +2151,17 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'ask-remove': removeConfirmPk = node.dataset.pk ?? null; render(); break
     case 'cancel-remove': removeConfirmPk = null; render(); break
     case 'ack-new-members': patchActive({ unseenMembers: [] }); render(); break
+    case 'dismiss-hint':
+      persisted.hints = store.withHintDismissed(persisted.hints, node.dataset.hint ?? '')
+      store.save(persisted); render(); break
+    case 'toggle-hints': {
+      const h = persisted.hints ?? { on: true, dismissed: [] }
+      persisted.hints = { ...h, on: !h.on }
+      store.save(persisted); render(); break
+    }
+    case 'reset-hints':
+      persisted.hints = { on: true, dismissed: [] }
+      store.save(persisted); toast('Tips are back on'); render(); break
     case 'remove-member': removeConfirmPk = null; void reseedCircle(node.dataset.pk); break
     case 'checkin': void sendCheckIn(); break
     case 'buzz': void sendBuzz(node.dataset.reason ?? (document.getElementById('buzz-custom') as HTMLInputElement | null)?.value ?? ''); break
@@ -2605,7 +2645,7 @@ function copyNpub(): void {
   if (!id) return
   let npub = id.pk
   try { npub = npubEncode(id.pk) } catch { /* keep hex */ }
-  navigator.clipboard?.writeText(npub).then(() => toast('Your key copied'), () => toast('Copy failed'))
+  navigator.clipboard?.writeText(npub).then(() => toast('Invite key copied'), () => toast('Copy failed'))
 }
 
 // ── Profiles & petnames ───────────────────────────────────────────────────────
@@ -2850,7 +2890,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       const status = await decryptRendezvousStatus(c.seedHex, e.content)
       st.rzvStatuses.set(status.member, status)
       if (status.status === 'at-risk' && st.rendezvous?.setBy === me?.pk && status.member !== me?.pk) {
-        toast(`⚠ ${nameFor(status.member)} may miss the rendezvous`)
+        toast(`⚠ ${nameFor(status.member)} may miss the meeting point`)
       }
     } else if (t === MEETING_REQUEST_TYPE) {
       const request = await decryptMeetingRequest(c.seedHex, e.content)

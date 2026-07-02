@@ -80,6 +80,24 @@ export interface Persisted {
   authMethod?: AuthMethod
   /** Local secret from which circle seeds are deterministically derived (nsec-tree). */
   circleRootHex?: string
+  /** Helper hints: a master switch + per-hint dismissals. Absent = all on. */
+  hints?: Hints
+}
+
+/** Helper-hint state: small "what & why" explanations shown while learning the
+ *  app, each dismissible, all silencable from settings once comfortable. */
+export interface Hints { on: boolean; dismissed: string[] }
+
+/** Should this hint render? Fresh devices (undefined state) show everything. */
+export function hintShown(h: Hints | undefined, id: string): boolean {
+  const hints = h ?? { on: true, dismissed: [] }
+  return hints.on && !hints.dismissed.includes(id)
+}
+
+/** Dismiss one hint (idempotent); the master switch is untouched. */
+export function withHintDismissed(h: Hints | undefined, id: string): Hints {
+  const hints = h ?? { on: true, dismissed: [] }
+  return hints.dismissed.includes(id) ? hints : { ...hints, dismissed: [...hints.dismissed, id] }
 }
 
 const KEY = 'flock:v1'
@@ -194,7 +212,7 @@ export function newSeed(): string {
 /** Decode an npub to a 64-char hex pubkey. Throws if not a valid npub. */
 export function npubToHex(npub: string): string {
   const d = nip19decode(npub.trim())
-  if (d.type !== 'npub' || typeof d.data !== 'string') throw new Error('That is not a valid npub')
+  if (d.type !== 'npub' || typeof d.data !== 'string') throw new Error('That does not look like an invite key')
   return d.data
 }
 

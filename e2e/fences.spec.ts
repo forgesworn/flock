@@ -27,7 +27,7 @@ test.describe('safe places sync across the circle', () => {
     // the fence A drew — and A is alerted with B's location, over the live relay.
     await moveAndReshare(B, PARIS)
     await expect(memberPill(A, /out/)).toBeVisible()
-    await expect(A.locator('.member .when', { hasText: '~' })).toBeVisible()
+    await expect(A.locator('.member .when', { hasText: 'on the map' })).toBeVisible()
   })
 
   // Deleting must sync too — an empty set is still a set (latest-wins), or a
