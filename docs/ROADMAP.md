@@ -428,9 +428,12 @@ modes**. Plan with designs, decisions, and per-slice tests:
   links; the fragment never reaches any server (not ours, not Cloudflare) and is
   scrubbed from the address bar on consumption, including fragment-only navigation
   while flock is already open. Pasted bare codes and full links both join.
-- [ ] **Slice 8 — permission-denied guidance + invite-wait feedback** 🟡 — denying
-  geolocation is a silent dead end (raw error toast, toggle reverts unexplained);
-  remote-invite wait spins forever with no timeout copy.
+- [x] **Slice 8 — permission-denied guidance + invite-wait feedback** 🟡 — location
+  errors carry a structured kind (`GeoErrorKind`); denied ⇒ persistent actionable
+  card + honest toggle + retry; transient no-fix ⇒ calm "Looking for you…" card that
+  clears on the next fix (watch keeps trying); remote-invite wait shows "still
+  waiting" guidance after 60 s. E2e simulates the denied browser API at the boundary
+  (Playwright auto-resolves geolocation even ungranted — probe-verified).
 - [ ] **Slice 9 — invite hygiene: share-sheet over clipboard** 🟡 — the raw seed on the
   OS clipboard can cloud-sync; prefer QR + `navigator.share`, sharpen the fallback copy.
 - [ ] **Slice 10 — Cloudflare in the threat model + private map default** 🟡 — CF
@@ -459,9 +462,13 @@ modes**. Plan with designs, decisions, and per-slice tests:
   markers updated), gift-wrap/NIP-44 jargon removed, plain-words footer.
   *Deferred to Slice 14: npub-as-name placeholder + nickname prompt on adoption
   (flow change, not copy).*
-- [ ] **Slice 14 — structure & flow simplification** 🟡 — You-tab Advanced disclosure
-  (relays/security/disband/reset collapsed), Circle-tab decluttering, remote-invite
-  reframe + await-QR becomes a prefill link (same class of fix as the join QR).
+- [x] **Slice 14 — structure & flow simplification** 🟡 — You-tab Advanced fold
+  (servers/security/leave/disband/reset collapsed by default; fixtures gained
+  `openAdvanced`); npub never shown as a name ("Member <tail>" + join-notice ✎
+  nudge); await-screen key QR → `origin/#invite=` link that prefills the sender's
+  form; failed clipboard copy renders the link as selectable text. *(Circle-tab
+  card consolidation deferred — meeting/rendezvous cards are already mutually
+  exclusive in practice.)*
 
 ## Resolved inputs
 
