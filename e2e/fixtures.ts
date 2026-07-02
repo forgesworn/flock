@@ -154,20 +154,15 @@ export function memberPill(page: Page, text: string | RegExp) {
   return page.locator('.member .pill', { hasText: text })
 }
 
-/** Buzz the circle with a custom reason (from the Circle tab).
- *  Fill + click run atomically in ONE in-page task: an inbound signal arriving
- *  between a separate fill and click re-renders the app (render-on-state rebuilds
- *  the DOM) and wipes the input — the click then sends an empty reason and the
- *  buzz silently no-ops. (The underlying UX bug — typing lost to an inbound
- *  re-render — is tracked in the audit-hardening plan.) */
+/** Buzz the circle with a custom reason (from the Circle tab). A plain fill +
+ *  click, deliberately: renders now preserve the focused input (value + caret)
+ *  across inbound re-renders, so every call is a live regression test of that
+ *  fix. (Before it, an inbound signal between fill and click wiped the field and
+ *  the buzz silently no-opped — the audit's input-wipe bug.) */
 export async function sendBuzz(page: Page, reason: string): Promise<void> {
   await gotoTab(page, 'circle')
-  await page.waitForSelector('#buzz-custom')
-  await page.evaluate((r) => {
-    const input = document.getElementById('buzz-custom') as HTMLInputElement
-    input.value = r
-    document.querySelector<HTMLElement>('[data-action="buzz"]:not([data-reason])')?.click()
-  }, reason)
+  await page.fill('#buzz-custom', reason)
+  await page.click('[data-action="buzz"]:not([data-reason])')
 }
 
 /** Take a 1-hour break (off-grid), optionally with a reason, from Home. */

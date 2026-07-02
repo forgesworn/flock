@@ -453,13 +453,39 @@ function joinFromLink(code: string): void {
   } catch { toast('That join link is not valid — ask for a fresh one.') }
 }
 
+// Render-on-state rebuilds the whole DOM, which used to silently discard whatever
+// the user was mid-typing when an inbound signal landed (the audit's input-wipe
+// bug: a buzz reason, a nickname, the relay list — gone, and the follow-up tap
+// acted on the emptied field). Capture the focused field before the rebuild and
+// restore value + caret + focus after. Deliberate clears are unaffected: tapping
+// any button moves focus off the field, so nothing is captured.
+function captureFocusedInput(): { id: string; value: string; start: number | null; end: number | null } | null {
+  const el = document.activeElement
+  const f = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.id ? el : null
+  if (!f) return null
+  let start: number | null = null, end: number | null = null
+  try { start = f.selectionStart; end = f.selectionEnd } catch { /* number inputs */ }
+  return { id: f.id, value: f.value, start, end }
+}
+
+function restoreFocusedInput(keep: ReturnType<typeof captureFocusedInput>): void {
+  if (!keep) return
+  const el = document.getElementById(keep.id)
+  if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement)) return
+  el.value = keep.value
+  el.focus()
+  try { if (keep.start !== null) el.setSelectionRange(keep.start, keep.end ?? keep.start) } catch { /* number inputs */ }
+}
+
 function render(): void {
   if (tab !== 'map' && mapView) { mapView.destroy(); mapView = null; addMode = false; rzvPick = false }
   syncRzvTicker() // start/stop the live countdown to match the current screen
   if (persisted.identity) ensureInviteSub()
+  const keep = captureFocusedInput()
   if (!persisted.identity || !activeCircle() || adding) {
     root.innerHTML = onboardingView()
     wireOnboard()
+    restoreFocusedInput(keep)
     return
   }
   ensureMember(activeCircle() as store.Circle, persisted.identity.pk)
@@ -469,6 +495,7 @@ function render(): void {
   const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
   root.innerHTML = `${buzzBanner()}<main class="screen fade-in ${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   wireApp()
+  restoreFocusedInput(keep)
 }
 
 // ── Views: app ───────────────────────────────────────────────────────────────
@@ -1184,7 +1211,7 @@ function wireOnboard(): void {
     })
   })
 }
-function rerenderOnboard(): void { root.innerHTML = onboardingView(); wireOnboard() }
+function rerenderOnboard(): void { const keep = captureFocusedInput(); root.innerHTML = onboardingView(); wireOnboard(); restoreFocusedInput(keep) }
 
 function wireApp(): void {
   const qrEl = document.getElementById('qr')
