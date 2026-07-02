@@ -80,7 +80,7 @@ encryption stay at the edge.
 | `policy` | Disclosure-on-event decision: withhold \| coarse \| full, by mode/trigger/breach | ✅ tested |
 | `signals` | `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078 events | ✅ tested |
 | `nightout` | Ephemeral groups (NIP-40), presence ("still out / gone home"), separation ("lost") | ✅ tested |
-| `checkin` | Dead-man's-switch — encrypted "I'm OK" heartbeats; `ok`/`overdue`/`missed` classifier | ✅ tested |
+| `checkin` | Dead-man's-switch — encrypted "I'm OK" heartbeats (custom cadence); `ok`/`overdue`/`missed`, local self-reminders, "I've got this" ack + escalation | ✅ tested |
 | `noreport` | Inverse fences — cap disclosure over sensitive addresses (withhold \| coarse) | ✅ tested |
 | `buzz` | Encrypted "look at your phone" ping with reason vocabulary | ✅ tested |
 | `allclear` | Stand-down signal, with a coerced flag | ✅ tested |

@@ -47,8 +47,10 @@ re-exports all of them plus the full `canary-kit` + `canary-kit/nostr` surface.
   events; builders derive keys and encrypt internally from the group seed.
 - `nightout` — ephemeral groups (NIP-40 expiry), presence (derived: a member is
   "gone home" when their beacons go stale, default 600 s), separation outliers.
-- `checkin` — dead-man's-switch: encrypted "I'm OK" heartbeats, `ok`/`overdue`/
-  `missed` classifier.
+- `checkin` — dead-man's-switch: encrypted "I'm OK" heartbeats (any cadence),
+  `ok`/`overdue`/`missed` classifier, local self-reminders (`selfCheckInStatus`),
+  and "I've got this" acknowledgement + escalation (`buildAckSignal`,
+  `classifyEscalation`) so a miss is handled by a person, not a single toast.
 - `noreport` — inverse fences that cap disclosure over sensitive addresses.
 - `buzz` — encrypted "look at your phone" ping. `allclear` — stand-down with a
   coerced flag. `fences` — circle-wide safe-place sync (latest-wins).
@@ -93,6 +95,12 @@ stillOut(entries: PresenceEntry[]): PresenceEntry[]
 buildCheckInSignal(p: { groupId: string, seedHex: string, member: string,
   intervalSeconds: number, timestamp?: number }): Promise<UnsignedEvent>  // interval <= 0 stands down
 classifyCheckins(checkins: CheckIn[], now: number, opts?: { graceSeconds?: number }): CheckInState[]
+selfCheckInStatus(mine: CheckIn | null, now: number, opts?: { remindBeforeSeconds?: number,
+  graceSeconds?: number }): 'none'|'ok'|'due-soon'|'overdue'|'missed'  // LOCAL only — never emits
+buildAckSignal(p: { groupId: string, seedHex: string, member: string, target: string,
+  timestamp?: number }): Promise<UnsignedEvent>  // "I've got this" for target's missed check-in
+classifyEscalation(states: CheckInState[], acks: CheckInAck[], now: number,
+  opts?: { stepSeconds?: number }): EscalationState[]  // unacknowledged first, levels 0-2
 ```
 
 Geohash encoding is the caller's job (`geohash-kit`'s `encode(lat, lon, precision)`);

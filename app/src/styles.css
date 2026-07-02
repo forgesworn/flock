@@ -516,6 +516,7 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip-row .btn { flex: 1; min-width: 84px; }
 .checkin-armed.overdue { border-color: var(--warn-dim); box-shadow: 0 0 0 1px var(--warn-dim); }
+.checkin-armed.due-soon { border-color: var(--warn-dim); }
 .avatar.small { width: 30px; height: 30px; font-size: 12px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); font-weight: 700; color: var(--muted); }
 #my-npub, #qr-npub { margin-left: auto; margin-right: auto; }
 

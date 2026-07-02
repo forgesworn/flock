@@ -101,6 +101,7 @@ not stored by relays. Core types (`t` → payload / key / trigger):
 | `help`  | `DuressAlert`  | duress key | SOS / duress |
 | `allclear` | `AllClear {member, timestamp, coerced?}` | group envelope key | "I'm safe now" — stands down the member's `help` alert. A **coerced** all-clear (flag inside the encryption, long-press to send) is IGNORED by receivers: the sender's screen shows a normal stand-down while the circle stays alarmed (§6.1) |
 | `checkin` | `CheckIn {member, timestamp, intervalSeconds}` | group envelope key (`deriveGroupKey`) | dead-man's-switch heartbeat |
+| `ack` | `CheckInAck {member, target, timestamp}` | group envelope key | "I've got this" — a watcher claims a missed check-in; other watchers stand their repeat alerts down (§3.5) |
 | `fences` | `FenceSet {fences, updatedAt, by}` | group envelope key | someone edits the circle's safe places (full-set, latest-wins — §3.2) |
 | `rzv` | `Rendezvous {id, place, deadline, mode, setBy, createdAt}` | group envelope key | someone sets "be at a place by a time" |
 | `rzv-status` | `RendezvousStatus {rendezvousId, member, status, etaSeconds, timestamp}` | group envelope key | a member's en-route / arrived / at-risk update |
@@ -168,6 +169,22 @@ envelope-keyed) on each manual "I'm OK". Every device runs `classifyCheckins`:
 A stand-down is a final check-in with `intervalSeconds <= 0`. **Auto-sending is
 deliberately not done** — the user must actively check in, so incapacitation
 surfaces as a missed check-in.
+
+**Self-reminder (local only).** Before the deadline the member's own device
+nudges them (`selfCheckInStatus`: `due-soon` → `overdue` → `missed`). The
+reminder emits **no traffic** — a nudge that published anything would be a tell
+(§6 invariant 1).
+
+**Escalation until acknowledged.** A miss must not be a single toast that
+gets swiped away. Every watcher escalates locally (`classifyEscalation`, levels
+0→2 by time since the miss) until a watcher claims it by sending an `ack`
+(`CheckInAck {member, target, timestamp}`, envelope-keyed): the first responder
+wins, every other device shows who has it and stands its repeat alerts down.
+An ack is dead once `target` checks in again (`timestamp <=` their latest
+check-in), so a stale ack can never silence a *new* miss. Only the responder's
+own key can claim (sender pubkey must match `member` — mirrors `allclear`).
+Escalation stays **peer-to-peer through the circle**: there is deliberately no
+monitoring centre — a paid custodian would be a centralised, subpoenable party.
 
 ## 4. Disclosure-on-event policy
 

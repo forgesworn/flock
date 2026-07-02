@@ -36,8 +36,12 @@ import {
   buildCheckInSignal,
   decryptCheckIn,
   classifyCheckins,
-  missedCheckins,
+  selfCheckInStatus,
+  buildAckSignal,
+  decryptAck,
+  classifyEscalation,
   CHECKIN_SIGNAL_TYPE,
+  ACK_SIGNAL_TYPE,
   buildBuzzSignal,
   decryptBuzz,
   DEFAULT_BUZZ_REASONS,
@@ -86,6 +90,7 @@ import {
   type CircleGeofence,
   type Geofence,
   type CheckIn,
+  type CheckInAck,
 } from '@forgesworn/flock'
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -137,6 +142,9 @@ let awaitSince = 0 // when the remote-invite wait began — drives the 'still wa
 const AWAIT_GUIDE_MS = 60_000
 let armingCheckin = false
 let checkinAlert = false
+let checkinAlertSub = '' // orb subtitle when every missed check-in is being handled
+const escNotified = new Map<string, number>() // `${cid}:${member}:${missedAt}` → highest escalation level already toasted
+const selfNudged = new Map<string, string>() // circleId → `${lastCheckIn}:${status}` already nudged (self-reminder)
 let monitorTimer = 0
 let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string } | null = null
 let travelMode: TravelMode = 'walk'
@@ -178,6 +186,8 @@ interface CircleState {
   beacons: Map<string, MemberBeacon>
   alerts: Map<string, number>
   checkins: Map<string, CheckIn>
+  /** First responder per missed member (keyed by target); pruned on their next check-in. */
+  acks: Map<string, CheckInAck>
   rzvStatuses: Map<string, RendezvousStatus>
   rendezvous: Rendezvous | null
   offgrid: Map<string, OffGrid>
@@ -192,7 +202,7 @@ interface CircleState {
 const circleStates = new Map<string, CircleState>()
 function cstate(id: string): CircleState {
   let s = circleStates.get(id)
-  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null, meetingGen: 0, meetingVenues: [] }; circleStates.set(id, s) }
+  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), acks: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null, meetingGen: 0, meetingVenues: [] }; circleStates.set(id, s) }
   return s
 }
 // Meeting-point requests I've declined to contribute to (by requestId). Declining
@@ -541,7 +551,7 @@ function orbState(): { cls: string; label: string; sub: string; action?: string 
   if (alertActive) return { cls: 'state-alert', label: 'Help sent', sub: 'Your circle has been alerted' }
   const inc = incomingAlert()
   if (inc) return { cls: 'state-alert', label: `${inc.name} needs help`, sub: 'Tap to see where', action: 'see-alert' }
-  if (checkinAlert) return { cls: 'state-alert', label: 'Check-in missed', sub: "Someone hasn't checked in" }
+  if (checkinAlert) return { cls: 'state-alert', label: 'Check-in missed', sub: checkinAlertSub || "Someone hasn't checked in" }
   if (isDark()) return { cls: 'state-dark', label: 'Taking a break', sub: `Sharing nothing · back in ${fmtMins((persisted.offGridUntil ?? 0) - nowSec())}` }
   if (breachActive) return { cls: 'state-alert', label: 'Outside safe place', sub: 'Location shared with your circle' }
   if (sharing && fix) {
@@ -675,16 +685,26 @@ function checkinCard(): string {
         <button class="btn small" data-action="arm" data-interval="1800">30 min</button>
         <button class="btn small" data-action="arm" data-interval="3600">1 hour</button>
       </div>
+      <div class="row">
+        <input class="input" id="custom-interval-mins" type="number" inputmode="numeric" min="5" max="1440" placeholder="Custom · minutes" style="flex:1" />
+        <button class="btn small" data-action="arm-custom">Set</button>
+      </div>
     </div>`
   }
   if (interval > 0) {
     const me = persisted.identity?.pk
     const mine = me ? cstate(c.id).checkins.get(me) : undefined
     const dueIn = mine ? (mine.timestamp + interval) - nowSec() : 0
-    const overdue = dueIn <= 0
-    return `<div class="card stack checkin-armed${overdue ? ' overdue' : ''}">
+    const status = selfCheckInStatus(mine ?? null, nowSec())
+    const alarmed = status === 'overdue' || status === 'missed'
+    const note =
+      status === 'missed' ? 'Missed — your circle has been alerted. Check in now'
+      : status === 'overdue' ? 'Overdue — check in now'
+      : status === 'due-soon' ? `Due soon — ${fmtMins(dueIn)} left`
+      : `Next check-in in ${fmtMins(dueIn)}`
+    return `<div class="card stack checkin-armed${alarmed ? ' overdue' : status === 'due-soon' ? ' due-soon' : ''}">
       <div class="row" style="justify-content:space-between">
-        <div><strong>Automatic check-in</strong><div class="note">${overdue ? 'Overdue — check in now' : `Next check-in in ${fmtMins(dueIn)}`}</div></div>
+        <div><strong>Automatic check-in</strong><div class="note">${note}</div></div>
         <button class="btn small ghost" data-action="disarm-checkin">Turn off</button>
       </div>
       <button class="btn primary" data-action="checkin">I'm OK — check in</button>
@@ -712,10 +732,18 @@ function circleMemberRow(pk: string, mePk: string): string {
   const ci = st?.checkins.get(pk)
   const ciState = ci ? classifyCheckins([ci], nowSec())[0] : null
   const dark = !isMe && !!cid && memberDark(cid, pk)
+  const ack = ciState?.status === 'missed' ? st?.acks.get(pk) : undefined
+  const escState = ciState?.status === 'missed'
+    ? classifyEscalation([ciState], ack ? [ack] : [], nowSec())[0] : null
+  const onIt = escState?.status === 'acknowledged'
+    ? (escState.acknowledgedBy === mePk ? 'You' : nameFor(escState.acknowledgedBy ?? '')) : null
+  const ackBtn = !isMe && escState?.status === 'unacknowledged'
+    ? `<button class="btn small" data-action="ack-checkin" data-pk="${pk}">I've got this</button>` : ''
 
   let pill: string
   if (st?.alerts.has(pk)) pill = '<span class="pill alert">help</span>'
   else if (dark) pill = '<span class="pill dark">on a break</span>'
+  else if (onIt) pill = `<span class="pill warn">✓ ${esc(onIt)} on it</span>`
   else if (ciState?.status === 'missed') pill = '<span class="pill alert">missed</span>'
   else if (ciState?.status === 'overdue') pill = '<span class="pill warn">overdue</span>'
   else if (ciState) pill = '<span class="pill active">checked in</span>'
@@ -730,7 +758,7 @@ function circleMemberRow(pk: string, mePk: string): string {
   return `<div class="member${isNew ? ' unseen' : ''}">
     ${avatarHtml(pk, isMe)}
     <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}${isNew ? ' <span class="pill new">new</span>' : ''}</div><div class="when">${sub}</div></div>
-    ${pill}${edit}
+    ${ackBtn}${pill}${edit}
   </div>`
 }
 
@@ -1594,7 +1622,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     if (!existing) return
     patchCircleById(existing.id, { seedHex: payload.s })
     const st = cstate(existing.id)
-    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
+    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
     beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(existing.id) // old-key pins are meaningless under the new seed
@@ -1653,7 +1681,7 @@ async function reseedCircle(removePk?: string): Promise<void> {
     }
     patchCircleById(c.id, { seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) })
     const st = cstate(c.id)
-    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
+    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
     beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(c.id) // old-key pins are meaningless under the new seed
@@ -1678,6 +1706,7 @@ async function sendCheckIn(): Promise<void> {
     const ck = cstate(c.id).checkins
     if (interval > 0) ck.set(id.pk, { member: id.pk, timestamp: nowSec(), intervalSeconds: interval })
     else ck.delete(id.pk)
+    cstate(c.id).acks.delete(id.pk) // my fresh check-in resolves any episode being handled
     toast(interval > 0 ? "Checked in — you're OK" : 'Checked out')
   } catch { toast('Check-in failed') }
   refresh()
@@ -1700,14 +1729,69 @@ function disarmCheckin(): void {
 function evaluateCheckinAlarm(): void {
   const me = persisted.identity?.pk
   let missed = 0
+  let handled = 0
+  let handledNote = ''
   for (const c of persisted.circles) {
+    const st = cstate(c.id)
     // A member who pre-announced a break is *meant* to be quiet — never alarm on them.
-    missed += missedCheckins(classifyCheckins([...cstate(c.id).checkins.values()], nowSec()))
-      .filter((s) => s.member !== me && !memberDark(c.id, s.member)).length
+    const states = classifyCheckins([...st.checkins.values()], nowSec())
+      .filter((s) => s.member !== me && !memberDark(c.id, s.member))
+    for (const e of classifyEscalation(states, [...st.acks.values()], nowSec())) {
+      missed += 1
+      if (e.status === 'acknowledged') {
+        handled += 1
+        const who = e.acknowledgedBy === me ? 'You' : nameFor(e.acknowledgedBy ?? '')
+        handledNote = `${who} ${e.acknowledgedBy === me ? 'are' : 'is'} checking on ${nameFor(e.member)}`
+        continue
+      }
+      // Nobody has said "I've got this" yet — keep escalating as levels rise.
+      const key = `${c.id}:${e.member}:${e.missedAt}`
+      if (e.level > (escNotified.get(key) ?? -1)) {
+        escNotified.set(key, e.level)
+        const name = nameFor(e.member)
+        toast(e.level === 0 ? `⚠ ${name} missed a check-in`
+          : e.level === 1 ? `⚠ Still no word from ${name} — can anyone check on them?`
+          : `🚨 No word from ${name} for a while — someone step in`)
+        if (e.level > 0) { try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ } }
+      }
+    }
   }
-  const was = checkinAlert
   checkinAlert = missed > 0
-  if (checkinAlert && !was) toast(`⚠ ${missed === 1 ? 'A member' : `${missed} members`} missed a check-in`)
+  checkinAlertSub = missed > 0 && handled === missed ? handledNote : ''
+}
+
+// Nudge the user BEFORE their own check-in goes overdue. Entirely local —
+// a reminder that emitted traffic would be a tell (FLOCK §6 invariant 1).
+function evaluateSelfReminder(): void {
+  const me = persisted.identity?.pk
+  if (!me) return
+  for (const c of persisted.circles) {
+    if ((c.checkinInterval ?? 0) <= 0) { selfNudged.delete(c.id); continue }
+    const mine = cstate(c.id).checkins.get(me) ?? null
+    const status = selfCheckInStatus(mine, nowSec())
+    if (status === 'ok' || status === 'none') { selfNudged.delete(c.id); continue }
+    const key = `${mine?.timestamp ?? 0}:${status}`
+    if (selfNudged.get(c.id) === key) continue // one nudge per status per episode
+    selfNudged.set(c.id, key)
+    toast(status === 'due-soon' ? `Check-in due soon · ${c.name} — tap "I'm OK"`
+      : status === 'overdue' ? `⚠ Check-in overdue · ${c.name} — check in now`
+      : `🚨 Check-in missed · ${c.name} — your circle may be alerted`)
+    try { navigator.vibrate?.(status === 'due-soon' ? 200 : [300, 120, 300]) } catch { /* no haptics */ }
+  }
+}
+
+async function sendAck(target: string): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id || !target || target === id.pk) return
+  try {
+    const tmpl = await buildAckSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, target })
+    await publishSignal(tmpl, c)
+    cstate(c.id).acks.set(target, { member: id.pk, target, timestamp: nowSec() })
+    evaluateCheckinAlarm()
+    toast(`You're checking on ${nameFor(target)} — the circle can stand down`)
+  } catch { toast("Couldn't send — try again") }
+  refresh()
 }
 
 function isEditing(): boolean {
@@ -1727,6 +1811,7 @@ function startMonitor(): void {
     }
     const expired = sweepExpired()
     evaluateCheckinAlarm()
+    evaluateSelfReminder()
     if (expired && !adding) { toast('A temporary circle ended'); render(); return }
     if (!isEditing()) refresh()
   }, 30_000)
@@ -2299,6 +2384,14 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'arm-menu': armingCheckin = true; render(); break
     case 'cancel-arm': armingCheckin = false; render(); break
     case 'arm': armCheckin(Number(node.dataset.interval)); break
+    case 'arm-custom': {
+      const el = document.getElementById('custom-interval-mins') as HTMLInputElement | null
+      const mins = Math.round(Number(el?.value))
+      if (!Number.isFinite(mins) || mins < 5 || mins > 1440) { toast('Pick between 5 minutes and 24 hours'); break }
+      armCheckin(mins * 60)
+      break
+    }
+    case 'ack-checkin': void sendAck(node.dataset.pk ?? ''); break
     case 'disarm-checkin': {
       const covert = wasCovertHold('disarm-checkin')
       disarmCheckin()
@@ -2937,6 +3030,9 @@ function resetDevice(): void {
   alertCircleId = null
   breachActive = false
   checkinAlert = false
+  checkinAlertSub = ''
+  escNotified.clear()
+  selfNudged.clear()
   awaitingInvite = false
   armingCheckin = false
   adding = false
@@ -3029,6 +3125,17 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
     } else if (t === CHECKIN_SIGNAL_TYPE) {
       const ci = await decryptCheckIn(c.seedHex, e.content)
       st.checkins.set(ci.member, ci)
+      st.acks.delete(ci.member) // their fresh check-in resolves the episode the ack was for
+      evaluateCheckinAlarm()
+    } else if (t === ACK_SIGNAL_TYPE) {
+      const ack = await decryptAck(c.seedHex, e.content)
+      // Only the responder themselves can claim they're on it (mirrors all-clear).
+      if (ack.member !== e.pubkey) return
+      // An ack from a previous episode (already resolved by that check-in) is dead.
+      if (ack.timestamp <= (st.checkins.get(ack.target)?.timestamp ?? 0)) return
+      const prev = st.acks.get(ack.target)
+      if (!prev || ack.timestamp < prev.timestamp) st.acks.set(ack.target, ack) // first responder wins
+      if (!me || ack.member !== me.pk) toast(`${nameFor(ack.member)} is checking on ${nameFor(ack.target)}`)
       evaluateCheckinAlarm()
     } else if (t === 'buzz') {
       const bz = await decryptBuzz(c.seedHex, e.content)
