@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, gotoTab } from './fixtures'
+import { test, expect, newPerson, createCircle, openAdvanced } from './fixtures'
 
 test.describe('reset device — two-step confirm', () => {
   // "Sign out & reset" wipes the key and every circle with no recovery path
@@ -6,7 +6,7 @@ test.describe('reset device — two-step confirm', () => {
   test('first tap arms, cancel disarms, confirming wipes back to onboarding', async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths', mode: 'family' })
-    await gotoTab(A, 'you')
+    await openAdvanced(A)
 
     // First tap only arms — nothing is wiped.
     await A.click('[data-action="ask-reset"]')

@@ -97,6 +97,7 @@ let alertActive = false // MY alert went out (confirmed publish) — sender's vi
 let alertFailed = false // my SOS could not be published — persistent retry state, never a toast
 let alertCircleId: string | null = null // which circle my live alert went to (stand-down target)
 let breachActive = false
+let geoIssue: 'denied' | 'nofix' | null = null // actionable location trouble shown as a card, not a toast
 let stopWatch: (() => void) | null = null
 let hidden = false // app backgrounded (page hidden) — pause sampling; a hidden PWA can't sample reliably anyway
 const subs = new Map<string, () => void>() // circleId@relay@inboxPk → unsubscribe (one per circle)
@@ -129,6 +130,11 @@ let addRadius = 300
 let stopInviteSub: (() => void) | null = null
 let inviteSubKey = ''
 let awaitingInvite = false
+let pendingInviteNpub: string | null = null // a scanned invite-key link, prefilled into the send form
+let showInviteLinkText = false // clipboard copy failed — render the link as selectable text instead
+let showAdvanced = false // You-tab advanced settings fold (session-only)
+let awaitSince = 0 // when the remote-invite wait began — drives the 'still waiting' guidance
+const AWAIT_GUIDE_MS = 60_000
 let armingCheckin = false
 let checkinAlert = false
 let monitorTimer = 0
@@ -317,12 +323,14 @@ function memberDark(circleId: string, pk: string): boolean {
   return !!o && isOffGrid(o, nowSec())
 }
 
-/** Display name for a member: my private petname → public profile (if opted-in) → short npub. */
+/** Display name for a member: my private petname → public profile (if opted-in) →
+ *  a human placeholder. An npub is never shown as a person's NAME (it reads as a
+ *  glitch); the 4-char tail keeps two unnamed members tellable apart. */
 function nameFor(pk: string): string {
   const pet = persisted.petnames[pk]
   if (pet) return pet
   if (persisted.showProfiles) { const p = getProfile(pk); if (p?.name) return p.name }
-  return shortNpub(pk)
+  try { return `Member ${npubEncode(pk).slice(-4)}` } catch { return `Member ${pk.slice(0, 4)}` }
 }
 
 /** Short label for a map pin: my private petname → public name (opted-in) → 2-char
@@ -394,25 +402,38 @@ export function mount(el: HTMLElement): void {
   // A join link (scanned QR / tapped in a chat) arrives as a #join= fragment —
   // never sent to any server. Scrub it from the address bar BEFORE anything else
   // runs: it carries the seed.
-  const joinCode = consumeJoinFragment()
+  const frag = consumeFragment()
   render()
-  if (joinCode) joinFromLink(joinCode)
+  if (frag?.kind === 'join') joinFromLink(frag.value)
+  if (frag?.kind === 'invite') inviteFromLink(frag.value)
   // Tapping a link while flock is already open is a fragment-only navigation —
   // no reload, no fresh mount — so consume those too.
   window.addEventListener('hashchange', () => {
-    const code = consumeJoinFragment()
-    if (code) joinFromLink(code)
+    const f = consumeFragment()
+    if (f?.kind === 'join') joinFromLink(f.value)
+    if (f?.kind === 'invite') inviteFromLink(f.value)
   })
   void restoreSignet()
 }
 
-/** Pull the invite code out of a #join= fragment and scrub it from the address
- *  bar/history straight away — it carries the seed. */
-function consumeJoinFragment(): string | null {
-  const m = location.hash.match(/^#join=(.+)$/)?.[1]
+/** Pull a #join= (circle invite — carries the SEED) or #invite= (someone's public
+ *  key, to prefill the send-invite form) out of the fragment, scrubbing the address
+ *  bar/history straight away. */
+function consumeFragment(): { kind: 'join' | 'invite'; value: string } | null {
+  const m = location.hash.match(/^#(join|invite)=(.+)$/)
   if (!m) return null
   history.replaceState(null, '', location.pathname + location.search)
-  return decodeURIComponent(m)
+  return { kind: m[1] as 'join' | 'invite', value: decodeURIComponent(m[2]) }
+}
+
+/** A scanned "invite key" QR: jump to the send-invite form with the key filled in. */
+function inviteFromLink(npub: string): void {
+  if (!persisted.identity || !activeCircle()) { toast('Create or join a circle first, then scan their key again'); return }
+  try { store.npubToHex(npub) } catch { toast("That key doesn't look right — ask them to show the QR again"); return }
+  pendingInviteNpub = npub
+  tab = 'circle'
+  render()
+  toast('Key filled in — tap Send encrypted invite')
 }
 
 /** Join straight from a scanned/tapped link — the same path as a pasted code. */
@@ -545,9 +566,29 @@ function homeView(): string {
       </div>
       ${hint('home-sos', 'Pick me up asks your circle to come and get you. Hold for help is an emergency SOS — it alerts everyone and shares where you are.')}
     </div>
+    ${geoIssueCard()}
     ${inviteCta()}
     <div style="margin-top:14px">${breakCard()}</div>
     <div style="margin-top:14px">${checkinCard()}</div>`
+}
+
+/** Location trouble as an actionable, persistent card — a denied permission is a
+ *  settings change only the user can make; a raw error toast is a dead end. */
+function geoIssueCard(): string {
+  if (geoIssue === 'denied') {
+    return `<div class="card stack geo-issue" style="margin-top:14px">
+      <strong>flock can't see your location</strong>
+      <div class="note">Location is blocked for this browser, so sharing switched itself off. Allow it in your phone's settings (Settings → your browser → Location → “While using”), then try again.</div>
+      <button class="btn small" data-action="geo-retry">Try again</button>
+    </div>`
+  }
+  if (geoIssue === 'nofix') {
+    return `<div class="card geo-issue" style="margin-top:14px">
+      <strong>Looking for you…</strong>
+      <div class="note">No GPS fix yet — still trying. Being near a window or outside helps.</div>
+    </div>`
+  }
+  return ''
 }
 
 /** A loud, friendly nudge to invite people while you're the only one here. */
@@ -621,7 +662,7 @@ function checkinCard(): string {
       <button class="btn primary" data-action="checkin">I'm OK — check in</button>
     </div>`
   }
-  return `<button class="btn ghost" data-action="arm-menu">Set up check-ins · dead-man's-switch</button>`
+  return `<button class="btn ghost" data-action="arm-menu">Set up check-ins · an automatic alert if one is missed</button>`
 }
 
 function circleMemberRow(pk: string, mePk: string): string {
@@ -671,6 +712,7 @@ function inviteSections(): string {
     <div class="section-title" style="margin-top:22px">Show a code (in person)</div>
     <div class="card stack">
       <div class="qr" id="qr"></div>
+      ${showInviteLinkText && activeCircle() ? `<div class="invite-code">${esc(store.inviteLink(activeCircle() as store.Circle, location.origin))}</div>` : ''}
       <button class="btn primary" data-action="copy-invite">Copy invite link</button>
       <div class="note">Let them scan the QR with their camera — it opens flock and joins in one tap. Or copy the link and send it. It carries the secret, so treat it like a password.</div>
     </div>
@@ -678,7 +720,7 @@ function inviteSections(): string {
     <div class="section-title" style="margin-top:22px">Send to their key (remote)</div>
     <div class="card stack">
       ${hint('invite-remote', "In person? Show them the QR above. Far away? Ask them to open flock, tap 'Join remotely', and send you the key it shows.")}
-      <div class="field"><label for="invite-npub">Their invite key</label><input class="input" id="invite-npub" placeholder="npub1…" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      <div class="field"><label for="invite-npub">Their invite key</label><input class="input" id="invite-npub" placeholder="npub1…" value="${esc(pendingInviteNpub ?? '')}" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
       <button class="btn small primary" data-action="send-invite">Send encrypted invite</button>
       <div class="note">Encrypted just for them — safe to send through any chat. Ask them to tap “Join remotely” and send you the key it shows.</div>
     </div>`
@@ -699,7 +741,7 @@ function circleView(): string {
   const joinNotice = unseen.length
     ? `<div class="card new-member-notice" role="alert">
         <div><strong>〰️ ${unseen.length === 1 ? 'A new phone' : `${unseen.length} new phones`} joined ${esc(c.name)}</strong>
-        <div class="note">Anyone holding the invite code can join. Not expecting this? Remove them under You → Circle security — removal rotates the key, cutting them off.</div></div>
+        <div class="note">Anyone holding the invite code can join. Tap ✎ on their row to give them a name you'll recognise. Not expecting anyone? Remove them under You → Circle security — that locks them out.</div></div>
         <button class="btn small ghost" data-action="ack-new-members">Got it</button>
       </div>`
     : ''
@@ -804,6 +846,32 @@ function youView(): string {
       <div class="note">Small explanations appear around the app while you're learning. Turn them off once you're comfortable.</div>
       ${persisted.hints?.dismissed.length ? '<button class="btn small ghost" data-action="reset-hints">Bring all tips back</button>' : ''}
     </div>
+    <div class="section-title" style="margin-top:18px">Names &amp; photos</div>
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between">
+        <span>Show public profiles</span>
+        <button class="switch${persisted.showProfiles ? ' on' : ''}" data-action="toggle-profiles" role="switch" aria-checked="${!!persisted.showProfiles}"><span class="knob"></span></button>
+      </div>
+      <div class="note">Off by default. When on, flock fetches public names &amp; photos from public relays — which tells them who you're looking up. Your private nicknames always work and never leave this device.</div>
+    </div>
+    <div class="section-title" style="margin-top:18px">Backup</div>
+    <div class="card stack">
+      <div class="note">One encrypted code holds your key, circles, nicknames and private places. Restore it from the welcome screen on any device. The passphrase is the only way in — nobody can reset it.</div>
+      <div class="field"><label for="backup-pass">Passphrase</label><input class="input" id="backup-pass" type="password" autocomplete="new-password" placeholder="Pick a strong passphrase" /></div>
+      <div class="row" style="gap:10px">
+        <button class="btn small" data-action="backup-copy">Copy backup code</button>
+        <button class="btn small ghost" data-action="backup-download">Download file</button>
+      </div>
+    </div>
+    <button class="btn ghost" data-action="toggle-advanced" style="margin-top:18px" aria-expanded="${showAdvanced}">${showAdvanced ? 'Hide advanced settings' : 'Advanced settings…'}</button>
+    ${showAdvanced ? advancedSections(me, c) : ''}
+    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose</div>`
+}
+
+/** The sharp tools, folded away by default: servers, security, disband, reset.
+ *  A practised user opens this once; a new user never trips over it. */
+function advancedSections(me: store.Identity, c: store.Circle): string {
+  return `
     <div class="section-title" style="margin-top:18px">Delivery servers</div>
     <div class="card stack">
       ${hint('relays', "flock sends your encrypted alerts through these servers. More than one means an alert can't be lost if one is down.")}
@@ -824,14 +892,6 @@ function youView(): string {
            </div>`
         : `<div class="row">${avatarHtml(pk, false, true)}<span class="who" style="font-size:14px">${esc(nameFor(pk))}</span><button class="btn small ghost" style="margin-left:auto" data-action="ask-remove" data-pk="${pk}">Remove</button></div>`).join('') || '<div class="note">No other members yet.</div>'}
     </div>
-    <div class="section-title" style="margin-top:18px">Names &amp; photos</div>
-    <div class="card stack">
-      <div class="row" style="justify-content:space-between">
-        <span>Show public profiles</span>
-        <button class="switch${persisted.showProfiles ? ' on' : ''}" data-action="toggle-profiles" role="switch" aria-checked="${!!persisted.showProfiles}"><span class="knob"></span></button>
-      </div>
-      <div class="note">Off by default. When on, flock fetches public names &amp; photos from public relays — which tells them who you're looking up. Your private nicknames always work and never leave this device.</div>
-    </div>
     <div class="section-title" style="margin-top:18px">This circle</div>
     <div class="card stack">
       <div class="kv"><span class="k">Name</span><span>${esc(c.name)}</span></div>
@@ -847,15 +907,6 @@ function youView(): string {
            </div>`
         : '<button class="btn small ghost" style="color:var(--alert)" data-action="ask-disband">Disband for everyone…</button>'}
     </div>
-    <div class="section-title" style="margin-top:18px">Backup</div>
-    <div class="card stack">
-      <div class="note">One encrypted code holds your key, circles, nicknames and private places. Restore it from the welcome screen on any device. The passphrase is the only way in — nobody can reset it.</div>
-      <div class="field"><label for="backup-pass">Passphrase</label><input class="input" id="backup-pass" type="password" autocomplete="new-password" placeholder="Pick a strong passphrase" /></div>
-      <div class="row" style="gap:10px">
-        <button class="btn small" data-action="backup-copy">Copy backup code</button>
-        <button class="btn small ghost" data-action="backup-download">Download file</button>
-      </div>
-    </div>
     <div class="card stack" style="margin-top:14px">
       ${resetConfirm
         ? `<div class="note" style="color:var(--alert)">This wipes your key and every circle from this device. Without a backup (the card above) there is <strong>no way back</strong>.</div>
@@ -866,7 +917,7 @@ function youView(): string {
         : `<button class="btn small ghost" data-action="ask-reset">Sign out &amp; reset this device…</button>
            <div class="note">Wipes your key and every circle from this browser.</div>`}
     </div>
-    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose</div>`
+  `
 }
 
 function navView(): string {
@@ -1052,7 +1103,10 @@ function onboardingView(): string {
         <button class="btn primary" data-action="copy-npub">Copy my key</button>
         <button class="btn ghost" data-action="back">Cancel</button>
       </div>
-      <div class="note" style="margin-top:12px">⟳ Waiting for a secure invite…</div>`
+      <div class="note" style="margin-top:12px">⟳ Waiting for a secure invite…</div>
+      ${awaitSince && Date.now() - awaitSince > AWAIT_GUIDE_MS
+        ? '<div class="note" style="margin-top:8px">Still waiting — check the inviter has your key and has tapped “Send encrypted invite”. It can take a minute on a slow connection. Or cancel and ask them for an invite code instead.</div>'
+        : ''}`
   } else if (adding) {
     inner = `
       <h1>Add a circle</h1>
@@ -1089,7 +1143,9 @@ function wireOnboard(): void {
     if (qrEl && persisted.identity) {
       try {
         const qr = qrcode(0, 'M')
-        qr.addData(fullNpub(persisted.identity.pk))
+        // A link, never bare text (same lesson as the join QR): the inviter's camera
+        // opens flock with this key already filled into the send-invite form.
+        qr.addData(`${location.origin}/#invite=${fullNpub(persisted.identity.pk)}`)
         qr.make()
         qrEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true })
       } catch { qrEl.remove() }
@@ -1540,6 +1596,7 @@ async function sendInvite(): Promise<void> {
     const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
     await svc.publishSigned(persisted.relayUrls, wrap as never)
     ensureMember(c, pk, true) // I sent this invite — their arrival is not news to me
+    pendingInviteNpub = null
     toast('Secure invite sent')
     render()
   } catch { toast('Could not send invite') }
@@ -2138,6 +2195,7 @@ function handleAction(action: string, node: HTMLElement): void {
     }
     case 'pickup': void emit('pickup'); break
     case 'sos-retry': void emit('help'); break
+    case 'geo-retry': geoIssue = null; sharing = false; startSharing(); break
     case 'im-safe': { const covert = wasCovertHold('im-safe'); void standDown(covert); break }
     case 'see-alert': goToAlert(); break
     case 'pickup-show': pickupPanel = 'show'; showDuressWord = false; pickupOutcome = null; render(); break
@@ -2159,6 +2217,7 @@ function handleAction(action: string, node: HTMLElement): void {
       persisted.hints = { ...h, on: !h.on }
       store.save(persisted); render(); break
     }
+    case 'toggle-advanced': showAdvanced = !showAdvanced; render(); break
     case 'reset-hints':
       persisted.hints = { on: true, dismissed: [] }
       store.save(persisted); toast('Tips are back on'); render(); break
@@ -2288,8 +2347,11 @@ function doJoinRemote(): void {
   persisted.identity ??= store.createIdentity()
   store.save(persisted)
   awaitingInvite = true
+  awaitSince = Date.now()
   onboardStep = 'await'
   render()
+  // Re-render once the "still waiting" guidance becomes due — no dead-end spinner.
+  window.setTimeout(() => { if (onboardStep === 'await') render() }, AWAIT_GUIDE_MS + 500)
 }
 
 function doJoin(): void {
@@ -2360,7 +2422,22 @@ function syncWatch(): void {
     stopWatch?.()
     watchHighAccuracy = hi
     resetSampleCadence()
-    const onErr = (msg: string): void => { toast(msg); sharing = false; syncWatch(); render() }
+    const onErr = (msg: string, kind: svc.GeoErrorKind): void => {
+      if (kind === 'denied') {
+        // The one failure the user must fix by hand: keep the toggle honest
+        // (sharing reverts) and explain HOW on a persistent card, not a toast.
+        geoIssue = 'denied'
+        sharing = false
+        syncWatch()
+      } else if (kind === 'unsupported') {
+        toast(msg)
+        sharing = false
+        syncWatch()
+      } else {
+        geoIssue = 'nofix' // transient — the watch keeps trying; clears on the next fix
+      }
+      render()
+    }
     stopWatch = hi
       ? svc.watchLocation(onFix, onErr, { highAccuracy: true })
       : svc.pollLocation(onFix, onErr, { highAccuracy: false, nextDelayMs: sampleDelayMs })
@@ -2380,12 +2457,14 @@ function startSharing(): void {
 function stopSharing(): void {
   sharing = false
   breachActive = false
+  geoIssue = null
   syncWatch()
   render()
 }
 
 function onFix(f: svc.Fix): void {
   fix = f
+  geoIssue = null // any successful fix clears the location-trouble card
   if (isDark()) { refresh(); return } // on a break — emit nothing at all
   broadcastRzvStatus()
   if (sharing) void autoEmit()
@@ -2637,7 +2716,10 @@ function copyInvite(): void {
   const c = activeCircle()
   if (!c) return
   const link = store.inviteLink(c, location.origin)
-  navigator.clipboard?.writeText(link).then(() => toast('Invite link copied'), () => toast('Copy failed — select it manually'))
+  navigator.clipboard?.writeText(link).then(
+    () => toast('Invite link copied — send it only through a chat you trust'),
+    () => { showInviteLinkText = true; render(); toast("Couldn't copy — here's the link to select") },
+  )
 }
 
 function copyNpub(): void {

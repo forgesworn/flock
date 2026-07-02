@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz, sendSOS, myPubkey, settle, gotoTab, memberPill } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz, sendSOS, myPubkey, settle, gotoTab, openAdvanced, memberPill } from './fixtures'
 
 test.describe('remove member — cut someone off (3 people)', () => {
   // Removing a member = rotate the key and send the new seed to everyone EXCEPT
@@ -22,7 +22,7 @@ test.describe('remove member — cut someone off (3 people)', () => {
     await expect(C.locator('.buzz-banner')).toBeVisible()
 
     // A sees both others (this also covers the concurrent-roster-update path).
-    await gotoTab(A, 'you')
+    await openAdvanced(A)
     await expect(A.locator('[data-action="ask-remove"]')).toHaveCount(2)
 
     // A removes C — the new key is gift-wrapped to B only; C is stranded.

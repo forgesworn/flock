@@ -179,9 +179,15 @@ export async function takeBreak(page: Page, why?: string): Promise<void> {
   await page.click('[data-action="do-dark"]')
 }
 
-/** Disband the active circle for everyone (from the You tab, two-step confirm). */
-export async function disbandCircle(page: Page): Promise<void> {
+/** Expand the You tab's Advanced fold (servers, security, disband, reset). */
+export async function openAdvanced(page: Page): Promise<void> {
   await gotoTab(page, 'you')
+  if (!(await page.locator('#relay').isVisible())) await page.click('[data-action="toggle-advanced"]')
+}
+
+/** Disband the active circle for everyone (You tab → Advanced, two-step confirm). */
+export async function disbandCircle(page: Page): Promise<void> {
+  await openAdvanced(page)
   await page.click('[data-action="ask-disband"]')
   await page.click('[data-action="disband"]')
 }
@@ -237,9 +243,9 @@ export async function armCheckin(page: Page, intervalSeconds = 900): Promise<voi
   await page.click(`[data-action="arm"][data-interval="${intervalSeconds}"]`)
 }
 
-/** Rotate the circle key (reseed) from the You tab. */
+/** Rotate the circle key (reseed) from the You tab's Advanced fold. */
 export async function reseed(page: Page): Promise<void> {
-  await gotoTab(page, 'you')
+  await openAdvanced(page)
   await page.click('[data-action="reseed"]')
 }
 

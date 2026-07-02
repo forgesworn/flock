@@ -120,6 +120,15 @@ const toFix = (pos: GeolocationPosition): Fix => ({
   at: Math.floor(pos.timestamp / 1000),
 })
 
+/** Why a location request failed — drives actionable guidance, not a raw toast.
+ *  'denied' is the one that needs the user's hands (a settings change); the
+ *  others are transient and the watch keeps trying. */
+export type GeoErrorKind = 'denied' | 'unavailable' | 'timeout' | 'unsupported'
+
+function geoErrorKind(err: GeolocationPositionError): GeoErrorKind {
+  return err.code === 1 ? 'denied' : err.code === 2 ? 'unavailable' : 'timeout'
+}
+
 /**
  * Watch foreground location. Returns a stop fn.
  *
@@ -131,17 +140,17 @@ const toFix = (pos: GeolocationPosition): Fix => ({
  */
 export function watchLocation(
   onFix: (f: Fix) => void,
-  onError: (message: string) => void,
+  onError: (message: string, kind: GeoErrorKind) => void,
   opts: { highAccuracy?: boolean } = {},
 ): () => void {
   if (!('geolocation' in navigator)) {
-    onError('Location is not available on this device.')
+    onError('Location is not available on this device.', 'unsupported')
     return () => { /* noop */ }
   }
   const highAccuracy = opts.highAccuracy ?? true
   const id = navigator.geolocation.watchPosition(
     (pos) => onFix(toFix(pos)),
-    (err) => onError(err.message || 'Could not get your location.'),
+    (err) => onError(err.message || 'Could not get your location.', geoErrorKind(err)),
     // A low-power watch may also lean on slightly staler cached fixes.
     { enableHighAccuracy: highAccuracy, maximumAge: highAccuracy ? 5000 : 15_000, timeout: 20_000 },
   )
@@ -157,11 +166,11 @@ export function watchLocation(
  */
 export function pollLocation(
   onFix: (f: Fix) => void,
-  onError: (message: string) => void,
+  onError: (message: string, kind: GeoErrorKind) => void,
   opts: { highAccuracy?: boolean; nextDelayMs: (f: Fix) => number },
 ): () => void {
   if (!('geolocation' in navigator)) {
-    onError('Location is not available on this device.')
+    onError('Location is not available on this device.', 'unsupported')
     return () => { /* noop */ }
   }
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -170,7 +179,7 @@ export function pollLocation(
   function tick(): void {
     navigator.geolocation.getCurrentPosition(
       (pos) => { if (stopped) return; const f = toFix(pos); onFix(f); schedule(opts.nextDelayMs(f)) },
-      (err) => { if (stopped) return; onError(err.message || 'Could not get your location.') },
+      (err) => { if (stopped) return; onError(err.message || 'Could not get your location.', geoErrorKind(err)) },
       { enableHighAccuracy: opts.highAccuracy ?? false, maximumAge: 10_000, timeout: 20_000 },
     )
   }

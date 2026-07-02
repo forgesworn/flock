@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz, gotoTab } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz, gotoTab, openAdvanced } from './fixtures'
 
 test.describe('backup & restore — survive losing the device', () => {
   // The worst user story the audit found: reset (or lose) your phone and every
@@ -22,7 +22,8 @@ test.describe('backup & restore — survive losing the device', () => {
     // code that was on the clipboard earlier.
     expect(blob, 'clipboard should hold the backup token').toMatch(/^eyJtIjoiZmxvY2stYmFja3Vw/)
 
-    // A wipes the device (two-step confirm) — back to the welcome screen.
+    // A wipes the device (two-step confirm, in Advanced) — back to the welcome screen.
+    await openAdvanced(A)
     await A.click('[data-action="ask-reset"]')
     await A.click('[data-action="reset-device"]')
     await expect(A.getByRole('button', { name: 'Create a circle' })).toBeVisible()

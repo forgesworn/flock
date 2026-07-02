@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendSOS, gotoTab, memberPill } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendSOS, gotoTab, openAdvanced, memberPill } from './fixtures'
 
 test.describe('truthful SOS states (audit Slice 11)', () => {
   // The orb must never claim "Help sent" when nothing went out. Break every relay,
@@ -6,7 +6,7 @@ test.describe('truthful SOS states (audit Slice 11)', () => {
   test("a failed SOS shows 'Help didn't send', persistently", async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths', mode: 'family' })
-    await gotoTab(A, 'you')
+    await openAdvanced(A)
     await A.fill('#relay', 'wss://127.0.0.1:9')
     await A.click('[data-action="save-relay"]')
     // Let the (failing) resubscription settle: a re-render mid-hold replaces the
