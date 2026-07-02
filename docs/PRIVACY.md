@@ -100,6 +100,34 @@ benefit: CF's Browser-Cache-TTL no longer overrides the origin's `no-cache` on
 Signals (SOS, beacons, check-ins…) are unaffected: they travel gift-wrapped over the
 relay hop, not through the host.
 
+## The device in a coercer's hand — the decoy view
+
+The relay threat model assumes the phone is yours. The coercion threat model does
+not: "unlock it and show me" makes flock itself the evidence — circles, members,
+safe places, alert history. The answer is the **decoy view** (Phase J; design in
+`docs/plans/2026-07-02-decoy-view.md`):
+
+- **Hide** (a covert 1.2 s hold on the wordmark, or the You-tab card): the entire
+  persisted state is sealed under a phrase-derived key — PBKDF2-SHA256 600k into
+  the same AES-256-GCM envelope the backup uses, with **no magic bytes** — and the
+  app reboots as a genuinely fresh install. Not a fake screen: a real, working app
+  with no identity, no subscriptions (arriving signals render nothing), fully
+  usable by the coercer.
+- **Come back**: the ordinary "Restore from backup" screen — anything as the code,
+  the unlock phrase as the passphrase. Wrong attempts produce the *genuine*
+  fresh-install errors at the *genuine* cost (a dummy KDF fills the timing when
+  nothing is hidden), so probing cannot distinguish a decoy from a first run.
+- **Decoy over wipe**, deliberately: a destructive wipe under a legal hold risks
+  obstruction liability; a sealed blob destroys nothing and stays recoverable by
+  its owner.
+
+**Honest limits.** This defends the *application layer* — an unlocked phone in a
+coercer's hand. A forensic image of the browser profile still finds an opaque blob
+(and the saved offline map area, which is not moved); an examiner can demand the
+phrase. Key-at-rest hardening is keystore-kit's job (Phase E). Hiding never emits
+anything — under real duress, the silent long-press on "Stop sharing" alarms the
+circle first, then hide.
+
 ## Captured requirements
 
 ### Private "no-report" zones (redaction zones)

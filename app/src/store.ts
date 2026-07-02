@@ -82,6 +82,11 @@ export interface Persisted {
   circleRootHex?: string
   /** Helper hints: a master switch + per-hint dismissals. Absent = all on. */
   hints?: Hints
+  /** "Hide flock" (decoy view) — present = armed. The phrase-derived sealing
+   *  key + its salt, computed once at enable time so the hide itself is
+   *  instant. Lives inside the very blob it seals, so unhiding restores the
+   *  protection still armed. See docs/plans/2026-07-02-decoy-view.md. */
+  decoy?: { salt: string; key: string }
 }
 
 /** Helper-hint state: small "what & why" explanations shown while learning the
@@ -177,12 +182,25 @@ export function load(): Persisted {
   return fresh
 }
 
+/** Once hiding starts, nothing may write the real state back — a queued signal
+ *  handler saving between the wipe and the reload would resurrect what the
+ *  decoy exists to hide. One-way; the reload clears it. */
+let saveLocked = false
+export function lockSaves(): void { saveLocked = true }
+
 export function save(state: Persisted): void {
+  if (saveLocked) return
   localStorage.setItem(KEY, JSON.stringify(state))
 }
 
 export function reset(): void {
   localStorage.removeItem(KEY)
+}
+
+/** Replace the persisted blob verbatim — the unhide path, restoring exactly
+ *  the JSON that was sealed (AES-GCM already authenticated it). */
+export function restoreRaw(json: string): void {
+  localStorage.setItem(KEY, json)
 }
 
 export function createIdentity(): Identity {

@@ -91,7 +91,7 @@ encryption stay at the edge.
 | `disband` | Circle dissolution signal | ✅ tested |
 | `offgrid` | Deliberate "going dark" — pre-announced; never suppresses help/pickup | ✅ tested |
 | `spokenverify` | Face-to-face pick-up verification words + silent duress word | ✅ tested |
-| `app/` (PWA) | Foreground UI — onboarding, status orb, SOS/pick-me-up, circle invites + presence; real Nostr publish/subscribe + geolocation | ✅ MVP |
+| `app/` (PWA) | Foreground UI — onboarding, status orb, SOS/pick-me-up, circle invites + presence; real Nostr publish/subscribe + geolocation; decoy view under compelled unlock | ✅ MVP |
 | `native/` (Capacitor) | Background geofencing + UnifiedPush — config + bridge scaffolded, reuses the same policy/transport | 🧱 scaffold |
 
 **Library:** `npm run build` · `npm test` · `npm run typecheck` · `npm run lint`

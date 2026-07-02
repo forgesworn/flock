@@ -289,6 +289,21 @@ Grounded in the feasibility research (`docs/research/2026-06-30-feasibility-rese
    ~two weeks of stored ciphertext. Consequence: relay replay only covers the
    window, so long-lived synced state (the fence set, §3.2) MUST be republished
    by its author when a new member appears.
+7. **Compelled unlock: the decoy view.** If a coercer compels a device unlock,
+   the app itself is evidence (circles, fences, alert history). *Implemented:*
+   an armed device can be **hidden** — the entire persisted state is sealed
+   under a phrase-derived key (PBKDF2-SHA256 → AES-256-GCM, the backup
+   machinery, deliberately with no magic bytes) and the app reboots as a
+   genuinely fresh install: a real, working app with no identity and no
+   subscriptions, so signals arriving while hidden render nothing. The exit is
+   the existing restore screen (anything as the code, the phrase as the
+   passphrase); every failure produces the genuine fresh-install error with
+   **constant work** (a dummy KDF when nothing is hidden), so neither behaviour
+   nor timing distinguishes a decoy from a first run. **Decoy over wipe**,
+   deliberately: a destructive wipe under a legal hold risks obstruction
+   liability; a sealed blob destroys nothing. Nothing touches the wire. Limits
+   are stated honestly (PRIVACY.md): a forensic image still finds an opaque
+   blob — key-at-rest hardening is keystore-kit's job.
 
 ## 7. Open items
 

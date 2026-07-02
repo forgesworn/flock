@@ -25,6 +25,7 @@ import { bboxContains, type BBox } from './area'
 import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
 import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
+import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
 import {
   decideEmission,
   classifyContainment,
@@ -978,6 +979,21 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
            </div>`
         : '<button class="btn small ghost" style="color:var(--alert)" data-action="ask-disband">Disband for everyone…</button>'}
     </div>
+    <div class="section-title" style="margin-top:18px">If you're forced to unlock</div>
+    <div class="card stack">
+      ${persisted.decoy
+        ? `<div class="note">✓ Hiding is on. Hold the <strong>flock</strong> name at the top of any screen for a second — everything disappears and the app looks brand new.</div>
+           <div class="note">To come back: <strong>Restore from backup</strong> on the welcome screen → type anything as the code, your unlock phrase as the passphrase. Under real duress, hold “Stop sharing” first — that quietly alerts your circle — then hide.</div>
+           <div class="row" style="gap:10px">
+             <button class="btn small" data-action="decoy-hide">Hide flock now</button>
+             <button class="btn small ghost" data-action="decoy-off">Turn off</button>
+           </div>`
+        : `${hint('decoy', 'If someone makes you open flock, hiding makes it look brand new — circles, places and alerts all out of sight until you bring them back with your phrase.')}
+           <div class="field"><label for="decoy-pass">Unlock phrase</label><input class="input" id="decoy-pass" type="password" autocomplete="new-password" placeholder="Pick a phrase only you know" /></div>
+           <div class="field"><label for="decoy-pass2">Same phrase again</label><input class="input" id="decoy-pass2" type="password" autocomplete="new-password" /></div>
+           <button class="btn small" data-action="decoy-enable">Turn on hiding</button>
+           <div class="note">If you forget the phrase while hidden, only a backup (the card above) can bring things back — make one first.</div>`}
+    </div>
     <div class="card stack" style="margin-top:14px">
       ${resetConfirm
         ? `<div class="note" style="color:var(--alert)">This wipes your key and every circle from this device. Without a backup (the card above) there is <strong>no way back</strong>.</div>
@@ -1283,6 +1299,8 @@ function wireApp(): void {
     }
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   })
+  const brand = root.querySelector<HTMLElement>('.topbar .brand')
+  if (brand) wireHideHold(brand)
   if (tab === 'map') void initMap()
 }
 
@@ -2436,6 +2454,9 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'reset-device': resetDevice(); break
     case 'backup-copy': void doBackup('copy'); break
     case 'backup-download': void doBackup('download'); break
+    case 'decoy-enable': void enableDecoy(); break
+    case 'decoy-hide': void hideNow(); break
+    case 'decoy-off': delete persisted.decoy; store.save(persisted); toast('Hiding is off'); render(); break
     case 'add-zone': addMode = true; addZoneKind = (node.dataset.kind as 'safe' | 'noreport') ?? 'safe'; newZonePolicy = 'withhold'; renderMapPanel(); updatePreview(); break
     case 'zone-kind': addZoneKind = node.dataset.kind as 'safe' | 'noreport'; renderMapPanel(); updatePreview(); break
     case 'zone-policy': newZonePolicy = node.dataset.policy as 'withhold' | 'coarse'; renderMapPanel(); updatePreview(); break
@@ -3075,8 +3096,76 @@ async function doRestore(): Promise<void> {
     store.save(persisted)
     location.reload() // boot from the restored state — subs, monitor and map come up as normal
   } catch (err) {
+    // A hidden state exits HERE — the phrase alone unlocks it (reloads on
+    // success). Constant work either way: a fresh install and a decoy must
+    // fail identically, in behaviour and in timing (see decoy.ts).
+    if (await tryUnhide(pass)) return
     toast(err instanceof Error ? err.message : 'Restore failed')
   }
+}
+
+// ── The decoy view — "hide flock" (docs/plans/2026-07-02-decoy-view.md) ─────
+/** The sealed real state while hidden. Deliberately unremarkable name; the
+ *  blob inside carries no magic string either. */
+const DECOY_CACHE_KEY = 'flock:cache'
+
+/** Arm hiding: derive the sealing key from the phrase once, up front — the
+ *  moment a coercer approaches is not the moment to spend a second on a KDF. */
+async function enableDecoy(): Promise<void> {
+  const p1 = (document.getElementById('decoy-pass') as HTMLInputElement | null)?.value ?? ''
+  const p2 = (document.getElementById('decoy-pass2') as HTMLInputElement | null)?.value ?? ''
+  if (p1.length < MIN_BACKUP_PASS) { toast(`Pick a phrase of at least ${MIN_BACKUP_PASS} characters`); return }
+  if (p1 !== p2) { toast("Those phrases don't match"); return }
+  const salt = newSalt()
+  persisted.decoy = { salt, key: await deriveDecoyKey(p1, salt) }
+  store.save(persisted)
+  toast('Hiding is on')
+  render()
+}
+
+/** Seal everything and reboot as a fresh install. Saves are locked before the
+ *  wipe so a queued signal handler can't write the real state back in the gap
+ *  before the reload lands. Never overwrites an existing sealed state. */
+async function hideNow(): Promise<void> {
+  const cfg = persisted.decoy
+  if (!cfg) return
+  if (localStorage.getItem(DECOY_CACHE_KEY)) { toast("Couldn't hide — free up some storage and try again"); return }
+  const sealed = await sealState(JSON.stringify(persisted), cfg.salt, cfg.key)
+  store.lockSaves()
+  localStorage.setItem(DECOY_CACHE_KEY, sealed)
+  store.reset()
+  location.reload()
+}
+
+/** Attempt the phrase against the sealed state; reloads into the real app on
+ *  success. When nothing is hidden, burns the identical KDF cost and fails —
+ *  so probing the restore screen can't tell a decoy from a fresh install. */
+async function tryUnhide(pass: string): Promise<boolean> {
+  const blob = localStorage.getItem(DECOY_CACHE_KEY)
+  if (!blob) { await dummyWork(pass); return false }
+  try {
+    const json = await openState(blob, pass)
+    store.restoreRaw(json)
+    localStorage.removeItem(DECOY_CACHE_KEY)
+    location.reload()
+    return true
+  } catch { return false }
+}
+
+/** The covert hide gesture — hold the topbar wordmark. Fires mid-hold at the
+ *  covert threshold (like the duress-word reveal); no visible affordance. */
+function wireHideHold(node: HTMLElement): void {
+  let timer = 0
+  const begin = (e: Event): void => {
+    if (!persisted.decoy) return
+    e.preventDefault()
+    timer = window.setTimeout(() => { void hideNow() }, COVERT_HOLD_MS)
+  }
+  const cancel = (): void => { if (timer) { clearTimeout(timer); timer = 0 } }
+  node.addEventListener('pointerdown', begin)
+  node.addEventListener('pointerup', cancel)
+  node.addEventListener('pointerleave', cancel)
+  node.addEventListener('pointercancel', cancel)
 }
 
 /** Full reset: sign out, wipe local state and every circle on this device. */

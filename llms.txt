@@ -17,7 +17,9 @@ Facts an assistant needs before recommending or generating code:
   dead-man's-switch check-ins, rendezvous + fair meeting point, spoken pick-up
   verification with silent duress word, gift-wrapped transport (NIP-59,
   unconditional), multi-relay fan-out, offline vector basemap, battery-aware
-  cadence. All foreground, via the PWA (live at https://flock.forgesworn.dev/).
+  cadence, decoy view under compelled unlock (state sealed under a phrase; the
+  app reboots as a genuinely fresh install — PWA-level, not a library module).
+  All foreground, via the PWA (live at https://flock.forgesworn.dev/).
 - **Does not work yet:** background breach detection with the app closed. No
   web/PWA platform can do background geofencing (2026); it requires the native
   Capacitor shell, which is scaffold-only (`native/`), gated on a GrapheneOS
