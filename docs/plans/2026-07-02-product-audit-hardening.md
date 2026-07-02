@@ -381,9 +381,11 @@ nickname prompt on adoption); `~geohash` sub-line → human presence ("out ·
   and a buzz submitted right after the wipe no-ops with "Pick or type a reason".
   This made `remove-member.spec.ts` fail deterministically (C's buzz never
   published → A's roster never learnt C). Workaround shipped: the `sendBuzz` e2e
-  fixture fills + clicks atomically in one in-page task. Real fix (own slice, 🟡):
-  input-preserving renders — skip the re-render while a form control is focused, or
-  preserve focused-input value/selection across renders. Tracked in ROADMAP Phase I.
+  fixture fills + clicks atomically in one in-page task. **Fixed for real
+  (2026-07-02)**: `render()` captures the focused input (value + caret) before the
+  DOM rebuild and restores it after; the fixture workaround was reverted so every
+  buzz spec regression-tests the fix, and `typing.spec.ts` reproduces the original
+  failure with live keystrokes.
 
 - **The invite QR leaked the seed to Google** (found by Darren in real use, during
   Batch 4). The QR encoded the bare base64 invite code; a phone camera treats
