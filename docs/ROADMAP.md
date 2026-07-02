@@ -396,9 +396,18 @@ modes**. Plan with designs, decisions, and per-slice tests:
   (existing identity/circles win, missing ones are added). E2e: back up → wipe →
   wrong passphrase rejected → restore → **B's next buzz decrypts on the restored
   device** over the live relay. Superseded by shamir-words/stash when Phase E lands.
-- [ ] **Slice 5 — duress cover for stop-sharing / disarm / off-grid** 🟠 — FLOCK.md
-  §6.1's coerced-stop silent alarm is unimplemented at the three real coercion points;
-  silent long-press variants riding the existing duress-key + tell-safe machinery.
+- [x] **Slice 5 — duress cover for stop-sharing / disarm / off-grid** 🟠 — FLOCK.md
+  §6.1's coerced-stop silent alarm was unimplemented at the three real coercion points.
+  Now a **silent long-press (1.2 s)** on Stop sharing / check-in Turn off / Go dark
+  performs the identical visible action **and** raises the circle `help` alarm via the
+  existing duress path (`raiseDuressAlarm` — fresh fix, no-report cap respected, silent
+  on failure). Tell-safe: hold-tracking is keyed by action (survives a mid-hold
+  re-render), a 10 s ceiling stops a stale pointerdown misreading keyboard activation
+  as covert, and a `covertHelpUntil` window drops the raiser's own relay echo so
+  nothing on the coerced screen changes — an overt SOS keeps its own-screen behaviour.
+  On the wire the extra wrap is indistinguishable from any signal. FLOCK.md §6.1 marked
+  implemented. E2e: normal tap-stop reaches nobody; long-press stop alarms B while A's
+  screen stays clean. *(Deliberately NOT on SOS — that's an overt action by design.)*
 - [ ] **Slice 6 — uniform NIP-40 expiry on every gift wrap** 🟠 — wraps are retained by
   relays forever; a future root compromise decrypts a family's whole history. One
   uniform window (16 d, derived from the backdated `created_at` so no new metadata).

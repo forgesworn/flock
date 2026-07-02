@@ -211,7 +211,12 @@ Grounded in the feasibility research (`docs/research/2026-06-30-feasibility-rese
 1. **Withholding must not be a detectable "tell".** (Levy & Schneier, 2020.) The
    withheld-by-default state MUST be observationally identical to active sharing
    from any observer's view. A coerced "stop sharing" SHOULD emit a silent alarm,
-   never a visible status change.
+   never a visible status change. *Implemented:* a silent long-press on **stop
+   sharing**, **check-in disarm**, or **off-grid** performs the identical visible
+   action and additionally raises the circle `help` alarm via the duress-key
+   path; the raising device suppresses its own relay echo, so nothing on the
+   coerced screen ever changes — only other members light up. On the wire the
+   extra wrap is indistinguishable from any other signal (`kind:1059`).
 2. **Duress must be indistinguishable and generative.** (Clark & Hengartner,
    2008.) A `help` trigger MUST look identical to normal use; the duress
    vocabulary MUST be generative, not a small fixed set (reuse canary-kit duress

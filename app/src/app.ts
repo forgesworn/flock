@@ -151,6 +151,7 @@ let ttlMode: 'ongoing' | 'today' | 'custom' = 'ongoing' // chosen lifetime for a
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
 let resetConfirm = false // inline confirm for the destructive "sign out & reset this device"
 let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
+let covertHelpUntil = 0 // window in which my own covert help echo must NOT surface here
 let goingDark = false // off-grid duration picker is open
 let darkDurSec = 3600 // chosen break length (sec); -1 = custom (read from input)
 let addZoneKind: 'safe' | 'noreport' = 'safe' // which kind of zone the map editor is adding
@@ -1044,6 +1045,11 @@ function wireApp(): void {
     const action = node.getAttribute('data-action') as string
     if (action === 'sos-hold') { wireSos(node as HTMLElement); return }
     if (action === 'spoken-reveal') { wireDuressReveal(node as HTMLElement); return }
+    // Coercion points: a silent long-press on these performs the identical visible
+    // action AND raises a covert help alarm (see wasCovertHold / FLOCK.md §6.1).
+    if (action === 'toggle-share' || action === 'disarm-checkin' || action === 'do-dark') {
+      node.addEventListener('pointerdown', () => beginHold(action))
+    }
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   })
   if (tab === 'map') void initMap()
@@ -2012,7 +2018,12 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'add-circle': adding = true; onboardStep = 'intro'; render(); break
     case 'go-invite': tab = 'circle'; render(); break
     case 'mode': setMode(node.dataset.mode as Mode); break
-    case 'toggle-share': sharing ? stopSharing() : startSharing(); break
+    case 'toggle-share': {
+      const covert = sharing && wasCovertHold('toggle-share') // only stopping can be coerced
+      sharing ? stopSharing() : startSharing()
+      if (covert) void raiseCovertSelfAlarm()
+      break
+    }
     case 'pickup': void emit('pickup'); break
     case 'pickup-show': pickupPanel = 'show'; showDuressWord = false; pickupOutcome = null; render(); break
     case 'pickup-check': pickupPanel = 'check'; pickupOutcome = null; render(); break
@@ -2052,7 +2063,12 @@ function handleAction(action: string, node: HTMLElement): void {
       if (cust) (cust as HTMLElement).hidden = darkDurSec !== -1
       break
     }
-    case 'do-dark': goDark(); break
+    case 'do-dark': {
+      const covert = wasCovertHold('do-dark')
+      goDark()
+      if (covert) void raiseCovertSelfAlarm()
+      break
+    }
     case 'come-back': comeBack(); break
     case 'edit-petname': editingPetname = node.dataset.pk ?? null; render(); break
     case 'save-petname': savePetname(node.dataset.pk as string); break
@@ -2061,7 +2077,12 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'arm-menu': armingCheckin = true; render(); break
     case 'cancel-arm': armingCheckin = false; render(); break
     case 'arm': armCheckin(Number(node.dataset.interval)); break
-    case 'disarm-checkin': disarmCheckin(); break
+    case 'disarm-checkin': {
+      const covert = wasCovertHold('disarm-checkin')
+      disarmCheckin()
+      if (covert) void raiseCovertSelfAlarm()
+      break
+    }
     case 'save-relay': saveRelay(); break
     case 'leave': leave(); break
     case 'ask-disband': disbandConfirm = true; render(); break
@@ -2373,6 +2394,37 @@ async function runSpokenCheck(): Promise<void> {
   if (res.status === 'duress' && res.duressMembers.length) await raiseDuressAlarm(res.duressMembers)
 }
 
+// ── Covert duress on coercion-point actions (FLOCK.md §6.1) ──────────────────
+// "Stop sharing", "turn off the check-in" and "take a break" are the three actions
+// a coercer plausibly forces. A silent long-press performs the IDENTICAL visible
+// action — nothing on this screen differs from a normal tap — and additionally
+// raises the circle help alarm about ME, which only the OTHER members ever see.
+const COVERT_HOLD_MS = 1200
+
+// Keyed by action name, not node — a background re-render mid-hold swaps the
+// button element, and the covert intent must survive it.
+const covertHold: Record<string, number> = {}
+function beginHold(action: string): void { covertHold[action] = Date.now() }
+
+/** True when the click that just fired came from a deliberate long hold. The
+ *  10 s ceiling discards stale pointerdowns (e.g. a drag-away that never
+ *  clicked), so a later keyboard activation can't misread as covert. */
+function wasCovertHold(action: string): boolean {
+  const t = covertHold[action]
+  delete covertHold[action]
+  return !!t && Date.now() - t >= COVERT_HOLD_MS && Date.now() - t < 10_000
+}
+
+/** Coerced stop/disarm/off-grid: the visible action has already happened,
+ *  identically to a normal tap. Raise the silent circle alarm about ME —
+ *  `covertHelpUntil` keeps my own relay echo from ever surfacing here. */
+async function raiseCovertSelfAlarm(): Promise<void> {
+  const id = persisted.identity
+  if (!id) return
+  covertHelpUntil = nowSec() + 120
+  await raiseDuressAlarm([id.pk])
+}
+
 // Silently raise the circle's help alarm for a coerced collector spotted during a
 // pick-up check. No toast, no local alert state — a coercer may be watching THIS
 // phone; only the other members' devices light up (see the onIncoming help guard).
@@ -2623,6 +2675,11 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       // detected it — it must NEVER surface on THIS screen; a coercer may be watching.
       // Other members surface and act on it as usual.
       if (me && who !== e.pubkey && (who === me.pk || e.pubkey === me.pk)) return
+      // A covert SELF-alarm (coerced stop / disarm / off-grid) names its own sender.
+      // Its echo must never surface on the device that raised it — a coercer may be
+      // holding it. Every other device alerts as usual. An overt SOS (no covert
+      // window) keeps showing on its own sender's screen, as it always did.
+      if (me && who === me.pk && e.pubkey === me.pk && nowSec() < covertHelpUntil) return
       st.alerts.set(who, e.created_at)
       if (!me || e.pubkey !== me.pk) { alertActive = true; toast(`🚨 Help raised in ${c.name}`) }
       if (a.geohash) saveBeacon(c.id, { member: who, geohash: a.geohash, precision: a.precision, timestamp: a.timestamp || e.created_at })
