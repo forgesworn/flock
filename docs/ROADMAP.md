@@ -293,7 +293,10 @@ Two halves that compose into one feature:
   - ✅ **Licence** — resolved to **MIT** (matches `package.json` and the whole ForgeSworn toolkit): added a `LICENSE` file (`Copyright (c) 2026 TheCryptoDonkey`) and linked it from the README, replacing the old "TBD".
   - **Key-at-rest** — localStorage isn't secure key storage (the in-app "preview"
     caveat is shown); harden via **keystore-kit** (Phase E) or lean on Sign-in-with-Signet.
-- [ ] **anvil** — release CI (like canary-kit).
+- [~] **Release CI** — GitHub Actions gates live (`.github/workflows/ci.yml`: lint/
+  typecheck/build/unit + the full two-person e2e suite, SHA-pinned actions, report
+  artefact on failure). anvil publishing deliberately omitted while the library is
+  private/unpublished.
 
 ## Phase H — Minimal footprint (battery, bandwidth, metadata)
 
