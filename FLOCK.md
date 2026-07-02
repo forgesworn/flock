@@ -99,6 +99,7 @@ not stored by relays. Core types (`t` → payload / key / trigger):
 | `breach` | `BeaconPayload` | beacon key | left every geofence |
 | `pickup` | `BeaconPayload` | beacon key | "pick me up" pressed |
 | `help`  | `DuressAlert`  | duress key | SOS / duress |
+| `allclear` | `AllClear {member, timestamp, coerced?}` | group envelope key | "I'm safe now" — stands down the member's `help` alert. A **coerced** all-clear (flag inside the encryption, long-press to send) is IGNORED by receivers: the sender's screen shows a normal stand-down while the circle stays alarmed (§6.1) |
 | `checkin` | `CheckIn {member, timestamp, intervalSeconds}` | group envelope key (`deriveGroupKey`) | dead-man's-switch heartbeat |
 | `fences` | `FenceSet {fences, updatedAt, by}` | group envelope key | someone edits the circle's safe places (full-set, latest-wins — §3.2) |
 | `rzv` | `Rendezvous {id, place, deadline, mode, setBy, createdAt}` | group envelope key | someone sets "be at a place by a time" |
@@ -217,6 +218,11 @@ Grounded in the feasibility research (`docs/research/2026-06-30-feasibility-rese
    path; the raising device suppresses its own relay echo, so nothing on the
    coerced screen ever changes — only other members light up. On the wire the
    extra wrap is indistinguishable from any other signal (`kind:1059`).
+   The same treatment covers standing DOWN an alert: "tell them you're fine"
+   is exactly what a coercer demands, so a long-press "I'm safe now" sends an
+   `allclear` whose `coerced` flag rides inside the encryption — the sending
+   screen and the wire look identical to a genuine stand-down, but receivers
+   keep the alarm live.
 2. **Duress must be indistinguishable and generative.** (Clark & Hengartner,
    2008.) A `help` trigger MUST look identical to normal use; the duress
    vocabulary MUST be generative, not a small fixed set (reuse canary-kit duress

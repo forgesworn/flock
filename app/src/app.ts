@@ -41,6 +41,9 @@ import {
   buildBuzzSignal,
   decryptBuzz,
   DEFAULT_BUZZ_REASONS,
+  buildAllClearSignal,
+  decryptAllClear,
+  ALLCLEAR_SIGNAL_TYPE,
   buildFencesSignal,
   decryptFences,
   isNewerFenceSet,
@@ -90,7 +93,9 @@ let persisted = store.load()
 let tab: 'home' | 'map' | 'circle' | 'you' = 'home'
 let fix: svc.Fix | null = null
 let sharing = false
-let alertActive = false
+let alertActive = false // MY alert went out (confirmed publish) — sender's view only
+let alertFailed = false // my SOS could not be published — persistent retry state, never a toast
+let alertCircleId: string | null = null // which circle my live alert went to (stand-down target)
 let breachActive = false
 let stopWatch: (() => void) | null = null
 let hidden = false // app backgrounded (page hidden) — pause sampling; a hidden PWA can't sample reliably anyway
@@ -260,6 +265,8 @@ function switchCircle(id: string): void {
   store.save(persisted)
   breachActive = false
   alertActive = false
+  alertFailed = false
+  alertCircleId = null
   disbandConfirm = false
   resetConfirm = false
   removeConfirmPk = null
@@ -466,9 +473,12 @@ function circleSwitcher(): string {
   return `<div class="circle-switch">${chips}<button class="circle-chip add" data-action="add-circle" aria-label="Add a circle">＋</button></div>`
 }
 
-function orbState(): { cls: string; label: string; sub: string } {
+function orbState(): { cls: string; label: string; sub: string; action?: string } {
   const c = activeCircle() as store.Circle
+  if (alertFailed) return { cls: 'state-alert', label: "Help didn't send", sub: 'Tap to try again — check your signal', action: 'sos-retry' }
   if (alertActive) return { cls: 'state-alert', label: 'Help sent', sub: 'Your circle has been alerted' }
+  const inc = incomingAlert()
+  if (inc) return { cls: 'state-alert', label: `${inc.name} needs help`, sub: 'Tap to see where', action: 'see-alert' }
   if (checkinAlert) return { cls: 'state-alert', label: 'Check-in missed', sub: "Someone hasn't checked in" }
   if (isDark()) return { cls: 'state-dark', label: 'Taking a break', sub: `Sharing nothing · back in ${fmtMins((persisted.offGridUntil ?? 0) - nowSec())}` }
   if (breachActive) return { cls: 'state-alert', label: 'Outside safe place', sub: 'Location shared with your circle' }
@@ -481,18 +491,33 @@ function orbState(): { cls: string; label: string; sub: string } {
   return { cls: 'state-safe', label: 'Private', sub: 'Location hidden until you need it' }
 }
 
+/** The newest live help alert raised by someone ELSE, across ALL circles — an
+ *  alert must surface even while the person is focused on another circle. */
+function incomingAlert(): { who: string; name: string; circleId: string; ts: number } | null {
+  const me = persisted.identity?.pk
+  let best: { who: string; name: string; circleId: string; ts: number } | null = null
+  for (const c of persisted.circles) {
+    for (const [who, ts] of cstate(c.id).alerts) {
+      if (who === me) continue
+      if (!best || ts > best.ts) best = { who, name: nameFor(who), circleId: c.id, ts }
+    }
+  }
+  return best
+}
+
 function homeView(): string {
   const c = activeCircle() as store.Circle
   const s = orbState()
   return `
     ${topbar(true)}
-    <div class="orb-wrap ${s.cls}">
+    <div class="orb-wrap ${s.cls}"${s.action ? ` data-action="${s.action}" role="button" tabindex="0"` : ''}>
       <div class="orb"><div class="orb-inner">
-        <div class="orb-state"><span class="orb-dot"></span>${s.label}</div>
+        <div class="orb-state"><span class="orb-dot"></span>${esc(s.label)}</div>
         <div class="orb-sub">${esc(s.sub)}</div>
       </div></div>
     </div>
     <div class="actions">
+      ${alertActive ? '<button class="btn primary" data-action="im-safe">I\'m safe now</button>' : ''}
       <button class="btn ${sharing ? 'ghost' : 'primary'}" data-action="toggle-share">
         ${sharing ? 'Stop sharing' : (isLive(c.mode) ? 'Start sharing' : 'Start watch')}
       </button>
@@ -1095,8 +1120,9 @@ function wireApp(): void {
     if (action === 'sos-hold') { wireSos(node as HTMLElement); return }
     if (action === 'spoken-reveal') { wireDuressReveal(node as HTMLElement); return }
     // Coercion points: a silent long-press on these performs the identical visible
-    // action AND raises a covert help alarm (see wasCovertHold / FLOCK.md §6.1).
-    if (action === 'toggle-share' || action === 'disarm-checkin' || action === 'do-dark') {
+    // action AND raises a covert help alarm — or, for "I'm safe now", sends a
+    // coerced all-clear the circle ignores (see wasCovertHold / FLOCK.md §6.1).
+    if (action === 'toggle-share' || action === 'disarm-checkin' || action === 'do-dark' || action === 'im-safe') {
       node.addEventListener('pointerdown', () => beginHold(action))
     }
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
@@ -2082,6 +2108,9 @@ function handleAction(action: string, node: HTMLElement): void {
       break
     }
     case 'pickup': void emit('pickup'); break
+    case 'sos-retry': void emit('help'); break
+    case 'im-safe': { const covert = wasCovertHold('im-safe'); void standDown(covert); break }
+    case 'see-alert': goToAlert(); break
     case 'pickup-show': pickupPanel = 'show'; showDuressWord = false; pickupOutcome = null; render(); break
     case 'pickup-check': pickupPanel = 'check'; pickupOutcome = null; render(); break
     case 'pickup-close': pickupPanel = null; pickupOutcome = null; showDuressWord = false; render(); break
@@ -2408,7 +2437,6 @@ async function emit(trigger: 'pickup' | 'help'): Promise<void> {
         ? { geohash: encode(position.lat, position.lon, plan.precision), precision: plan.precision, locationSource: 'beacon' as const }
         : null
       template = await buildHelpSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, location })
-      alertActive = true
     } else {
       if (plan.action === 'withhold' || !position) {
         if (trigger === 'pickup') toast('Need your location first — start sharing.')
@@ -2419,9 +2447,14 @@ async function emit(trigger: 'pickup' | 'help'): Promise<void> {
       saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
     }
     await publishSignal(template, c)
+    // "Help sent" only AFTER a confirmed publish — the orb must never claim an
+    // alert went out when it didn't (the most dangerous lie the UI could tell).
+    if (type === 'help') { alertActive = true; alertFailed = false; alertCircleId = c.id }
     toast(trigger === 'help' ? 'Help sent to your circle' : 'Pick-up request sent')
   } catch {
-    toast('Could not send — check your relay and connection.')
+    // A failed SOS gets a PERSISTENT retry state on the orb, not a vanishing toast.
+    if (type === 'help') alertFailed = true
+    else toast("Couldn't send — check your connection.")
   }
   refresh()
 }
@@ -2514,6 +2547,39 @@ async function raiseDuressAlarm(members: string[]): Promise<void> {
   }
 }
 
+// "I'm safe now" — stand down my help alert for the whole circle. A covert
+// long-press sends a COERCED all-clear instead: this screen behaves identically
+// (a watching coercer sees a normal stand-down, same toast, same calm orb) but
+// receivers ignore it, so the circle stays alarmed (FLOCK §6.1).
+async function standDown(coerced: boolean): Promise<void> {
+  const id = persisted.identity
+  const c = persisted.circles.find((x) => x.id === alertCircleId) ?? activeCircle()
+  if (!id || !c) return
+  try {
+    const tmpl = await buildAllClearSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, ...(coerced ? { coerced: true } : {}) })
+    await publishSignal(tmpl, c)
+    alertActive = false
+    alertFailed = false
+    alertCircleId = null
+    cstate(c.id).alerts.delete(id.pk)
+    toast("Stand-down sent — your circle knows you're OK")
+    render()
+  } catch { toast("Couldn't send — check your connection and try again") }
+}
+
+// The orb said "[Name] needs help — tap to see where": focus that circle, on the
+// map if we already hold a location for them, otherwise on the roster. Deliberately
+// NOT switchCircle(), which would clear my own live alert flags.
+function goToAlert(): void {
+  const inc = incomingAlert()
+  if (!inc) return
+  persisted.activeCircleId = inc.circleId
+  store.save(persisted)
+  syncWatch()
+  tab = cstate(inc.circleId).beacons.has(inc.who) ? 'map' : 'circle'
+  render()
+}
+
 // Silent long-press to reveal the duress word on the "prove it's me" tile. No fill
 // or animation (that would be a tell) — hold ~0.6 s and the word swaps in place.
 function wireDuressReveal(node: HTMLElement): void {
@@ -2587,6 +2653,8 @@ function leave(): void {
   removeCircle(c.id)
   breachActive = false
   alertActive = false
+  alertFailed = false
+  alertCircleId = null
   disbandConfirm = false
   resetConfirm = false
   removeConfirmPk = null
@@ -2610,6 +2678,8 @@ async function disbandCircle(): Promise<void> {
   removeConfirmPk = null
   breachActive = false
   alertActive = false
+  alertFailed = false
+  alertCircleId = null
   tab = 'home'
   toast(`Disbanded ${name}`)
   render()
@@ -2668,6 +2738,8 @@ function resetDevice(): void {
   if (rzvTicker) { clearInterval(rzvTicker); rzvTicker = 0 }
   sharing = false
   alertActive = false
+  alertFailed = false
+  alertCircleId = null
   breachActive = false
   checkinAlert = false
   awaitingInvite = false
@@ -2740,12 +2812,25 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       // window) keeps showing on its own sender's screen, as it always did.
       if (me && who === me.pk && e.pubkey === me.pk && nowSec() < covertHelpUntil) return
       st.alerts.set(who, e.created_at)
-      if (!me || e.pubkey !== me.pk) { alertActive = true; toast(`🚨 Help raised in ${c.name}`) }
+      // Receiver state derives from st.alerts (see incomingAlert) — alertActive is
+      // the SENDER's "my alert went out" flag and must never be set on receive.
+      if (!me || e.pubkey !== me.pk) toast(`🚨 Help raised in ${c.name}`)
       if (a.geohash) saveBeacon(c.id, { member: who, geohash: a.geohash, precision: a.precision, timestamp: a.timestamp || e.created_at })
     } else if (t === 'beacon' || t === 'breach' || t === 'pickup') {
       const p = await decryptBeacon(deriveBeaconKey(c.seedHex), e.content)
       saveBeacon(c.id, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
       if (t === 'pickup' && (!me || e.pubkey !== me.pk)) toast(`Pick-up request in ${c.name}`)
+    } else if (t === ALLCLEAR_SIGNAL_TYPE) {
+      const ac = await decryptAllClear(c.seedHex, e.content)
+      // Only the alert's OWNER can stand it down — a member must not be able to
+      // clear someone else's alarm (e.g. a flagged collector clearing a duress flag).
+      if (ac.member !== e.pubkey) return
+      // A coerced stand-down (flag inside the encryption) is ignored: the sender's
+      // screen already shows a normal stand-down, but the circle stays alarmed.
+      if (ac.coerced) return
+      st.alerts.delete(ac.member)
+      if (me && ac.member === me.pk) { alertActive = false; alertFailed = false }
+      else toast(`${nameFor(ac.member)} is safe — alert stood down`)
     } else if (t === CHECKIN_SIGNAL_TYPE) {
       const ci = await decryptCheckIn(c.seedHex, e.content)
       st.checkins.set(ci.member, ci)

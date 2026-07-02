@@ -43,6 +43,10 @@
       "types": "./dist/buzz.d.ts",
       "import": "./dist/buzz.js"
     },
+    "./allclear": {
+      "types": "./dist/allclear.d.ts",
+      "import": "./dist/allclear.js"
+    },
     "./fences": {
       "types": "./dist/fences.d.ts",
       "import": "./dist/fences.js"
