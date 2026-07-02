@@ -89,7 +89,7 @@ table below records what the *host* can see — one hop, ours, with access logs 
 | Your **IP** + tile viewports | the neighbourhoods you look at ≈ where you live/go | offline/vector basemap: a saved area pans with **zero** tile traffic (default from Slice 10) |
 | Place-name searches (`/nominatim`) | addresses you type | same-origin proxy already hides you from OSM; searches are user-initiated and rare |
 | Venue-search boxes (`/overpass`) | the area of a meeting-point search (never a member's coordinates — bbox only, by design) | bbox is already the *coarsest* artefact of the search |
-| Offline-extract boxes (`/api/extract`) | the area you saved for offline ≈ home | treat as sensitive: no app-level logging, Caddy access logs off (both done); per-IP rate-limit follow-up |
+| Offline-extract boxes (`/api/extract`) | the area you saved for offline ≈ home | treat as sensitive: no app-level logging, Caddy access logs off, per-IP rate-limit (6/10 min, salted-hash keys) — all done |
 
 **The decision (taken 2026-07-02): grey-clouded.** Cloudflare no longer sees any
 traffic — the accepted trade is losing its DDoS shielding and edge tile cache (worth
