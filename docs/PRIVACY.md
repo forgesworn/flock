@@ -79,8 +79,10 @@ operator's promise — so a `.onion` endpoint on a plain no-log relay beats a
 The relay never sees plaintext, but the **map does not use the relay**. The PWA is
 served from our host, and the map's same-origin proxies (`/tiles/*`, `/nominatim/*`,
 `/overpass/*`, `/api/extract`) exist so OpenStreetMap services never see users. That
-moves the exposure to our edge — and **Cloudflare sits in front of it**
-(orange-cloud): TLS terminates at Cloudflare, so CF — not just our Caddy — can see:
+moves the exposure to our edge. **Resolved 2026-07-02: the DNS record is grey-clouded
+(DNS-only)** — TLS terminates at our Caddy alone, and Cloudflare is out of the traffic
+path entirely (verified: direct Let's Encrypt chain, no `cf-ray` on any response). The
+table below records what the *host* can see — one hop, ours, with access logs off:
 
 | It CAN see | What it means | Mitigation |
 |---|---|---|
@@ -89,12 +91,11 @@ moves the exposure to our edge — and **Cloudflare sits in front of it**
 | Venue-search boxes (`/overpass`) | the area of a meeting-point search (never a member's coordinates — bbox only, by design) | bbox is already the *coarsest* artefact of the search |
 | Offline-extract boxes (`/api/extract`) | the area you saved for offline ≈ home | treat as sensitive: no app-level logging, Caddy access logs off (both done); per-IP rate-limit follow-up |
 
-**The decision (open):** grey-cloud `flock.forgesworn.dev` (DNS-only, TLS at Caddy
-alone) is the recommended end-state — Cloudflare drops out of the TLS path entirely.
-The trade-off is losing CF's DDoS shielding and its edge tile cache; the offline
-basemap default shrinks the tile-cache value, which is most of the reason to stay.
-Until switched, **Cloudflare is inside the trust boundary for map metadata** — this
-table is the honest record of that.
+**The decision (taken 2026-07-02): grey-clouded.** Cloudflare no longer sees any
+traffic — the accepted trade is losing its DDoS shielding and edge tile cache (worth
+little once areas are saved offline) and the origin IP being public in DNS. A side
+benefit: CF's Browser-Cache-TTL no longer overrides the origin's `no-cache` on
+`index.html`/`sw.js`, so deploys reach returning users without cache fights.
 
 Signals (SOS, beacons, check-ins…) are unaffected: they travel gift-wrapped over the
 relay hop, not through the host.

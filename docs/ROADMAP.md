@@ -450,9 +450,10 @@ modes**. Plan with designs, decisions, and per-slice tests:
   PRIVACY.md gains "the map & the host": honest table of what CF sees as TLS
   terminator (IP + tile viewports, searches, extract boxes ≈ home) + mitigations.
   Offline-map control now ON for everyone ('0' opts out; raster = automatic fallback
-  for unsaved areas; /api/extract verified live on prod). **Open decision (Darren):
-  grey-cloud the DNS record** — takes CF out of the TLS path at the cost of DDoS
-  shielding + the edge tile cache (worth less once areas are saved offline).
+  for unsaved areas; /api/extract verified live on prod). **Decision taken (2026-07-02):
+  grey-clouded** — CF is out of the TLS path (verified: direct LE chain, no cf-ray,
+  proxies + no-cache headers all green from the origin). Bonus: kills the CF
+  Browser-Cache-TTL override that made deploys sticky for returning users.
 - [x] **Slice 11 — truthful SOS states** 🔴 — "Help sent" now only after a confirmed
   publish; failure = persistent "Help didn't send / tap to try again" orb (retry, not
   toast). Receiver orb shows "[name] needs help / tap to see where" from `st.alerts`
