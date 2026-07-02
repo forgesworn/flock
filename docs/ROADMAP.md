@@ -385,9 +385,17 @@ modes**. Plan with designs, decisions, and per-slice tests:
   E2e (`fences.spec.ts`): **B breaches a fence only A drew** — drawn on A, lands on
   B's map with zero setup, B leaving alerts A over the live relay — plus delete-syncs.
   Private places stay device-only by design. *(Role-gated editing waits for dominion.)*
-- [ ] **Slice 4 — circle-root backup & restore** 🟠 — no export of `circleRootHex`
-  exists; device loss destroys every circle. Passphrase-encrypted export/import
-  (PBKDF2 → canary-kit envelope, no new crypto) as the stopgap before shamir-words.
+- [x] **Slice 4 — circle-root backup & restore** 🟠 — device loss used to destroy every
+  circle forever. New `app/src/backup.ts` (7 unit tests): a single passphrase-encrypted
+  token — PBKDF2-SHA256 (600k) → canary-kit's AES-256-GCM envelope, **no new crypto** —
+  carrying identity, `circleRootHex`, the circles **with their seeds** (a joined
+  circle's seed is *not* derivable from your root — root alone was never enough),
+  petnames and private places; relay list + presence cache deliberately excluded.
+  You-tab **Backup** card (copy code / download file; the reset confirm points at it);
+  **Restore from backup** on the welcome screen; restore merges without clobbering
+  (existing identity/circles win, missing ones are added). E2e: back up → wipe →
+  wrong passphrase rejected → restore → **B's next buzz decrypts on the restored
+  device** over the live relay. Superseded by shamir-words/stash when Phase E lands.
 - [ ] **Slice 5 — duress cover for stop-sharing / disarm / off-grid** 🟠 — FLOCK.md
   §6.1's coerced-stop silent alarm is unimplemented at the three real coercion points;
   silent long-press variants riding the existing duress-key + tell-safe machinery.

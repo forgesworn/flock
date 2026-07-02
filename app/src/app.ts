@@ -24,6 +24,7 @@ import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
 import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap } from './invite'
+import { exportBackup, importBackup, applyBackup } from './backup'
 import {
   decideEmission,
   classifyContainment,
@@ -143,7 +144,7 @@ let lastRzvStatus = 0
 let rzvPick = false // picking a rendezvous spot on the map (crosshair mode)
 let rzvTicker = 0 // 1 s interval driving the live countdown; 0 when idle
 
-let onboardStep: 'intro' | 'create' | 'join' | 'await' = 'intro'
+let onboardStep: 'intro' | 'create' | 'join' | 'await' | 'restore' = 'intro'
 let onboardMode: Mode = 'family'
 let adding = false // adding another circle from within the app (not first-run onboarding)
 let ttlMode: 'ongoing' | 'today' | 'custom' = 'ongoing' // chosen lifetime for a new circle
@@ -744,9 +745,18 @@ function youView(): string {
            </div>`
         : '<button class="btn small ghost" style="color:var(--alert)" data-action="ask-disband">Disband for everyone…</button>'}
     </div>
+    <div class="section-title" style="margin-top:18px">Backup</div>
+    <div class="card stack">
+      <div class="note">One encrypted code holds your key, circles, nicknames and private places. Restore it from the welcome screen on any device. The passphrase is the only way in — nobody can reset it.</div>
+      <div class="field"><label for="backup-pass">Passphrase</label><input class="input" id="backup-pass" type="password" autocomplete="new-password" placeholder="Pick a strong passphrase" /></div>
+      <div class="row" style="gap:10px">
+        <button class="btn small" data-action="backup-copy">Copy backup code</button>
+        <button class="btn small ghost" data-action="backup-download">Download file</button>
+      </div>
+    </div>
     <div class="card stack" style="margin-top:14px">
       ${resetConfirm
-        ? `<div class="note" style="color:var(--alert)">This wipes your key and every circle from this device. Without a backup there is <strong>no way back</strong>.</div>
+        ? `<div class="note" style="color:var(--alert)">This wipes your key and every circle from this device. Without a backup (the card above) there is <strong>no way back</strong>.</div>
            <div class="row" style="gap:10px">
              <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="reset-device">Wipe this device</button>
              <button class="btn small ghost" data-action="cancel-reset">Cancel</button>
@@ -919,6 +929,16 @@ function onboardingView(): string {
         <button class="btn" data-action="join-remote">Join remotely (share my key)</button>
         <button class="btn ghost" data-action="back">Back</button>
       </div>`
+  } else if (onboardStep === 'restore') {
+    inner = `
+      <h1>Restore from backup</h1>
+      <p class="tagline">Paste your backup code and unlock it with its passphrase — your key and circles come back exactly as they were.</p>
+      <div class="field" style="text-align:left;margin-bottom:12px"><label for="restore-code">Backup code</label><textarea class="input" id="restore-code" rows="4" placeholder="Paste backup code…"></textarea></div>
+      <div class="field" style="text-align:left;margin-bottom:16px"><label for="restore-pass">Passphrase</label><input class="input" id="restore-pass" type="password" autocomplete="current-password" /></div>
+      <div class="actions">
+        <button class="btn primary" data-action="do-restore">Restore</button>
+        <button class="btn ghost" data-action="back">Back</button>
+      </div>`
   } else if (onboardStep === 'await') {
     const np = persisted.identity ? fullNpub(persisted.identity.pk) : ''
     inner = `
@@ -953,6 +973,7 @@ function onboardingView(): string {
       <div class="actions">
         <button class="btn primary" data-action="create">Create a circle</button>
         <button class="btn ghost" data-action="join">Join with a code</button>
+        <button class="btn ghost" data-action="restore">Restore from backup</button>
         ${signetRow}
       </div>`
   }
@@ -977,6 +998,8 @@ function wireOnboard(): void {
       const a = node.getAttribute('data-action')
       if (a === 'create') { onboardStep = 'create'; rerenderOnboard() }
       else if (a === 'join') { onboardStep = 'join'; rerenderOnboard() }
+      else if (a === 'restore') { onboardStep = 'restore'; rerenderOnboard() }
+      else if (a === 'do-restore') void doRestore()
       else if (a === 'back') { onboardStep = 'intro'; awaitingInvite = false; rerenderOnboard() }
       else if (a === 'ob-mode') {
         // Flip the behaviour in place. A full re-render here would discard whatever's
@@ -2047,6 +2070,8 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'ask-reset': resetConfirm = true; render(); break
     case 'cancel-reset': resetConfirm = false; render(); break
     case 'reset-device': resetDevice(); break
+    case 'backup-copy': void doBackup('copy'); break
+    case 'backup-download': void doBackup('download'); break
     case 'add-zone': addMode = true; addZoneKind = (node.dataset.kind as 'safe' | 'noreport') ?? 'safe'; newZonePolicy = 'withhold'; renderMapPanel(); updatePreview(); break
     case 'zone-kind': addZoneKind = node.dataset.kind as 'safe' | 'noreport'; renderMapPanel(); updatePreview(); break
     case 'zone-policy': newZonePolicy = node.dataset.policy as 'withhold' | 'coarse'; renderMapPanel(); updatePreview(); break
@@ -2477,6 +2502,46 @@ async function disbandCircle(): Promise<void> {
   tab = 'home'
   toast(`Disbanded ${name}`)
   render()
+}
+
+// ── Backup & restore ─────────────────────────────────────────────────────────
+const MIN_BACKUP_PASS = 8
+
+/** Export this device's state as a passphrase-encrypted code (copy or file). */
+async function doBackup(how: 'copy' | 'download'): Promise<void> {
+  const input = document.getElementById('backup-pass') as HTMLInputElement | null
+  const pass = input?.value ?? ''
+  if (pass.length < MIN_BACKUP_PASS) { toast(`Pick a passphrase of at least ${MIN_BACKUP_PASS} characters`); return }
+  try {
+    const blob = await exportBackup(persisted, pass)
+    if (how === 'copy') {
+      await navigator.clipboard.writeText(blob)
+      toast('Backup code copied — store it somewhere safe')
+    } else {
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(new Blob([blob], { type: 'text/plain' }))
+      a.download = `flock-backup-${new Date().toISOString().slice(0, 10)}.txt`
+      a.click()
+      URL.revokeObjectURL(a.href)
+      toast('Backup file saved — store it somewhere safe')
+    }
+    if (input) input.value = ''
+  } catch { toast("Couldn't create the backup") }
+}
+
+/** Restore a backup from the welcome screen, then boot cleanly from the new state. */
+async function doRestore(): Promise<void> {
+  const code = (document.getElementById('restore-code') as HTMLTextAreaElement | null)?.value ?? ''
+  const pass = (document.getElementById('restore-pass') as HTMLInputElement | null)?.value ?? ''
+  if (!code.trim() || !pass) { toast('Paste the backup code and its passphrase'); return }
+  try {
+    const data = await importBackup(code, pass)
+    persisted = applyBackup(persisted, data)
+    store.save(persisted)
+    location.reload() // boot from the restored state — subs, monitor and map come up as normal
+  } catch (err) {
+    toast(err instanceof Error ? err.message : 'Restore failed')
+  }
 }
 
 /** Full reset: sign out, wipe local state and every circle on this device. */
