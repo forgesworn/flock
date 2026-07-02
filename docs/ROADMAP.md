@@ -446,13 +446,19 @@ modes**. Plan with designs, decisions, and per-slice tests:
   screen + wire, receivers keep alarming; only the alert's owner can stand it down.
   E2e: broken-relay SOS shows persistent retry; genuine stand-down clears B; coerced
   stand-down calms A's screen while B stays alarmed.
-- [ ] **Slice 12 — helper hints + settings switch** 🟠 — Darren's ask: one reusable
-  `hint(id, text)` with per-hint dismiss, "Show helper tips" toggle (default on) +
-  "bring tips back" on You; initial placements on mode/watch/SOS/invite/relays/zones.
-- [ ] **Slice 13 — jargon & copy pass** 🟠 — nothing Nostr-shaped reaches a user:
-  npub → invite key/code (npub never shown as a member name — placeholder + nickname
-  prompt), ~geohash → human presence, reseed → "reset security", dead-man's-switch →
-  "automatic check-in", transient → temporary, Rendezvous unified with Meeting point.
+- [x] **Slice 12 — helper hints + settings switch** 🟠 — `hint(id, text)` component
+  (`.tip`, per-hint ✕), persisted `{on, dismissed[]}` via pure `hintShown`/
+  `withHintDismissed`, "Show helper tips" switch (default on) + "Bring all tips back"
+  on You. Placed: start-watch (mode-aware what/why), SOS/pick-up pair, remote invite,
+  pick-up check, delivery servers. E2e: default-on → dismiss one → global off →
+  back on remembers the dismissal → reset restores.
+- [x] **Slice 13 — jargon & copy pass** 🟠 — npub → "invite key" (+ friendly error
+  copy), reseed → "Reset this circle's security", dead-man's-switch → "Automatic
+  check-in", "Nostr relays" → "Delivery servers", transient → temporary, Rendezvous
+  unified as Meeting point, `~geohash` under members → "location on the map" (e2e
+  markers updated), gift-wrap/NIP-44 jargon removed, plain-words footer.
+  *Deferred to Slice 14: npub-as-name placeholder + nickname prompt on adoption
+  (flow change, not copy).*
 - [ ] **Slice 14 — structure & flow simplification** 🟡 — You-tab Advanced disclosure
   (relays/security/disband/reset collapsed), Circle-tab decluttering, remote-invite
   reframe + await-QR becomes a prefill link (same class of fix as the join QR).
