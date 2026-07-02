@@ -1,6 +1,6 @@
 # A second no-log relay — redundancy now, "provable" later
 
-**Date:** 2026-07-01 · **Owner:** TBD · **Status:** design; v0 ready to build (infra), v1 parked with rationale
+**Date:** 2026-07-01 · **Owner:** TBD · **Status:** design; **v0 runbook ready** — `docs/runbooks/second-relay.md` (blocked only on a host). Note: Slice 6 made NIP-40 honouring a hard requirement, which now favours nostr-rs-relay over strfry (see runbook).
 
 ## Why this exists
 
