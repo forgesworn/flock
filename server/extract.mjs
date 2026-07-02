@@ -16,6 +16,7 @@
 
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,6 +31,28 @@ const MAX_SPAN_KM = Number(process.env.EXTRACT_MAX_SPAN_KM ?? 60)
 // shared box. Excess requests get 429 rather than piling up.
 const MAX_CONCURRENT = Number(process.env.EXTRACT_MAX_CONCURRENT ?? 3)
 let inflight = 0
+
+// Per-IP rate limit — an extract is heavyweight AND its bbox ≈ someone's home, so
+// abuse is both a DoS and a privacy probe. Sliding window, in-memory only, keyed by
+// a per-process salted hash of the client IP: nothing is persisted or logged, and
+// even a memory inspection reveals no addresses (no-log posture holds).
+const RATE_MAX = Number(process.env.EXTRACT_RATE_MAX ?? 6)
+const RATE_WINDOW_MS = Number(process.env.EXTRACT_RATE_WINDOW_S ?? 600) * 1000
+const rateSalt = randomBytes(16)
+const rate = new Map() // ipHash → recent request timestamps
+function rateLimited(req) {
+  const ip = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket.remoteAddress || ''
+  const key = createHash('sha256').update(rateSalt).update(ip).digest('base64')
+  const now = Date.now()
+  const hits = (rate.get(key) ?? []).filter((t) => now - t < RATE_WINDOW_MS)
+  if (hits.length >= RATE_MAX) { rate.set(key, hits); return true }
+  hits.push(now)
+  rate.set(key, hits)
+  if (rate.size > 10_000) { // prune idle buckets so the map can't grow unbounded
+    for (const [k, v] of rate) if (!v.some((t) => now - t < RATE_WINDOW_MS)) rate.delete(k)
+  }
+  return false
+}
 
 // Resolve the newest daily planet build once, then reuse for the day.
 let cached = null // { url, day: 'YYYYMMDD' }
@@ -101,6 +124,8 @@ const server = createServer((req, res) => {
     let parsed
     try { parsed = validateBody(JSON.parse(raw || '{}')) } catch { parsed = { error: 'invalid JSON' } }
     if (parsed.error) { res.writeHead(parsed.error.includes('too large') ? 413 : 400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: parsed.error })); return }
+    // After validation (a fat-fingered client isn't locked out by 400s), before work.
+    if (rateLimited(req)) { res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '60' }).end(JSON.stringify({ error: 'too many saves from this connection — try again in a few minutes' })); return }
     if (inflight >= MAX_CONCURRENT) { res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '5' }).end(JSON.stringify({ error: 'busy — try again shortly' })); return }
     inflight++
     try {
@@ -114,4 +139,4 @@ const server = createServer((req, res) => {
   })
 })
 
-server.listen(PORT, HOST, () => console.error(`flock extract service on ${HOST}:${PORT} (bin=${BIN}, maxzoom≤${MAXZOOM_CAP}, span≤${MAX_SPAN_KM}km, maxConcurrent=${MAX_CONCURRENT})`))
+server.listen(PORT, HOST, () => console.error(`flock extract service on ${HOST}:${PORT} (bin=${BIN}, maxzoom≤${MAXZOOM_CAP}, span≤${MAX_SPAN_KM}km, maxConcurrent=${MAX_CONCURRENT}, rate=${RATE_MAX}/${RATE_WINDOW_MS / 1000}s per IP)`))
