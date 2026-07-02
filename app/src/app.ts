@@ -817,7 +817,7 @@ function mapPanelInner(): string {
         <button class="btn small ghost" data-action="cancel-zone">Cancel</button>
       </div>`
   }
-  const safe = persisted.geofences
+  const safe = activeFences()
   const safeList = safe.length
     ? safe.map((z, i) => `<div class="zone-row"><span class="dot-safe"></span><span class="zone-meta">Safe place ${i + 1}<small>${radiusOf(z)}</small></span><button class="zone-del" data-action="del-zone" data-i="${i}" aria-label="Delete">✕</button></div>`).join('')
     : '<div class="note">None yet. Add a safe place and you’ll be told if a circle member leaves it.</div>'
@@ -840,7 +840,7 @@ function mapPanelInner(): string {
 // is on (the extract service must be deployed first — see offlineMapEnabled).
 function offlineMapControl(): string {
   if (!offlineMapEnabled()) return ''
-  const hasZones = persisted.geofences.length > 0 || persisted.noReportZones.length > 0
+  const hasZones = activeFences().length > 0 || persisted.noReportZones.length > 0
   const saved = offlineSavedBytes != null
   const mb = saved ? (offlineSavedBytes! / 1e6).toFixed(1) : ''
   const status = offlineSaving
@@ -1028,7 +1028,7 @@ async function initMap(): Promise<void> {
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
   mapView = await MapView.create(container, fix ?? undefined, { circleId: activeCircle()?.id })
   if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
-  mapView.setGeofences(persisted.geofences)
+  mapView.setGeofences(activeFences())
   mapView.setNoReportZones(persisted.noReportZones)
   mapView.onMove(() => { if (addMode) updatePreview() })
   updateMapData()
@@ -1070,7 +1070,7 @@ async function saveOfflineMap(): Promise<void> {
   renderMapPanel()
   try {
     const { saveArea } = await import('./offlineArea')
-    const r = await saveArea(id, persisted.geofences, persisted.noReportZones)
+    const r = await saveArea(id, activeFences(), persisted.noReportZones)
     offlineSavedBytes = r?.bytes ?? offlineSavedBytes
     offlineSaving = false
     await initMap() // re-init so the map now renders from the saved OPFS basemap
@@ -1197,22 +1197,21 @@ function saveZone(): void {
     persisted.noReportZones = [...persisted.noReportZones, zone]
     toast('Private place added — it stays hidden')
   } else {
-    persisted.geofences = [...persisted.geofences, area]
+    setActiveFences([...activeFences(), area])
     toast('Safe place added')
   }
   store.save(persisted)
   addMode = false
   addZoneKind = 'safe'
   mapView.setPreview(null)
-  mapView.setGeofences(persisted.geofences)
+  mapView.setGeofences(activeFences())
   mapView.setNoReportZones(persisted.noReportZones)
   renderMapPanel()
 }
 
 function delZone(i: number): void {
-  persisted.geofences = persisted.geofences.filter((_, idx) => idx !== i)
-  store.save(persisted)
-  mapView?.setGeofences(persisted.geofences)
+  setActiveFences(activeFences().filter((_, idx) => idx !== i))
+  mapView?.setGeofences(activeFences())
   renderMapPanel()
 }
 
@@ -1281,6 +1280,14 @@ async function publishSignal(unsigned: { kind: number; content: string; tags: st
 
 // ── Members, invites & reseed ────────────────────────────────────────────────
 function members(): string[] { return activeCircle()?.members ?? [] }
+
+// ── Safe places (per-circle) ─────────────────────────────────────────────────
+function activeFences(): Geofence[] { return activeCircle()?.geofences ?? [] }
+function setActiveFences(fences: Geofence[]): void {
+  const c = activeCircle()
+  if (!c) return
+  patchCircleById(c.id, { geofences: fences })
+}
 
 function ensureMember(circle: store.Circle, pk: string): void {
   // Re-read the live roster rather than trusting the captured `circle`: two
@@ -2198,8 +2205,8 @@ async function autoEmit(): Promise<void> {
   // Family: if a cheap (low-power) fix can't tell which side of a safe-zone edge
   // we're on, take one sharp GPS fix before deciding — so we neither miss a breach
   // nor cry wolf on one. Only escalates near an edge, so it stays cheap elsewhere.
-  if (c.mode === 'family' && persisted.geofences.length > 0
-      && classifyContainment({ lat: f.lat, lon: f.lon }, f.accuracy, persisted.geofences) === 'uncertain') {
+  if (c.mode === 'family' && (c.geofences?.length ?? 0) > 0
+      && classifyContainment({ lat: f.lat, lon: f.lon }, f.accuracy, c.geofences ?? []) === 'uncertain') {
     const sharp = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 0, timeoutMs: 4000 })
     if (sharp) { f = sharp; fix = sharp }
   }
@@ -2207,7 +2214,7 @@ async function autoEmit(): Promise<void> {
     mode: c.mode,
     position: { lat: f.lat, lon: f.lon },
     trigger: 'none',
-    geofences: c.mode === 'family' ? persisted.geofences : undefined,
+    geofences: c.mode === 'family' ? c.geofences ?? [] : undefined,
     offGrid: isDark(),
     noReportZones: persisted.noReportZones,
     accuracyMetres: f.accuracy,
@@ -2251,7 +2258,7 @@ async function emit(trigger: 'pickup' | 'help'): Promise<void> {
     mode: c.mode,
     position,
     trigger,
-    geofences: c.mode === 'family' ? persisted.geofences : undefined,
+    geofences: c.mode === 'family' ? c.geofences ?? [] : undefined,
     offGrid: isDark(),
     noReportZones: persisted.noReportZones,
     accuracyMetres: use?.accuracy,
@@ -2328,7 +2335,7 @@ async function raiseDuressAlarm(members: string[]): Promise<void> {
     mode: c.mode,
     position,
     trigger: 'help',
-    geofences: c.mode === 'family' ? persisted.geofences : undefined,
+    geofences: c.mode === 'family' ? c.geofences ?? [] : undefined,
     offGrid: isDark(),
     noReportZones: persisted.noReportZones,
     accuracyMetres: use?.accuracy,

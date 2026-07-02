@@ -45,7 +45,12 @@ test.describe('map — safe & private places', () => {
 
     await A.click('[data-action="add-zone"][data-kind="safe"]')
     await A.click('[data-action="save-zone"]')
-    const centre = await A.evaluate(() => JSON.parse(localStorage.getItem('flock:v1') || '{}').geofences?.[0]?.centre ?? null)
+    // Safe places live on the circle (per-circle, synced), not device-globally.
+    const centre = await A.evaluate(() => {
+      const s = JSON.parse(localStorage.getItem('flock:v1') || '{}')
+      const c = (s.circles ?? []).find((x: { id: string }) => x.id === s.activeCircleId)
+      return c?.geofences?.[0]?.centre ?? null
+    })
     expect(centre, 'a zone should have saved at the map centre').not.toBeNull()
     expect(centre.lat).toBeCloseTo(PARIS.latitude, 1) // ≈48.86, nowhere near London's 51.51
     expect(centre.lon).toBeCloseTo(PARIS.longitude, 1) // ≈2.35, nowhere near London's -0.13

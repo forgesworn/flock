@@ -24,6 +24,12 @@ export interface Circle {
   epoch?: number
   /** Transient lifetime (unix sec, NIP-40 style). Undefined = long-lived (e.g. family). */
   expiresAt?: number
+  /** This circle's safe places. Per-circle (synced to the circle — see fences sync). */
+  geofences?: Geofence[]
+  /** Latest-wins clock for the synced fence set (unix sec of the last applied edit). */
+  fencesUpdatedAt?: number
+  /** Who made that edit (pubkey hex) — the deterministic tie-break for equal clocks. */
+  fencesBy?: string
 }
 export interface Persisted {
   identity: Identity | null
@@ -33,8 +39,9 @@ export interface Persisted {
   activeCircleId: string | null
   /** Relays sensitive traffic is fanned out to (delivery redundancy). Non-empty. */
   relayUrls: string[]
-  geofences: Geofence[]
-  /** Inverse geofences — inside one, disclosure is capped even on a trigger. On-device only. */
+  /** Inverse geofences — inside one, disclosure is capped even on a trigger. On-device
+   *  only, and deliberately device-global: a private place (home) is YOURS, applies in
+   *  every circle, and is never synced — unlike per-circle safe places. */
   noReportZones: NoReportZone[]
   /** Unix sec my deliberate darkness ends; undefined/elapsed = on grid. */
   offGridUntil?: number
@@ -80,6 +87,18 @@ export function prunePresence(
   return out
 }
 
+/**
+ * Migrate legacy device-global safe places into any circle without its own set.
+ * Pure. The old device-global list applied to every family circle on this device,
+ * so a per-circle copy preserves breach behaviour exactly; night-out circles never
+ * evaluate fences, so a copy there is harmless (and keeps the data if the mode's
+ * circle is the only one left).
+ */
+export function adoptLegacyFences(circles: Circle[], legacy?: Geofence[]): Circle[] {
+  if (!legacy?.length) return circles
+  return circles.map((c) => (c.geofences ? c : { ...c, geofences: [...legacy] }))
+}
+
 const toHex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 export const fromHex = (h: string): Uint8Array =>
@@ -87,11 +106,11 @@ export const fromHex = (h: string): Uint8Array =>
 const randHex = (n: number): string => toHex(crypto.getRandomValues(new Uint8Array(n)))
 
 export function load(): Persisted {
-  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrls: resolveRelays(), geofences: [], noReportZones: [], petnames: {}, presence: {} }
+  const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrls: resolveRelays(), noReportZones: [], petnames: {}, presence: {} }
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return fresh
-    const o = JSON.parse(raw) as Partial<Persisted> & { circle?: Circle | null; relayUrl?: string }
+    const o = JSON.parse(raw) as Partial<Persisted> & { circle?: Circle | null; relayUrl?: string; geofences?: Geofence[] }
     const state: Persisted = { ...fresh, ...o, circles: o.circles ?? [], noReportZones: o.noReportZones ?? [], petnames: o.petnames ?? {}, relayUrls: resolveRelays(o) }
     // Migrate the legacy single-relay field into the fanned-out list (resolveRelays did the work).
     delete (state as unknown as Record<string, unknown>).relayUrl
@@ -104,6 +123,9 @@ export function load(): Persisted {
     // Drop expired transient circles, then keep the active id valid.
     const now = Math.floor(Date.now() / 1000)
     state.circles = state.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
+    // Migrate legacy device-global safe places into each circle.
+    state.circles = adoptLegacyFences(state.circles, o.geofences)
+    delete (state as unknown as Record<string, unknown>).geofences
     if (!state.circles.some((c) => c.id === state.activeCircleId)) {
       state.activeCircleId = state.circles[0]?.id ?? null
     }
