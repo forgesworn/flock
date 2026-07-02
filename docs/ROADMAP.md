@@ -363,12 +363,13 @@ modes**. Plan with designs, decisions, and per-slice tests:
   (arm → alert-coloured warning + Cancel), reset warns "no way back" (Slice 4 will link
   the backup). E2e: a new `reset.spec.ts` (arm → cancel keeps the circle → confirm wipes
   to onboarding) and the 3-party remove spec now drives arm → cancel → re-arm → execute.
-- [ ] **Follow-up (found during Batch 1) — typing is wiped by any inbound re-render** 🟡 —
-  render-on-state rebuilds the DOM when a signal arrives, so text a user is mid-typing
-  (buzz reason, petname, relay list…) is silently lost; for a buzz this made the send
-  no-op with an empty reason. Made the e2e fixture atomic as a workaround; the real fix
-  is input-preserving renders (skip re-render while an input is focused, or patch around
-  it). Surfaced by `remove-member.spec.ts` failing 5× in a row — not relay flake.
+- [x] **Follow-up (found during Batch 1) — typing is wiped by any inbound re-render** 🟡 —
+  fixed systemically: `render()`/`rerenderOnboard()` capture the focused input (value +
+  caret) before the DOM rebuild and restore it after; deliberate clears unaffected
+  (tapping a button blurs the field first). The `sendBuzz` fixture dropped its atomic
+  workaround — every buzz spec is a live regression test — and `typing.spec.ts`
+  reproduces the original failure with real keystrokes (B mid-typing when A's buzz
+  re-renders B's screen).
 - [x] **Slice 3 — safe places sync across the circle** 🔴 — fences were device-local
   only, so a guardian's safe place did nothing on the child's phone. Shipped in three
   sub-slices: **3a** — fences move onto the `Circle` (per-circle), legacy device-global
