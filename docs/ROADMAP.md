@@ -434,12 +434,18 @@ modes**. Plan with designs, decisions, and per-slice tests:
   clears on the next fix (watch keeps trying); remote-invite wait shows "still
   waiting" guidance after 60 s. E2e simulates the denied browser API at the boundary
   (Playwright auto-resolves geolocation even ungranted — probe-verified).
-- [ ] **Slice 9 — invite hygiene: share-sheet over clipboard** 🟡 — the raw seed on the
-  OS clipboard can cloud-sync; prefer QR + `navigator.share`, sharpen the fallback copy.
-- [ ] **Slice 10 — Cloudflare in the threat model + private map default** 🟡 — CF
-  terminates TLS in front of the same-origin proxies (sees IP + viewports/bboxes ≈
-  home); grey-cloud or document honestly, and flip the proven offline/vector basemap
-  to default.
+- [x] **Slice 9 — invite hygiene: share-sheet over clipboard** 🟡 — invite button
+  prefers `navigator.share` (secret never touches a cloud-syncing clipboard);
+  clipboard = desktop fallback, selectable text = last resort; AbortError treated
+  as "sheet closed", not failure. (QR→link + trust-framing toast shipped earlier
+  with the QR-leak fix.)
+- [x] **Slice 10 — Cloudflare in the threat model + private map default** 🟡 —
+  PRIVACY.md gains "the map & the host": honest table of what CF sees as TLS
+  terminator (IP + tile viewports, searches, extract boxes ≈ home) + mitigations.
+  Offline-map control now ON for everyone ('0' opts out; raster = automatic fallback
+  for unsaved areas; /api/extract verified live on prod). **Open decision (Darren):
+  grey-cloud the DNS record** — takes CF out of the TLS path at the cost of DDoS
+  shielding + the edge tile cache (worth less once areas are saved offline).
 - [x] **Slice 11 — truthful SOS states** 🔴 — "Help sent" now only after a confirmed
   publish; failure = persistent "Help didn't send / tap to try again" orb (retry, not
   toast). Receiver orb shows "[name] needs help / tap to see where" from `st.alerts`
