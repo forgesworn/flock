@@ -336,9 +336,12 @@ hardware cost to what we actually disclose. (Ordered biggest-win-first.)
   be caught fast even for a *fast* exit (a child driven off is exactly when it matters), so
   family GPS must **not** back off — a safety line, not a battery one. Pure helpers TDD'd
   (`hasMoved`, `nextPollDelaySeconds`); night-out share + family breach e2es both green.
-- [ ] **Battery-aware** *(nice-to-have)*: the Battery Status API — widen intervals / drop
-  accuracy when the phone is low, **except** during an active alert (safety wins over
-  battery).
+- [x] **Battery-aware — shipped.** Battery Status API (Chromium; absent elsewhere ⇒
+  never conserve): battery ≤20% AND discharging AND **no live alert anywhere** widens the
+  night-out poll (cadence `conserve` doubles every delay; the stale-window ceiling still
+  holds so a still member never falsely reads "gone home"). Family's continuous watch is
+  deliberately untouched (safety line), and any alert — mine, failed, incoming, check-in,
+  breach — restores full cadence. Pure logic TDD'd in `cadence.test.ts`.
 - [ ] **Real validation needs hardware** — the functional path builds and tests in the
   emulator, but true battery / Doze behaviour is a **Tier-2 (real GrapheneOS)**
   measurement, gated exactly like the native background work (Phase 0 / no test devices

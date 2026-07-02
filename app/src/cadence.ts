@@ -88,8 +88,12 @@ export function hasMoved(distanceMetres: number, accuracyA: number, accuracyB: n
  * samples have been stationary. Exponential back-off from `minSeconds` (just
  * moved) toward `maxSeconds` (long settled), so battery use tapers while a moving
  * device is still tracked closely. Pure and deterministic.
+ *
+ * `conserve` (battery low and discharging, no active alert) doubles every delay —
+ * the ceiling still holds, so a still member never ages past the presence stale
+ * window into a false "gone home". The cap is a safety line; conserve is not.
  */
-export function nextPollDelaySeconds(stationaryStreak: number, bounds: PollBounds): number {
-  const streak = Math.max(0, Math.floor(stationaryStreak))
+export function nextPollDelaySeconds(stationaryStreak: number, bounds: PollBounds, opts?: { conserve?: boolean }): number {
+  const streak = Math.max(0, Math.floor(stationaryStreak)) + (opts?.conserve ? 1 : 0)
   return Math.min(bounds.minSeconds * 2 ** streak, bounds.maxSeconds)
 }

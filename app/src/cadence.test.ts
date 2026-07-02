@@ -83,4 +83,17 @@ describe('nextPollDelaySeconds', () => {
   it('treats a negative/garbage streak as "just moved" (floor)', () => {
     expect(nextPollDelaySeconds(-3, BOUNDS)).toBe(30)
   })
+
+  // Battery-aware widening: a low, discharging battery doubles every delay —
+  // but the ceiling still holds, so a still member NEVER ages past the presence
+  // stale window into a false "gone home" (safety cap beats battery).
+  it('conserve doubles the delay at every streak', () => {
+    expect(nextPollDelaySeconds(0, BOUNDS, { conserve: true })).toBe(60)
+    expect(nextPollDelaySeconds(1, BOUNDS, { conserve: true })).toBe(120)
+  })
+
+  it('conserve still respects the stale-window ceiling', () => {
+    expect(nextPollDelaySeconds(2, BOUNDS, { conserve: true })).toBe(180) // 240 capped
+    expect(nextPollDelaySeconds(50, BOUNDS, { conserve: true })).toBe(180)
+  })
 })

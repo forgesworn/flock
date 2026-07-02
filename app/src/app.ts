@@ -397,6 +397,7 @@ export function mount(el: HTMLElement): void {
     const ctx = spokenCtx()
     return ctx ? spokenWordsFor(ctx.seedHex, ctx.me, ctx.counter, ctx.members) : null
   }
+  watchBattery() // battery-aware sampling (conserve when low + discharging, never during an alert)
   rehydratePresence() // restore cached member pins so a refresh doesn't blank the map
   store.save(persisted) // persist any legacy→multi-circle migration / pruning straight away
   // A join link (scanned QR / tapped in a chat) arrives as a #join= fragment —
@@ -2433,6 +2434,34 @@ let watchHighAccuracy = true // accuracy tier the running watch was armed at
 
 function resetSampleCadence(): void { lastSampleFix = null; stationaryStreak = 0 }
 
+// ── Battery-aware conservation (Phase H) ─────────────────────────────────────
+// A dying phone is itself a safety risk — flock draining the last of it is worse
+// than slower sampling. When the battery is low AND discharging AND no alert is
+// live anywhere, the night-out poll widens (cadence `conserve`). Family's
+// continuous watch is untouched — a safety line, not a battery one. Where the
+// Battery Status API doesn't exist (iOS/Firefox) we simply never conserve.
+const CONSERVE_BELOW = 0.2
+let batteryLow = false
+let batteryCharging = true
+function watchBattery(): void {
+  type BatteryManager = { level: number; charging: boolean; addEventListener: (t: string, f: () => void) => void }
+  const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryManager> }
+  nav.getBattery?.().then((b) => {
+    const update = (): void => { batteryLow = b.level <= CONSERVE_BELOW; batteryCharging = b.charging }
+    update()
+    b.addEventListener('levelchange', update)
+    b.addEventListener('chargingchange', update)
+  }).catch(() => { /* no API → never conserve */ })
+}
+
+function conserveNow(): boolean {
+  if (!batteryLow || batteryCharging) return false
+  // Safety wins over battery: any live alert anywhere keeps the full cadence.
+  if (alertActive || alertFailed || checkinAlert || breachActive) return false
+  for (const c of persisted.circles) if (cstate(c.id).alerts.size) return false
+  return true
+}
+
 /** Next night-out poll delay (ms): tight while moving, backing off when stationary. */
 function sampleDelayMs(f: svc.Fix): number {
   const prev = lastSampleFix
@@ -2442,7 +2471,7 @@ function sampleDelayMs(f: svc.Fix): number {
   )
   stationaryStreak = moved ? 0 : stationaryStreak + 1
   lastSampleFix = f
-  return nextPollDelaySeconds(stationaryStreak, SAMPLE_POLL_BOUNDS) * 1000
+  return nextPollDelaySeconds(stationaryStreak, SAMPLE_POLL_BOUNDS, { conserve: conserveNow() }) * 1000
 }
 
 /** Start or stop location sampling to match shouldSample(), re-arming if the tier
