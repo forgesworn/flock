@@ -713,7 +713,7 @@ function inviteSections(): string {
     <div class="card stack">
       <div class="qr" id="qr"></div>
       ${showInviteLinkText && activeCircle() ? `<div class="invite-code">${esc(store.inviteLink(activeCircle() as store.Circle, location.origin))}</div>` : ''}
-      <button class="btn primary" data-action="copy-invite">Copy invite link</button>
+      <button class="btn primary" data-action="copy-invite">${'share' in navigator ? 'Share invite link' : 'Copy invite link'}</button>
       <div class="note">Let them scan the QR with their camera — it opens flock and joins in one tap. Or copy the link and send it. It carries the secret, so treat it like a password.</div>
     </div>
 
@@ -1245,8 +1245,11 @@ async function centreOnCurrentPosition(): Promise<void> {
 // Off by default until the extract service (server/extract.mjs) is deployed to the
 // host; enable with VITE_OFFLINE_MAP=1 or localStorage 'flock.offlinemap'='1'.
 function offlineMapEnabled(): boolean {
+  // Default ON (audit Slice 10): saving your area once makes the map zero-network —
+  // nobody (host or CDN) sees when or where you look. '0' opts out; raster tiles
+  // remain the automatic fallback wherever no area is saved.
   if (import.meta.env.VITE_OFFLINE_MAP === '1') return true
-  try { return localStorage.getItem('flock.offlinemap') === '1' } catch { return false }
+  try { return localStorage.getItem('flock.offlinemap') !== '0' } catch { return true }
 }
 
 async function refreshOfflineState(): Promise<void> {
@@ -2202,7 +2205,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'pickup-check': pickupPanel = 'check'; pickupOutcome = null; render(); break
     case 'pickup-close': pickupPanel = null; pickupOutcome = null; showDuressWord = false; render(); break
     case 'pickup-check-run': void runSpokenCheck(); break
-    case 'copy-invite': copyInvite(); break
+    case 'copy-invite': void copyInvite(); break
     case 'copy-npub': copyNpub(); break
     case 'send-invite': void sendInvite(); break
     case 'reseed': void reseedCircle(); break
@@ -2712,10 +2715,19 @@ function wireDuressReveal(node: HTMLElement): void {
   node.addEventListener('pointercancel', cancel)
 }
 
-function copyInvite(): void {
+async function copyInvite(): Promise<void> {
   const c = activeCircle()
   if (!c) return
   const link = store.inviteLink(c, location.origin)
+  // The OS share sheet keeps the secret off the clipboard entirely (clipboards
+  // cloud-sync and every app can read them). Clipboard is the desktop fallback;
+  // selectable text is the last resort.
+  if (navigator.share) {
+    try { await navigator.share({ title: `Join ${c.name} on flock`, url: link }); return }
+    catch (e) {
+      if ((e as Error).name === 'AbortError') return // user closed the sheet — not an error
+    }
+  }
   navigator.clipboard?.writeText(link).then(
     () => toast('Invite link copied — send it only through a chat you trust'),
     () => { showInviteLinkText = true; render(); toast("Couldn't copy — here's the link to select") },

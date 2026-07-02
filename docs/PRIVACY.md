@@ -74,6 +74,31 @@ operator's promise — so a `.onion` endpoint on a plain no-log relay beats a
 "provable-no-log" (TEE) relay for the metadata that actually matters here. See
 `docs/plans/2026-07-01-second-no-log-relay.md`.
 
+## The map & the host — the other hop (audit Slice 10)
+
+The relay never sees plaintext, but the **map does not use the relay**. The PWA is
+served from our host, and the map's same-origin proxies (`/tiles/*`, `/nominatim/*`,
+`/overpass/*`, `/api/extract`) exist so OpenStreetMap services never see users. That
+moves the exposure to our edge — and **Cloudflare sits in front of it**
+(orange-cloud): TLS terminates at Cloudflare, so CF — not just our Caddy — can see:
+
+| It CAN see | What it means | Mitigation |
+|---|---|---|
+| Your **IP** + tile viewports | the neighbourhoods you look at ≈ where you live/go | offline/vector basemap: a saved area pans with **zero** tile traffic (default from Slice 10) |
+| Place-name searches (`/nominatim`) | addresses you type | same-origin proxy already hides you from OSM; searches are user-initiated and rare |
+| Venue-search boxes (`/overpass`) | the area of a meeting-point search (never a member's coordinates — bbox only, by design) | bbox is already the *coarsest* artefact of the search |
+| Offline-extract boxes (`/api/extract`) | the area you saved for offline ≈ home | treat as sensitive: no app-level logging, Caddy access logs off (both done); per-IP rate-limit follow-up |
+
+**The decision (open):** grey-cloud `flock.forgesworn.dev` (DNS-only, TLS at Caddy
+alone) is the recommended end-state — Cloudflare drops out of the TLS path entirely.
+The trade-off is losing CF's DDoS shielding and its edge tile cache; the offline
+basemap default shrinks the tile-cache value, which is most of the reason to stay.
+Until switched, **Cloudflare is inside the trust boundary for map metadata** — this
+table is the honest record of that.
+
+Signals (SOS, beacons, check-ins…) are unaffected: they travel gift-wrapped over the
+relay hop, not through the host.
+
 ## Captured requirements
 
 ### Private "no-report" zones (redaction zones)
