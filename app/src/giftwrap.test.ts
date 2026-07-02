@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { generateSecretKey } from 'nostr-tools/pure'
 import { makeLocalSigner } from './signer'
-import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
+import { giftWrap, giftUnwrap, rawNip44Decrypt, WRAP_EXPIRY_SECONDS } from './giftwrap'
 import { deriveInbox } from './keys'
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
@@ -39,5 +39,27 @@ describe('gift-wrap-everything: signals via the shared inbox', () => {
   it('the inbox rotates when the seed rotates (reseed)', () => {
     expect(deriveInbox(SEED).pk).not.toBe(deriveInbox('33'.repeat(32)).pk)
     expect(deriveInbox(SEED).pk).toBe(deriveInbox(SEED).pk) // deterministic
+  })
+})
+
+describe('NIP-40 retention bound (audit Slice 6)', () => {
+  it('every wrap type expires the same uniform window after its backdated created_at', async () => {
+    const inbox = deriveInbox(SEED)
+    const invitee = signer()
+    // Signal-, fences- and invite-style wraps: a per-type window would be a
+    // type-tell, and deriving from real time would undo the created_at blur.
+    const wraps = [
+      await giftWrap(signer(), inbox.pk, { kind: 20_078, content: 'beacon-blob', tags: [['t', 'beacon']] }),
+      await giftWrap(signer(), inbox.pk, { kind: 20_078, content: 'fences-blob', tags: [['t', 'fences']] }),
+      await giftWrap(signer(), invitee.pubkey, { kind: 24_078, content: 'invite-blob', tags: [] }),
+    ]
+    for (const wrap of wraps) {
+      const exp = Number(wrap.tags.find((t) => t[0] === 'expiration')?.[1])
+      expect(exp).toBe(wrap.created_at + WRAP_EXPIRY_SECONDS)
+    }
+  })
+
+  it('the window clears the 2-day created_at randomisation with room for offline members', () => {
+    expect(WRAP_EXPIRY_SECONDS).toBeGreaterThanOrEqual(14 * 86_400 + 172_800)
   })
 })

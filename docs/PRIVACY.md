@@ -66,6 +66,7 @@ What it **can** still see is connection metadata, which no relay can avoid handl
 | Your **IP** → geolocation, pattern-of-life | A `.onion` endpoint removes it (Tor). This — not a "provable no-log" relay — is the high-leverage fix |
 | **IP ↔ a pseudonymous inbox** (you subscribe to your own) → group size/shape, active hours | Rotates on reseed; further blunted over Tor |
 | Real **arrival timing + volume** (bursts) | Timing hygiene / cover traffic (planned) |
+| **Stored ciphertext history** — every retained wrap is decryptable by a *future* key compromise | Every wrap carries a NIP-40 `expiration`: one **uniform 16-day** window for all types (a per-type window would be a type-tell), derived from the backdated `created_at` (so the tag adds zero information). Epoch rotation bounds exposure forwards; this bounds it **backwards** to ~2 weeks |
 
 **The honest framing:** this is **defence in depth on top of "the relay is untrusted"**,
 never a reason to trust it. The damaging residual is the **IP** — Tor's job, not the

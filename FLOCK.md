@@ -231,6 +231,14 @@ Grounded in the feasibility research (`docs/research/2026-06-30-feasibility-rese
    and legal duty-of-care obligations and an asymmetric power relationship;
    night-out mode is consensual, symmetric, and ephemeral. Defaults differ
    accordingly and MUST NOT be conflated.
+6. **Bounded relay retention.** Every gift wrap carries a NIP-40 `expiration`:
+   one **uniform 16-day** window for all wrap types (a per-type window would be
+   a type-tell), derived from the already-backdated `created_at` (real time
+   would undo the timing blur) — so the tag adds zero information. Epoch
+   rotation bounds a key compromise *forwards*; expiry bounds it *backwards* to
+   ~two weeks of stored ciphertext. Consequence: relay replay only covers the
+   window, so long-lived synced state (the fence set, §3.2) MUST be republished
+   by its author when a new member appears.
 
 ## 7. Open items
 

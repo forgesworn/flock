@@ -18,6 +18,14 @@ const nowSec = (): number => Math.floor(Date.now() / 1000)
 // NIP-59: randomise created_at up to 2 days in the past to blur timing.
 const wrapTime = (): number => nowSec() - Math.floor(Math.random() * 172_800)
 
+// NIP-40: every wrap expires this long after its created_at, bounding how far
+// back a future key compromise can decrypt relay-stored history. ONE window for
+// all wrap types (a per-type window would be a type-tell), derived from the
+// already-backdated created_at (real time would undo the timing blur) — so the
+// tag carries zero information beyond created_at itself. 16 days clears the
+// 2-day backdating while leaving ~2 weeks for offline members to catch up.
+export const WRAP_EXPIRY_SECONDS = 16 * 86_400
+
 export interface InnerEvent { kind: number; content: string; tags: string[][]; created_at?: number }
 export interface Rumor { pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; id?: string }
 
@@ -41,8 +49,9 @@ export async function giftWrap(signer: FlockSigner, recipientPk: string, inner: 
   const seal = await signer.signEvent({ kind: 13, content: sealContent, tags: [], created_at: wrapTime() })
   const ephSk = generateSecretKey()
   const wrapContent = nip44encrypt(JSON.stringify(seal), getConversationKey(ephSk, recipientPk))
+  const created_at = wrapTime()
   return finalizeEvent(
-    { kind: 1059, content: wrapContent, tags: [['p', routeTag]], created_at: wrapTime() },
+    { kind: 1059, content: wrapContent, tags: [['p', routeTag], ['expiration', String(created_at + WRAP_EXPIRY_SECONDS)]], created_at },
     ephSk,
   ) as unknown as SignedEvent
 }
