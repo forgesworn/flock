@@ -437,11 +437,15 @@ modes**. Plan with designs, decisions, and per-slice tests:
   terminates TLS in front of the same-origin proxies (sees IP + viewports/bboxes ≈
   home); grey-cloud or document honestly, and flip the proven offline/vector basemap
   to default.
-- [ ] **Slice 11 — truthful SOS states** 🔴 — from the UX deep-dive (verified):
-  `alertActive` is set before the publish, so a failed SOS still shows "Help sent";
-  the receiver of an alert sees sender's-perspective copy; no "I'm safe now"
-  stand-down. Fix all three (stand-down gets the Slice-5 covert long-press treatment:
-  coerced all-clear keeps other devices alarmed).
+- [x] **Slice 11 — truthful SOS states** 🔴 — "Help sent" now only after a confirmed
+  publish; failure = persistent "Help didn't send / tap to try again" orb (retry, not
+  toast). Receiver orb shows "[name] needs help / tap to see where" from `st.alerts`
+  across all circles; tap focuses the circle (map when a location is held). New
+  `allclear` library signal (group envelope key): "I'm safe now" stands the circle
+  down; covert long-press sends `coerced:true` inside the encryption — identical
+  screen + wire, receivers keep alarming; only the alert's owner can stand it down.
+  E2e: broken-relay SOS shows persistent retry; genuine stand-down clears B; coerced
+  stand-down calms A's screen while B stays alarmed.
 - [ ] **Slice 12 — helper hints + settings switch** 🟠 — Darren's ask: one reusable
   `hint(id, text)` with per-hint dismiss, "Show helper tips" toggle (default on) +
   "bring tips back" on You; initial placements on mode/watch/SOS/invite/relays/zones.
