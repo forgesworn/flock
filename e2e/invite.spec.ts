@@ -12,6 +12,23 @@ test.describe('invites — both ways', () => {
     await expect(B.locator('.circle-chip.on')).toContainText('The Smiths')
   })
 
+  test('join by link (the QR path): opening the link joins in one tap, then the secret is scrubbed', async ({ browser }) => {
+    const A = await newPerson(browser)
+    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    // The copy button now yields a LINK with the code in the #fragment — a camera
+    // app OPENS it (bare-text QRs get offered to a web search, seed and all).
+    const link = await inviteCode(A)
+    expect(link).toContain('#join=')
+
+    const B = await newPerson(browser)
+    await B.goto(link)
+    // B lands joined, and the seed is scrubbed from the address bar immediately.
+    await expect(B.locator('[data-action="tab"][data-tab="circle"]')).toBeVisible()
+    expect(B.url()).not.toContain('join=')
+    await gotoTab(B, 'circle')
+    await expect(B.locator('.circle-chip.on')).toContainText('The Smiths')
+  })
+
   test('remote invite (gift-wrap over the relay): B shares a key, A sends, B auto-joins', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)

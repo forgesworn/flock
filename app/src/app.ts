@@ -371,8 +371,45 @@ export function mount(el: HTMLElement): void {
   }
   rehydratePresence() // restore cached member pins so a refresh doesn't blank the map
   store.save(persisted) // persist any legacy→multi-circle migration / pruning straight away
+  // A join link (scanned QR / tapped in a chat) arrives as a #join= fragment —
+  // never sent to any server. Scrub it from the address bar BEFORE anything else
+  // runs: it carries the seed.
+  const joinCode = consumeJoinFragment()
   render()
+  if (joinCode) joinFromLink(joinCode)
+  // Tapping a link while flock is already open is a fragment-only navigation —
+  // no reload, no fresh mount — so consume those too.
+  window.addEventListener('hashchange', () => {
+    const code = consumeJoinFragment()
+    if (code) joinFromLink(code)
+  })
   void restoreSignet()
+}
+
+/** Pull the invite code out of a #join= fragment and scrub it from the address
+ *  bar/history straight away — it carries the seed. */
+function consumeJoinFragment(): string | null {
+  const m = location.hash.match(/^#join=(.+)$/)?.[1]
+  if (!m) return null
+  history.replaceState(null, '', location.pathname + location.search)
+  return decodeURIComponent(m)
+}
+
+/** Join straight from a scanned/tapped link — the same path as a pasted code. */
+function joinFromLink(code: string): void {
+  try {
+    const circle = store.decodeInvite(store.inviteCodeFrom(code))
+    if (persisted.circles.some((c) => c.id === circle.id)) { switchCircle(circle.id); return }
+    persisted.identity ??= store.createIdentity()
+    circle.members = [persisted.identity.pk]
+    circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
+    upsertCircle(circle, true)
+    onboardStep = 'intro'
+    adding = false
+    tab = 'home'
+    render()
+    toast(`You've joined ${circle.name}`)
+  } catch { toast('That join link is not valid — ask for a fresh one.') }
 }
 
 function render(): void {
@@ -592,8 +629,8 @@ function inviteSections(): string {
     <div class="section-title" style="margin-top:22px">Show a code (in person)</div>
     <div class="card stack">
       <div class="qr" id="qr"></div>
-      <button class="btn primary" data-action="copy-invite">Copy invite code</button>
-      <div class="note">Strongest: let them scan the QR, or send the code. It carries the secret, so treat it like a password.</div>
+      <button class="btn primary" data-action="copy-invite">Copy invite link</button>
+      <div class="note">Let them scan the QR with their camera — it opens flock and joins in one tap. Or copy the link and send it. It carries the secret, so treat it like a password.</div>
     </div>
 
     <div class="section-title" style="margin-top:22px">Send to their key (remote)</div>
@@ -1045,7 +1082,9 @@ function wireApp(): void {
   if (qrEl && ac) {
     try {
       const qr = qrcode(0, 'M')
-      qr.addData(store.encodeInvite(ac))
+      // A LINK, never bare text: camera apps open links, but bare text they offer
+      // to web-search — which would hand the seed to a search engine (see inviteLink).
+      qr.addData(store.inviteLink(ac, location.origin))
       qr.make()
       qrEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true })
     } catch { qrEl.remove() }
@@ -2187,7 +2226,7 @@ function doJoinRemote(): void {
 function doJoin(): void {
   const code = (document.getElementById('jcode') as HTMLTextAreaElement | null)?.value ?? ''
   try {
-    const circle = store.decodeInvite(code)
+    const circle = store.decodeInvite(store.inviteCodeFrom(code))
     persisted.identity ??= store.createIdentity()
     if (persisted.circles.some((c) => c.id === circle.id)) { switchCircle(circle.id); adding = false; return }
     circle.members = [persisted.identity.pk]
@@ -2491,8 +2530,8 @@ function wireDuressReveal(node: HTMLElement): void {
 function copyInvite(): void {
   const c = activeCircle()
   if (!c) return
-  const code = store.encodeInvite(c)
-  navigator.clipboard?.writeText(code).then(() => toast('Invite code copied'), () => toast('Copy failed — select it manually'))
+  const link = store.inviteLink(c, location.origin)
+  navigator.clipboard?.writeText(link).then(() => toast('Invite link copied'), () => toast('Copy failed — select it manually'))
 }
 
 function copyNpub(): void {

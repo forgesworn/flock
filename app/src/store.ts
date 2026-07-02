@@ -205,6 +205,21 @@ export function encodeInvite(c: Circle): string {
   return b64encode(JSON.stringify({ v: 1, id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) }))
 }
 
+/** A tappable/scannable join link. The code (which carries the SEED) travels in
+ *  the URL FRAGMENT — a fragment is never sent to any server, so neither the
+ *  host nor a CDN in front of it ever sees the secret. Camera apps OPEN a link;
+ *  bare text they offer to web-search, which would hand the seed to a search
+ *  engine. The app scrubs the fragment from the address bar on load. */
+export function inviteLink(c: Circle, origin: string): string {
+  return `${origin}/#join=${encodeInvite(c)}`
+}
+
+/** The invite code from pasted text: a bare code, or a full join link. */
+export function inviteCodeFrom(text: string): string {
+  const m = text.match(/#join=([^&\s]+)/)
+  return m ? m[1] : text.trim()
+}
+
 export function decodeInvite(code: string): Circle {
   const o = JSON.parse(b64decode(code.trim()))
   if (o.v !== 1 || typeof o.s !== 'string' || o.s.length !== 64 || typeof o.id !== 'string') {
