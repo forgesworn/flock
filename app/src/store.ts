@@ -37,6 +37,13 @@ export interface Circle {
   unseenMembers?: string[]
   /** When THIS device joined (unix sec) — see JOIN_GRACE_SEC. Unset for circles we created. */
   joinedAt?: number
+  /** When the current seed was adopted (unix sec) — drives automatic rotation
+   *  (rotation.ts). Stamped on create/join/reseed; migrated to "now" for
+   *  circles that predate rotation. */
+  reseededAt?: number
+  /** Device-local: when this device last re-wrapped the current seed for
+   *  offline members (rotation.ts refreshDue). Never synced. */
+  seedRefreshedAt?: number
 }
 
 /** Right after we join, relay replay delivers the existing members' history —
@@ -190,6 +197,9 @@ function hydrate(o: Partial<Persisted> & { circle?: Circle | null; relayUrl?: st
   // Migrate legacy device-global safe places into each circle.
   state.circles = adoptLegacyFences(state.circles, o.geofences)
   delete (state as unknown as Record<string, unknown>).geofences
+  // Rotation migration: circles from before automatic seed rotation have no
+  // seed age — start their clock now rather than mass-rotating on upgrade day.
+  state.circles = state.circles.map((c) => (c.reseededAt ? c : { ...c, reseededAt: now }))
   if (!state.circles.some((c) => c.id === state.activeCircleId)) {
     state.activeCircleId = state.circles[0]?.id ?? null
   }
@@ -307,6 +317,7 @@ export function createCircle(name: string, mode: Mode, ownerPk: string, circleRo
     members: [ownerPk],
     checkinInterval: 0,
     epoch: 0,
+    reseededAt: Math.floor(Date.now() / 1000),
     ...(expiresAt ? { expiresAt } : {}),
   }
 }

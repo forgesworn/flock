@@ -25,6 +25,7 @@ import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
 import { isNativeShell } from './native'
+import { rotationDue, refreshDue } from './rotation'
 import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
@@ -446,6 +447,10 @@ function bootUnlocked(): void {
   }
   watchBattery() // battery-aware sampling (conserve when low + discharging, never during an alert)
   rehydratePresence() // restore cached member pins so a refresh doesn't blank the map
+  // Automatic seed rotation: shortly after boot (letting signer restore + subs
+  // settle first), then hourly — the cadence is monthly, precision irrelevant.
+  window.setTimeout(() => { void maybeRotateSeeds() }, 20_000)
+  window.setInterval(() => { void maybeRotateSeeds() }, 3_600_000)
   store.save(persisted) // persist any legacy→multi-circle migration / pruning straight away
   // A join link (scanned QR / tapped in a chat) arrives as a #join= fragment —
   // never sent to any server. Scrub it from the address bar BEFORE anything else
@@ -1709,7 +1714,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     if (persisted.circles.some((c) => c.id === payload.id)) return // already a member
     upsertCircle({
       id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m,
-      members: [signer.pubkey], checkinInterval: 0, joinedAt: nowSec(), ...(payload.x ? { expiresAt: payload.x } : {}),
+      members: [signer.pubkey], checkinInterval: 0, joinedAt: nowSec(), reseededAt: nowSec(), ...(payload.x ? { expiresAt: payload.x } : {}),
     }, true)
     awaitingInvite = false
     onboardStep = 'intro'
@@ -1720,7 +1725,8 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
   } else if (payload.t === 'reseed') {
     const existing = persisted.circles.find((c) => c.id === payload.id)
     if (!existing) return
-    patchCircleById(existing.id, { seedHex: payload.s })
+    if (existing.seedHex === payload.s) return // a refresh echo of the seed we already hold — nothing to do
+    patchCircleById(existing.id, { seedHex: payload.s, reseededAt: nowSec() })
     const st = cstate(existing.id)
     st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.trails.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
@@ -1766,8 +1772,8 @@ async function sendInvite(): Promise<void> {
   } catch { toast('Could not send invite') }
 }
 
-async function reseedCircle(removePk?: string): Promise<void> {
-  const c = activeCircle()
+async function reseedCircle(removePk?: string, circle: store.Circle | null = activeCircle(), silent = false): Promise<void> {
+  const c = circle
   const signer = getSigner()
   if (!c || !signer) return
   persisted.circleRootHex ??= store.newSeed()
@@ -1779,7 +1785,7 @@ async function reseedCircle(removePk?: string): Promise<void> {
       const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
       for (const w of wraps) await svc.publishSigned(persisted.relayUrls, w as never)
     }
-    patchCircleById(c.id, { seedHex: seed, epoch, members: (c.members ?? []).filter((pk) => pk !== removePk) })
+    patchCircleById(c.id, { seedHex: seed, epoch, reseededAt: nowSec(), seedRefreshedAt: nowSec(), members: (c.members ?? []).filter((pk) => pk !== removePk) })
     const st = cstate(c.id)
     st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.trails.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
     st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
@@ -1789,9 +1795,36 @@ async function reseedCircle(removePk?: string): Promise<void> {
     // members, but anyone joining after the reseed finds it on the new inbox).
     const reseeded = persisted.circles.find((x) => x.id === c.id)
     if (reseeded && reseeded.fencesUpdatedAt !== undefined) void publishFences(reseeded)
-    toast(removePk ? 'Member removed — circle security reset' : 'Circle security reset')
+    if (!silent) toast(removePk ? 'Member removed — circle security reset' : 'Circle security reset')
     render()
-  } catch { toast("Couldn't reset security — try again") }
+  } catch { if (!silent) toast("Couldn't reset security — try again") }
+}
+
+// ── Automatic seed rotation (rotation.ts) ────────────────────────────────────
+// An ongoing circle's mailbox (the seed-derived inbox) is its only wire-visible
+// pseudonym; rotating it monthly bounds how long a hostile relay can cluster
+// traffic against it. Between rotations, the first-ranked member re-wraps the
+// current seed weekly so a member offline through a rotation (reseed wraps
+// expire — NIP-40) is never locked out. Silent: routine hygiene, not news.
+async function maybeRotateSeeds(): Promise<void> {
+  const me = persisted.identity?.pk
+  const signer = getSigner()
+  if (!me || !signer || isDark()) return // deliberately dark — no automatic traffic at all
+  const now = nowSec()
+  for (const c of [...persisted.circles]) {
+    if (rotationDue(c, me, now)) {
+      await reseedCircle(undefined, c, true)
+    } else if (refreshDue(c, me, c.seedRefreshedAt, now)) {
+      try {
+        const recipients = (c.members ?? []).filter((pk) => pk !== me)
+        if (recipients.length) {
+          const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: c.seedHex, n: c.name, m: c.mode })
+          for (const w of wraps) await svc.publishSigned(persisted.relayUrls, w as never)
+        }
+        patchCircleById(c.id, { seedRefreshedAt: now })
+      } catch { /* transient — the next hourly check retries */ }
+    }
+  }
 }
 
 // ── Check-in / dead-man's-switch ─────────────────────────────────────────────
