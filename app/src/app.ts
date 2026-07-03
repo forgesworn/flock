@@ -1264,13 +1264,13 @@ function onboardingView(): string {
     const getApp = isNativeShell()
       ? ''
       : /android/i.test(navigator.userAgent)
-        ? `<a class="btn get" href="./get.html">Get the Android app</a>
-           ${hint('get-app', "The app can keep watch in the background — you're told if someone leaves a safe place even with the phone in a pocket. The website only works while it's open.")}`
-        : '<div class="note" style="margin-top:16px">On Android or GrapheneOS? <a href="./get.html">Get the app</a> — it can keep watch in the background; the website only works while open.</div>'
+        ? `<a class="btn get" href="./get.html">⬇&nbsp; Get the Android app</a>
+           ${hint('get-app', "The app can keep watch in the background and tell you if someone leaves a safe place, even with the phone in a pocket. This website only works while it's open.")}`
+        : '<div class="note onboard-note">On Android or GrapheneOS? <a href="./get.html">Get the app</a>. It can keep watch in the background. This website only works while open.</div>'
     inner = `
       <img class="hero-logo" src="./icon.svg" alt="" />
       <h1>Stay close,<br/>stay private.</h1>
-      <p class="tagline">Your location stays hidden — shared only when you ask for a pick-up, raise help, or step outside a safe area.</p>
+      <p class="tagline">Your location stays hidden. It is shared only when you ask for a pick-up, raise help, or step outside a safe area.</p>
       <div class="actions">
         <button class="btn primary" data-action="create">Create a circle</button>
         <button class="btn ghost" data-action="join">Join with a code</button>
@@ -1278,7 +1278,7 @@ function onboardingView(): string {
         ${getApp}
         ${signetRow}
       </div>
-      <div class="note" style="margin-top:16px">No account, no sign-up — flock makes an anonymous key that lives only on this phone.</div>`
+      <div class="note onboard-note">No account, no sign-up. flock makes an anonymous key that lives only on this phone.</div>`
   }
   return `<main class="screen onboard fade-in">${inner}</main><div class="toast" id="toast"></div>`
 }

@@ -332,9 +332,14 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .btn.ghost { background: transparent; }
 .btn.small { width: auto; padding: 10px 16px; font-size: 14px; border-radius: 999px; }
 /* The APK download on the welcome screen — a highlighted, positive action
-   (and an <a>, so kill the underline). */
+   (and an <a>, so kill the underline). Solid fill: it must be unmissable on a
+   phone, not another quiet outline in the stack. */
 a.btn { text-decoration: none; }
-.btn.get { background: var(--safe-dim); border-color: var(--safe-dim); color: var(--safe); }
+.btn.get { background: var(--safe); border-color: transparent; color: #08110d; font-weight: 700; }
+/* Welcome-screen footnotes carry real information (the download path, the
+   no-account promise) — readable size and contrast, not fine print. */
+.onboard-note { margin-top: 16px; font-size: 14px; color: var(--muted); }
+.onboard-note a { color: var(--safe); }
 
 .actions { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 4px; }
 

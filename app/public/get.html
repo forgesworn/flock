@@ -10,7 +10,7 @@
   <style>
     :root {
       --bg: #0e1116; --surface: #161b22; --line: rgba(255,255,255,.08);
-      --text: #eef1f5; --muted: #97a3b1; --safe: #5fd0a8; --calm: #6ea8fe;
+      --text: #eef1f5; --muted: #b7c2d0; --safe: #5fd0a8; --calm: #8db8ff;
       color-scheme: dark;
     }
     * { box-sizing: border-box; }
@@ -20,24 +20,25 @@
       display: flex; justify-content: center; padding: 32px 20px 64px;
     }
     main { max-width: 620px; width: 100%; }
-    h1 { font-family: Georgia, serif; font-weight: 600; font-size: 2rem; margin: 18px 0 6px; }
+    h1 { font-family: Georgia, serif; font-weight: 600; font-size: 2.1rem; margin: 18px 0 6px; }
     h2 { font-size: 1.15rem; margin: 0 0 4px; }
     p { margin: 8px 0; }
-    .tagline { color: var(--muted); margin-bottom: 28px; }
+    .tagline { color: var(--muted); margin-bottom: 20px; }
     .logo { width: 64px; height: 64px; border-radius: 16px; }
     .card {
       background: var(--surface); border: 1px solid var(--line);
       border-radius: 18px; padding: 20px 22px; margin: 16px 0;
     }
     .btn {
-      display: inline-block; background: var(--safe); color: #08110d;
-      font-weight: 700; text-decoration: none; border-radius: 14px;
-      padding: 14px 22px; margin: 10px 0 4px;
+      display: block; width: 100%; text-align: center;
+      background: var(--safe); color: #08110d;
+      font-weight: 800; font-size: 19px; text-decoration: none;
+      border-radius: 16px; padding: 18px 22px; margin: 6px 0 10px;
     }
     .muted { color: var(--muted); font-size: .95rem; }
     ol { padding-left: 22px; margin: 10px 0; }
-    li { margin: 10px 0; }
-    li .why { display: block; color: var(--muted); font-size: .92rem; }
+    li { margin: 12px 0; }
+    li .why { display: block; color: var(--muted); font-size: .95rem; }
     a { color: var(--calm); }
     code {
       background: rgba(255,255,255,.06); border-radius: 6px; padding: 2px 6px;
@@ -52,36 +53,35 @@
 <main>
   <img class="logo" src="./icon.svg" alt="" />
   <h1>Get flock</h1>
-  <p class="tagline">Stay close, stay private — location shared only when a moment needs it.</p>
+  <p class="tagline">Stay close, stay private. Location is shared only when a moment needs it.</p>
+
+  <a class="btn" href="./downloads/flock.apk" download>⬇&nbsp; Download flock for Android</a>
+  <p class="muted">Free. Works on any Android 7+ phone, including GrapheneOS. No Google Play,
+     no Google account, nothing phones home.</p>
 
   <div class="card">
-    <h2>Android &amp; GrapheneOS — the app</h2>
-    <p>The app can keep watch <strong>in the background</strong> — it notices you leaving a
-       safe place even with the screen off. The web version below only works while open.</p>
-    <p>No Google account, no app store, no sign-up — flock makes an anonymous key that
-       lives only on your phone, so nothing links it to you. Use it as a guest and reset
-       it whenever. You install the app straight from here.</p>
-    <a class="btn" href="./downloads/flock.apk" download>Download flock for Android</a>
-    <p class="muted">Works on any Android 7+ phone, including GrapheneOS — no Google Play services needed.</p>
+    <h2>Install it (takes a minute)</h2>
     <ol>
-      <li>Open the downloaded file (pull down your notifications and tap it).</li>
-      <li>If your phone asks, allow your browser to <strong>install unknown apps</strong> — that's
-          Android's normal question for any app that doesn't come from an app store.
-          <span class="why">Why: flock is deliberately not in the Play Store — no Google account or
-          tracking involved in getting it.</span></li>
+      <li>Open the downloaded file. Pull down your notifications and tap it.</li>
+      <li>If your phone asks, allow your browser to <strong>install unknown apps</strong>.
+          That is Android's normal question for any app that skips the app store.
+          <span class="why">Why: flock is deliberately not in the Play Store, so no Google
+          account or tracking is involved in getting it.</span></li>
       <li>When you first share in the app, choose location
-          <strong>“Allow all the time”</strong> (Android takes you to Settings for this).
-          <span class="why">Why: that's what lets flock notice a safe-place breach while your phone
-          is in your pocket. It does <em>not</em> mean your location is shared all the time —
-          sharing still follows flock's rules: only on a breach, a pick-up, or a call for help.</span></li>
+          <strong>“Allow all the time”</strong>. Android takes you to Settings for this.
+          <span class="why">Why: this lets flock notice you leaving a safe place while the
+          phone is in your pocket. It does <em>not</em> mean your location is shared all the
+          time. Sharing still follows flock's rules: only on a breach, a pick-up, or a call
+          for help.</span></li>
       <li>Allow the notification when asked.
-          <span class="why">Why: Android requires a visible notice while an app watches location in
-          the background. It only appears while sharing is on.</span></li>
+          <span class="why">Why: Android requires a visible notice while an app watches
+          location in the background. It only appears while sharing is on.</span></li>
       <li>GrapheneOS only: set Settings → Apps → flock → Battery → <strong>Unrestricted</strong>.
-          <span class="why">Why: otherwise the system may quietly stop the watch to save power.</span></li>
+          <span class="why">Why: otherwise the system may quietly stop the watch to save
+          power.</span></li>
     </ol>
-    <p class="muted">Updates: download the new file and install it over the top — your circles and
-       settings stay.</p>
+    <p class="muted">Updates: download the new file and install it over the top. Your circles
+       and settings stay.</p>
     <details>
       <summary>Verify your download (optional)</summary>
       <p class="muted">Compare the file's fingerprint with
@@ -92,10 +92,18 @@
   </div>
 
   <div class="card">
-    <h2>Any phone — the web app</h2>
+    <h2>Why the app instead of the website?</h2>
+    <p>The app can keep watch <strong>in the background</strong>. It notices you leaving a
+       safe place even with the screen off. The website only works while it is open.</p>
+    <p>There is no account and no sign-up. flock makes an anonymous key that lives only on
+       your phone, so nothing links it to you. Use it as a guest and reset it whenever.</p>
+  </div>
+
+  <div class="card">
+    <h2>Any phone, no install</h2>
     <p>Open <a href="https://flock.forgesworn.dev/">flock.forgesworn.dev</a> and add it to your
        home screen (iPhone: Share → <em>Add to Home Screen</em>). Everything works while the app
-       is open — including SOS, pick-ups and the live map.</p>
+       is open, including SOS, pick-ups and the live map.</p>
   </div>
 
   <a class="back" href="./">← Back to flock</a>
