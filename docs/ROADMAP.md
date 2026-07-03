@@ -11,13 +11,78 @@ hardware — the **Android APK now ships** (`npm run apk:release`) and is ready 
 sideload the moment hardware lands). Those two, plus publishing `keystore-kit` to
 npm, are the standing Darren-side actions.
 
+## MVP scope (2026-07)
+
+The app was **refocused to a single MVP** (2026-07-03): privacy-preserving **live
+location sharing with one group of friends** — circle set up in advance, QR/remote
+invites, a per-person **geohash precision slider** (3–9: whole region, e.g.
+Mallorca → exact spot; the map shows exactly what the circle sees of you, with a
+dashed would-see preview while not sharing) driving
+the emission pipeline (`decideEmission` coarse override; sampling tier follows the
+slider — ≥7 uses GPS, coarser polls low-power), and front-page **"buzz the circle"
+quick actions** (Check in · Come to me · Where are you? · Call me · On my way).
+**"Come to me"** sends the buzz plus a confirmed **one-shot exact beacon**
+(precision 9, plain `beacon` on the wire, cadence untouched, slider unchanged;
+no-report zones still cap it). Family/night-out modes collapsed to one persistent
+share-live mode (invite wire format unchanged).
+
+**Parked post-MVP — removed from the app UI only; the library keeps every module
+tested and exported:** SOS/duress (incl. stand-down, covert holds, breadcrumb
+trail), pick-me-up + spoken verification, take-a-break/off-grid, safe places /
+geofence breach, the no-report-zone editor (the policy cap still applies to any
+legacy zones), the periodic check-in dead-man's-switch, rendezvous + meeting
+points, and the offline-map save control (its area source was the zone editor).
+Their roadmap entries below stand as the post-MVP backlog — annotated, not
+deleted. The e2e suite was trimmed to the MVP subset at the same time (see the
+coverage note below).
+
+Coarse disclosures render as the **true geohash cell square** (2026-07-03) —
+the member is guaranteed inside the square, whose centre is the grid's, never
+their position; the old circular halo only approximated it (a member near a
+cell corner sat outside the inscribed circle).
+
+## Lost phone ("back of a taxi")
+
+A phone that is *sharing* is a findable phone — that's the pitch for leaving
+coarse sharing on all trip. The playbook that already works: watch its pin move
+(APK background watch), buzz it repeatedly (system notification + vibration even
+hidden), read its **last seen** when the beacons stop, then **remove member**
+(reseed cuts the device off) — and the App lock means a finder gets ciphertext.
+
+- [x] **Last seen** (2026-07-03): every roster row with a cached beacon shows
+  "on the map · within ~X · last seen HH:MM" plus a 📍 **see-on-map** jump that
+  frames the member's whole disclosed cell. Pure UI over the presence cache.
+- [x] **Peer "mark as lost"** (2026-07-03): anyone in the circle flags a
+  member's phone lost (`t=lost` signal, `src/lost.ts`, FLOCK.md §3.3 —
+  group-envelope encrypted, latest-per-member wins). Everyone's roster shows a
+  "phone lost" pill, the pin/square turns alert-red, and the phone itself shows
+  a loud finder card on Home ("found this phone? please help it home") with
+  vibration + system notification. Anyone clears it — including the owner
+  tapping "It's not lost — I've got it". Display-only by design: it never
+  changes what the device discloses. e2e: `lost-phone.spec.ts`.
+- [ ] **Make it ring**: a targeted buzz variant the APK plays as a loud
+  alarm-channel notification even on silent — the back-of-taxi case is a
+  *minutes* problem. Native work in `native/notify.ts` (alarm channel, sound,
+  maybe bypass-DND permission); no protocol change.
+- [ ] **Remote exact ping ("find my phone")**: a member asks; the lost device
+  answers with a one-shot exact beacon (the existing come-to-me one-shot,
+  triggered remotely — targeted buzz as the ask, plain `beacon` as the answer).
+  **Consent design is the work, not the code**: owner pre-authorises per circle
+  ("if I lose my phone, this circle may ping it"), the device shows a loud
+  banner with a cancel window before answering, rate-limited, and the consent
+  path gets its own e2e. Do not build the mechanism before the gates.
+- **Non-goal — permanent**: remote "start sharing". If sharing was off when the
+  phone was lost, nothing can switch it on from outside: a remote-enable switch
+  is indistinguishable from a stalking tool and breaks the invariant that
+  disclosure only ever originates from the device's own settings.
+
 ## Cross-cutting (apply to everything)
 
 - **Mobile-first** — phone-shaped, large touch targets, one-handed, installable PWA, offline-tolerant.
 - **Uber privacy** — the relay is untrusted; minimise all metadata (see `PRIVACY.md`).
 - **Minimal footprint (north star)** — flock must be nearly *free to run*: negligible **battery**, negligible **relay traffic**, negligible **metadata**. These are one idea, not three — disclosure-on-event (share only what a moment needs) is the same discipline as sample/emit-only-when-needed. The clean tell: **coarse sharing should use coarse, low-power location** (network/cell, not GPS) — a battery win that is *also* a privacy win (hardware that can't over-collect). Tracked in **Phase H**.
 - **Full e2e tests** — Playwright drives **two real browser contexts (two identities)** that talk to each other through `relay.trotters.cc`, so every assertion is on the *other* person's screen — the gift-wrap → relay → unwrap → decrypt → render path, proven between people. **No feature is "done" without an e2e.**
-  - ✅ **Covered** (`e2e/`, `npm run test:e2e` — 42 flows across 24 spec files, green with one occasional live-relay retry): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace) + **custom cadence** + **self-reminder** (due-soon → overdue on A's own card) + **acknowledge** (3-person: miss → B "I've got this" → C sees "on it") + a **dying battery** riding the check-in (stubbed API → B reads "battery critical"), the **breadcrumb trail** (A moves under a fast-forwarded clock → SOS → B gets the alert + trail), the **decoy view** (hide → a fresh app that stays silent under B's buzz → a wrong phrase gets the genuine fresh-install error → the right one restores the circle; plus the decoy proven fully usable with reset-inside-decoy preserving the hidden state), the **app lock** (ciphertext at rest → grace-expired cold boot gated by the PIN → wrong PIN refused → unlock and B's live buzz still decrypts → grace reload skips the PIN; plus the lock × decoy composition — no PIN screen in the decoy, unhide → one-tap re-lock), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map), **rendezvous** (A map-picks a meeting point → B receives the flag pin **and** a live ticking countdown), and the **meeting point** end-to-end (A proposes → B **opts in** with a coarse spot → A's device computes a fair midpoint **on-device** → the pick lands on B as a rendezvous), plus its **Slice 3** enrichments — a **named venue** upgrade (Overpass mocked for determinism), the **fairness** toggle re-ranking in place, contributor **cells + the venue pin** on the proposer's map, and a **per-person exact** share reaching the proposer alone as a crisp dot while the group stays coarse. Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
+  - ✅ **Covered** (`e2e/` — **trimmed to the MVP subset 2026-07-03**: the flows below marked with removed features now live in git history only; new `precision` and `quick-action` specs cover the slider and buzz quick actions. Historic full-suite snapshot follows): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace) + **custom cadence** + **self-reminder** (due-soon → overdue on A's own card) + **acknowledge** (3-person: miss → B "I've got this" → C sees "on it") + a **dying battery** riding the check-in (stubbed API → B reads "battery critical"), the **breadcrumb trail** (A moves under a fast-forwarded clock → SOS → B gets the alert + trail), the **decoy view** (hide → a fresh app that stays silent under B's buzz → a wrong phrase gets the genuine fresh-install error → the right one restores the circle; plus the decoy proven fully usable with reset-inside-decoy preserving the hidden state), the **app lock** (ciphertext at rest → grace-expired cold boot gated by the PIN → wrong PIN refused → unlock and B's live buzz still decrypts → grace reload skips the PIN; plus the lock × decoy composition — no PIN screen in the decoy, unhide → one-tap re-lock), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map), **rendezvous** (A map-picks a meeting point → B receives the flag pin **and** a live ticking countdown), and the **meeting point** end-to-end (A proposes → B **opts in** with a coarse spot → A's device computes a fair midpoint **on-device** → the pick lands on B as a rendezvous), plus its **Slice 3** enrichments — a **named venue** upgrade (Overpass mocked for determinism), the **fairness** toggle re-ranking in place, contributor **cells + the venue pin** on the proposer's map, and a **per-person exact** share reaching the proposer alone as a crisp dot while the group stays coarse. Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
   - ✅ **Regression backbone** — the security-critical `decideEmission` core has an **exhaustive truth-table** (`src/policy.matrix.test.ts`): every one of the 216 permutations of mode × trigger × off-grid × position × geofence × no-report, checked against a differential oracle **and** standalone safety invariants (an SOS always fires; nothing emits without a position; off-grid never silences a trigger; a no-report zone never pins a sensitive address). 579 unit tests total.
   - 🐛 **Bug the e2e caught & fixed**: the 3-party test surfaced a roster-update race — `ensureMember` trusted a circle snapshot captured before an `await`, so two first-contact signals arriving together would let the later write clobber the earlier one, silently dropping a member (who'd then be skipped by reseeds and lists). Fixed to re-read the live roster.
   - 🐛 **Bug the e2e *missed* — and the guard that now catches it**: the map rendered **blank** on the live site. maplibre tags `#map` with `.maplibregl-map{position:relative}`, which (equal specificity, loaded later) beat the app's `.map-canvas{position:absolute;inset:0}` and collapsed the container to **height 0** — yet tiles still loaded and the canvas stayed "visible", so the e2e's visibility check passed while the map showed nothing. Fixed with a higher-specificity selector; `map.spec.ts` now asserts `#map` has real height. **And a release bug it exposed:** the service worker was serving returning users a **stale cached `index.html`** (pinning old hashed assets), so deploys silently didn't land — fixed by cache-busting the SW (`{ cache: 'reload' }` navigations + cache-name bump) and `Cache-Control: no-cache` on `index.html`. *Lesson: "canvas visible" ≠ "content rendered" — assert real dimensions.*

@@ -2,15 +2,20 @@
 
 > Coercion-resistant family & friends safety and privacy-preserving location sharing.
 
-**Status:** 🛠️ Preview live at **https://flock.forgesworn.dev/**. The
-`@forgesworn/flock` library (14 modules — see the table below) and the PWA
-(onboarding, status orb, SOS/pick-me-up, map+geofences, secure invites, reseed,
-dead-man's-switch) are built and tested, on a **shipped privacy-by-architecture
-foundation** (gift-wrap-everything, nsec-tree personas/epochs, multi-circle —
-see [`docs/PRIVACY.md`](docs/PRIVACY.md)). **Works today (foreground):** SOS /
-pick-me-up, night-out sharing, check-ins, geofences on a live map, meeting
-points. **Not yet:** background breach alerts with the app closed — that needs
-the native shell, gated on the Phase 0 GrapheneOS spike. Start with
+**Status:** 🛠️ Preview live at **https://flock.forgesworn.dev/**. **The app is
+now a focused MVP** (2026-07): privacy-preserving **live location sharing with
+one group of friends** — set the circle up in advance, invite by QR code, and
+each member controls how closely the others see them with a **geohash precision
+slider** (a whole region, e.g. Mallorca → exact spot), plus one-tap "buzz the circle" quick actions
+(Check in · Come to me · Where are you? · Call me · On my way). Built on a
+**shipped privacy-by-architecture foundation** (gift-wrap-everything, nsec-tree
+personas/epochs, multi-circle, app lock + decoy view — see
+[`docs/PRIVACY.md`](docs/PRIVACY.md)). The wider safety set (SOS/duress,
+pick-me-up, geofences, dead-man's-switch, rendezvous/meeting points, off-grid,
+spoken verification) is **parked post-MVP**: it lives on fully tested in the
+`@forgesworn/flock` library (see the table below) but is no longer wired into
+the app UI. **Not yet:** delivery with the app fully closed — that needs the
+native shell, gated on the Phase 0 GrapheneOS spike. Start with
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the stack & why),
 [`docs/FORGESWORN-TOOLKIT.md`](docs/FORGESWORN-TOOLKIT.md) (how flock uses the
 ForgeSworn freedom-tech toolset), [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md),
@@ -21,17 +26,19 @@ the protocol spec [`FLOCK.md`](FLOCK.md), the tracked backlog
 [feasibility research](docs/research/2026-06-30-feasibility-research.md).
 
 `flock` extends [`canary-kit`](https://github.com/forgesworn/canary-kit) (which itself
-extends `spoken-token`) into a location-aware safety tool for two audiences:
+extends `spoken-token`) into location-aware sharing and safety tooling. The **app MVP**
+serves one audience:
 
-- **Families.** Children carry a phone; guardians define optional geofenced safe areas.
-  The child's location is **withheld by default** and only disclosed to guardians on a
-  triggering event:
-  1. leaving a safe area (geofence breach),
-  2. a **"pick me up"** request, or
-  3. an **"I need help / SOS"** alert.
-- **Friends on a night out.** Symmetric, consent-based, **ephemeral** rough location
-  sharing — "who's still at the bar / who's gone home", spotting if someone gets lost,
-  time-boxed to the night via NIP-40 expiry.
+- **A group of friends** (e.g. a trip to Mallorca) who want to see roughly where each
+  other are — **without ever handing their movements to a company**. The group is set
+  up in advance, people join by QR code, sharing is off until each person turns it on,
+  and a per-person **precision slider** decides how closely the others see them
+  (a whole city … the exact spot). Untrackable by design: encrypted end-to-end,
+  fanned out over no-log Nostr relays, no accounts, no server-side location, ever.
+
+The **library** additionally retains the full family-safety capability set
+(disclosure-on-event, geofence breach, SOS/duress, check-ins, meeting points…) for
+post-MVP app phases and other ForgeSworn tools.
 
 All transport is **decentralised over Nostr**. Each device evaluates its own geofence
 **locally** and only ever broadcasts **encrypted** alerts. No server holds plaintext
@@ -45,17 +52,16 @@ adversarially verified — see the research doc). The W3C Geofencing API is dead
 needs an installed PWA, and lets the *browser* decide if/when it fires; on iOS Safari it
 doesn't work at all.
 
-**Therefore:** the PWA delivers everything that works in the foreground (manual SOS /
-pick-me-up, night-out sharing, live map while open). **True background breach detection
-requires the native Capacitor wrapper.** PWA-first, native-fallback — by necessity, not
-preference.
+**Therefore:** the PWA delivers everything that works in the foreground (live sharing,
+buzz quick actions, the map while open). **True background operation requires the
+native Capacitor wrapper.** PWA-first, native-fallback — by necessity, not preference.
 
 | Capability | iOS PWA | Android PWA | GrapheneOS | Native (Capacitor) |
 |---|:--:|:--:|:--:|:--:|
 | Foreground location | ✅ | ✅ | ✅ | ✅ |
-| **Background geofence breach** | ❌ | ❌ | ❌ | ✅ **only path** |
+| **Background location sharing** | ❌ | ❌ | ❌ | ✅ **only path** |
 | Push notifications | ✅¹ | ✅ | ⚠️ UnifiedPush | ✅ |
-| Manual SOS / pick-me-up (app open) | ✅ | ✅ | ✅ | ✅ |
+| Live sharing + buzz (app open) | ✅ | ✅ | ✅ | ✅ |
 
 ¹ Installed PWA only (iOS 16.4+). No background location.
 
@@ -91,8 +97,8 @@ encryption stay at the edge.
 | `disband` | Circle dissolution signal | ✅ tested |
 | `offgrid` | Deliberate "going dark" — pre-announced; never suppresses help/pickup | ✅ tested |
 | `spokenverify` | Face-to-face pick-up verification words + silent duress word | ✅ tested |
-| `app/` (PWA) | Foreground UI — onboarding, status orb, SOS/pick-me-up, circle invites + presence; real Nostr publish/subscribe + geolocation; decoy view under compelled unlock; app lock (state encrypted at rest behind a PIN) | ✅ MVP |
-| `native/` (Capacitor) | Background geofencing + UnifiedPush — config + bridge scaffolded, reuses the same policy/transport | 🧱 scaffold |
+| `app/` (PWA) | **MVP UI** — onboarding, status orb, live sharing with a **precision slider** (geohash 3–9, region → exact spot; the map previews what the circle sees of you), "buzz the circle" quick actions incl. a confirmed one-shot exact **"Come to me"**, QR + remote invites, presence map, reseed/remove; decoy view under compelled unlock; app lock (state encrypted at rest behind a PIN). SOS/pick-me-up, geofences, check-ins, rendezvous/meeting, off-grid: **parked post-MVP** (library retains all of it) | ✅ MVP |
+| `native/` (Capacitor) | Background location sharing + UnifiedPush — APK ships; reuses the same policy/transport | 🧱 shell |
 
 **Library:** `npm run build` · `npm test` · `npm run typecheck` · `npm run lint`
 **PWA:** `npm run dev` (localhost) · `npm run build:app` (→ `dist-app/`) · `npm run preview:app`

@@ -2,8 +2,8 @@
 
 The PWA does everything in the **foreground**. The native shell adds the one
 thing no web platform can do in 2026: **true background geolocation** (and thus
-background geofence-breach alerts) on Android and **GrapheneOS** — see
-`../docs/research/2026-06-30-feasibility-research.md`.
+location sharing that keeps working with the phone in a pocket) on Android and
+**GrapheneOS** — see `../docs/research/2026-06-30-feasibility-research.md`.
 
 > Status: **Android ships** — `npm run apk` / `npm run apk:release` produce an
 > installable APK. iOS remains unbuilt. The generated `android/` project is
@@ -84,7 +84,7 @@ files into `native/` before building.
 
 1. Sideload the APK (no Play Services needed — nothing in the app uses them).
 2. Location permission: choose **"Allow all the time"** (Android 11+ sends you
-   to Settings for this) — background breach detection needs it; foreground-only
+   to Settings for this) — background sharing needs it; foreground-only
    sharing works with "While using".
 3. Allow the notification (Android 13+): it belongs to the foreground service
    that keeps the watcher alive; it only exists while sharing is on.
