@@ -32,11 +32,14 @@ rsync -az --delete --exclude='*.pmtiles' --exclude='downloads/' dist-app/ "${HOS
 
 # Ship the Android APK (linked from get.html) when a signed release build exists
 # locally — `npm run apk:release` first. Its SHA-256 goes alongside so careful
-# users can verify the download.
+# users can verify the download. The sha256 line names the file as browsers
+# save it: flock-<build>.apk (get.js sets the download attribute from
+# version.json — the git hash both builds were stamped with).
 APK="android/app/build/outputs/apk/release/flock-release.apk"
 if [ -f "${APK}" ]; then
   echo "→ shipping Android APK"
-  shasum -a 256 "${APK}" | awk '{print $1 "  flock.apk"}' > /tmp/flock.apk.sha256
+  BUILD=$(sed -n 's/.*"build":"\([^"]*\)".*/\1/p' dist-app/version.json)
+  shasum -a 256 "${APK}" | awk -v n="flock-${BUILD:-unknown}.apk" '{print $1 "  " n}' > /tmp/flock.apk.sha256
   ssh "${HOST}" "mkdir -p ${REMOTE_DIR}/downloads"
   rsync -az "${APK}" "${HOST}:${REMOTE_DIR}/downloads/flock.apk"
   rsync -az /tmp/flock.apk.sha256 "${HOST}:${REMOTE_DIR}/downloads/flock.apk.sha256"
