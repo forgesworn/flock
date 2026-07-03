@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "cc.trotters.flock",
+      "sha256_cert_fingerprints": [
+        "32:0A:B5:BC:EE:9E:BE:E3:3A:22:DA:A6:18:E7:9D:14:E8:1F:1A:B8:02:76:C3:DD:96:37:EF:AB:25:86:98:77",
+        "3C:AF:A9:23:0D:59:AD:AD:C9:C9:1C:2B:00:A4:63:EE:81:00:EB:E0:B1:7C:65:F2:C6:D6:8E:3D:D2:1A:DB:37"
+      ]
+    }
+  }
+]

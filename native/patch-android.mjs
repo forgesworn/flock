@@ -12,6 +12,12 @@
 //  - allowBackup=false: with the app lock off, localStorage is plaintext
 //    (identity keys, circle seeds) — it must not be extractable via adb or
 //    cloud backup.
+//  - App Links intent filter: a scanned/tapped https://flock.forgesworn.dev
+//    invite opens the APP (not the browser) on phones that have it, so the
+//    joiner lands in the install with background watch — not a second identity
+//    in the browser. autoVerify checks the site's /.well-known/assetlinks.json
+//    (shipped in app/public, so every deploy serves it) against the APK's
+//    signing cert; native/deeplink.ts feeds the arriving URL to the app.
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -42,6 +48,24 @@ for (const p of PERMISSIONS) {
 
 if (xml.includes('android:allowBackup="true"')) {
   xml = xml.replace('android:allowBackup="true"', 'android:allowBackup="false"')
+  changed = true
+}
+
+// Verified App Link for invite links/QRs. Appended after the MAIN/LAUNCHER
+// intent filter of the only activity in the generated manifest.
+const APP_LINK_HOST = 'flock.forgesworn.dev'
+if (!xml.includes(`android:host="${APP_LINK_HOST}"`)) {
+  xml = xml.replace(
+    '</intent-filter>',
+    `</intent-filter>
+
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="${APP_LINK_HOST}" />
+            </intent-filter>`,
+  )
   changed = true
 }
 

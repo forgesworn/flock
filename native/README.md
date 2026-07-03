@@ -59,9 +59,19 @@ files into `native/` before building.
   can never be a tell on a "fresh install". Detection via the injected
   `window.Capacitor` (`app/src/native.ts`) keeps Capacitor out of the web
   bundle; the bridge loads as a lazy chunk only inside the shell.
-- **`patch-android.mjs`** — location + foreground-service permissions, and
+- **`patch-android.mjs`** — location + foreground-service permissions,
   `allowBackup=false` (with the app lock off, localStorage is plaintext — it
-  must not be extractable via adb/cloud backup).
+  must not be extractable via adb/cloud backup), and the **verified App Links
+  intent filter** for `https://flock.forgesworn.dev`.
+- **`deeplink.ts`** — a scanned/tapped flock invite arrives in the shell as an
+  Android *intent* (the WebView never navigates); this bridge re-injects just
+  the `#join=`/`#invite=` fragment so the app's normal hashchange consumer
+  handles it. Verification is against `/.well-known/assetlinks.json` (committed
+  at `app/public/.well-known/`, so every deploy serves it) — it lists the
+  release **and** local debug signing fingerprints; regenerate with
+  `keytool -list -v -keystore native/release.keystore` if the key ever changes.
+  Net effect: someone with the APK installed who scans an invite QR joins in
+  the app (background watch, one identity), not in a browser tab.
 
 ## Installing on GrapheneOS / Android
 

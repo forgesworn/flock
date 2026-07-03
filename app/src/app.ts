@@ -24,7 +24,7 @@ import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
-import { isNativeShell } from './native'
+import { isNativeShell, shareOrigin } from './native'
 import { rotationDue, refreshDue } from './rotation'
 import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
@@ -466,6 +466,9 @@ function bootUnlocked(): void {
     if (f?.kind === 'join') joinFromLink(f.value)
     if (f?.kind === 'invite') inviteFromLink(f.value)
   })
+  // In the APK a tapped/scanned flock link arrives as an Android intent, not a
+  // navigation — bridge it onto the same hashchange path (native/deeplink.ts).
+  if (isNativeShell()) void import('../../native/deeplink').then((d) => d.watchDeepLinks())
   void restoreSignet()
 }
 
@@ -813,7 +816,7 @@ function inviteSections(): string {
     <div class="section-title" style="margin-top:22px">Show a code (in person)</div>
     <div class="card stack">
       <div class="qr" id="qr"></div>
-      ${showInviteLinkText && activeCircle() ? `<div class="invite-code">${esc(store.inviteLink(activeCircle() as store.Circle, location.origin))}</div>` : ''}
+      ${showInviteLinkText && activeCircle() ? `<div class="invite-code">${esc(store.inviteLink(activeCircle() as store.Circle, shareOrigin()))}</div>` : ''}
       <button class="btn primary" data-action="copy-invite">${'share' in navigator ? 'Share invite link' : 'Copy invite link'}</button>
       <div class="note">Let them scan the QR with their camera — it opens flock and joins in one tap. Or copy the link and send it. It carries the secret, so treat it like a password.</div>
     </div>
@@ -1292,7 +1295,7 @@ function wireOnboard(): void {
         const qr = qrcode(0, 'M')
         // A link, never bare text (same lesson as the join QR): the inviter's camera
         // opens flock with this key already filled into the send-invite form.
-        qr.addData(`${location.origin}/#invite=${fullNpub(persisted.identity.pk)}`)
+        qr.addData(`${shareOrigin()}/#invite=${fullNpub(persisted.identity.pk)}`)
         qr.make()
         qrEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true })
       } catch { qrEl.remove() }
@@ -1341,7 +1344,7 @@ function wireApp(): void {
       const qr = qrcode(0, 'M')
       // A LINK, never bare text: camera apps open links, but bare text they offer
       // to web-search — which would hand the seed to a search engine (see inviteLink).
-      qr.addData(store.inviteLink(ac, location.origin))
+      qr.addData(store.inviteLink(ac, shareOrigin()))
       qr.make()
       qrEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true })
     } catch { qrEl.remove() }
@@ -3101,7 +3104,7 @@ function wireDuressReveal(node: HTMLElement): void {
 async function copyInvite(): Promise<void> {
   const c = activeCircle()
   if (!c) return
-  const link = store.inviteLink(c, location.origin)
+  const link = store.inviteLink(c, shareOrigin())
   // The OS share sheet keeps the secret off the clipboard entirely (clipboards
   // cloud-sync and every app can read them). Clipboard is the desktop fallback;
   // selectable text is the last resort.
