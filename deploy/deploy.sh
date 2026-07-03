@@ -26,6 +26,23 @@ echo "→ deploying to ${HOST}:${REMOTE_DIR}"
 # local dev/demo + market-proof extracts only. The real feature downloads each
 # circle's area to OPFS at runtime via the extract service; the self-hosted
 # glyphs/sprite under basemap/{fonts,sprite} DO ship.
-rsync -az --delete --exclude='*.pmtiles' dist-app/ "${HOST}:${REMOTE_DIR}/"
+# downloads/ (the Android APK) is excluded from --delete so an app-only deploy
+# never removes the APK already on the host.
+rsync -az --delete --exclude='*.pmtiles' --exclude='downloads/' dist-app/ "${HOST}:${REMOTE_DIR}/"
+
+# Ship the Android APK (linked from get.html) when a signed release build exists
+# locally — `npm run apk:release` first. Its SHA-256 goes alongside so careful
+# users can verify the download.
+APK="android/app/build/outputs/apk/release/flock-release.apk"
+if [ -f "${APK}" ]; then
+  echo "→ shipping Android APK"
+  shasum -a 256 "${APK}" | awk '{print $1 "  flock.apk"}' > /tmp/flock.apk.sha256
+  ssh "${HOST}" "mkdir -p ${REMOTE_DIR}/downloads"
+  rsync -az "${APK}" "${HOST}:${REMOTE_DIR}/downloads/flock.apk"
+  rsync -az /tmp/flock.apk.sha256 "${HOST}:${REMOTE_DIR}/downloads/flock.apk.sha256"
+  rm -f /tmp/flock.apk.sha256
+else
+  echo "  (no local release APK — skipping; run 'npm run apk:release' to ship one)"
+fi
 
 echo "✓ deployed. https://flock.forgesworn.dev"

@@ -7,8 +7,9 @@ view + the App lock) is **complete**, and the foreground go-live hardening list
 (Phase G) is done bar two items that need things code can't provide: **relay #2**
 (runbook ready — `docs/runbooks/second-relay.md`, blocked only on a host) and the
 **native background-geofencing gate** (Phase 0 spike, blocked on real GrapheneOS
-hardware). Those two, plus publishing `keystore-kit` to npm, are the standing
-Darren-side actions.
+hardware — the **Android APK now ships** (`npm run apk:release`) and is ready to
+sideload the moment hardware lands). Those two, plus publishing `keystore-kit` to
+npm, are the standing Darren-side actions.
 
 ## Cross-cutting (apply to everything)
 
@@ -100,6 +101,18 @@ Darren-side actions.
   on reseed/leave/disband — so a reload no longer blanks the map while it waits up to 5 min for a peer's next
   beacon. Cache is on-device only (no new metadata leaves the phone). 6 new unit tests (`store.presence.test.ts`);
   the night-out map e2e now nicknames A, reloads B, and asserts A's rough area **and** petname persist. **Follow-ups:** none.
+- [ ] **Festival mode — find each other in a crowd (2026-07-03).** The use case:
+  a group at a festival wants to see *where each other is* well enough to walk
+  over. The night-out coarse beacon (geohash-6, ±~600 m) is deliberately too
+  coarse for that — it says "still on site", not "by the left of the main stage".
+  Sketch: a per-circle, time-boxed **"finding each other" precision step-up**
+  (geohash-8, ±~19 m — opt-in, visible to the whole circle, auto-reverts with the
+  circle's expiry or a timer) so precision is a *deliberate, mutual, temporary*
+  choice, never a default. Pairs with what's already shipped: separation ("lost")
+  alerts, the fair meeting point, and the offline PMTiles basemap (festival cell
+  networks are congested — pre-download the site; beacons are tiny and ride the
+  relay socket). Policy change is one precision knob through `decideEmission`;
+  the real work is UX + making the step-up unmistakably consensual.
 
 ## Phase D — Identity & social
 
@@ -241,11 +254,24 @@ Two halves that compose into one feature:
 
 ## Phase G — Platform & release
 
-- [ ] **Capacitor native shell** — background geofencing. Phase 0 spike harness
-  scaffolded (`native/spike/`) with Tier 0/1/2 validation tiers
-  (`docs/plans/2026-06-30-phase0-graphene-spike.md`). **No test devices yet**, so the
-  reliability gate stays **open** — the Tier 0 emulator only validates the functional
-  path (route → fix → breach), not cadence / Doze / battery on real GrapheneOS.
+- [ ] **Capacitor native shell** — background geofencing.
+  - [x] **Android APK ships (2026-07-03)** — `npm run apk` / `npm run apk:release`
+    (`native/build-apk.sh`: generate → native-mode web build → manifest patch →
+    icons → Gradle → zipalign/apksigner). The shell is a thin layer: the background
+    watcher (`native/background.ts`, LocationManager + foreground service, **no
+    Google APIs** → GrapheneOS-compatible) forwards fixes into the app's normal
+    `onFix → autoEmit` pipeline, so policy/no-report/off-grid/cadence are identical
+    to foreground; it is tied to the **sharing toggle** and torn down on
+    stop/reset/**hide** (the notification must never be a decoy tell). Native builds
+    point the privacy proxies at flock.forgesworn.dev (`app/.env.native`); Caddy
+    gained the CORS headers the shell's `https://localhost` origin needs
+    (`deploy/Caddyfile` — **manual conf.d re-drop needed on the host**).
+    `allowBackup=false` keeps plaintext localStorage out of adb/cloud backups.
+  - [ ] **Reliability gate stays OPEN** — Phase 0 spike harness ready
+    (`native/spike/`, `docs/plans/2026-06-30-phase0-graphene-spike.md`); **no test
+    devices yet**. The Tier 0 emulator only validates the functional path (route →
+    fix → breach), not cadence / Doze / battery on real GrapheneOS. Sideload the
+    APK + run the spike when hardware lands.
 - [ ] **Inbound alerts (app closed)** — receive SOS/breach with flock closed.
   Persistent foreground-service relay socket (Option A, recommended) →
   UnifiedPush + bridge (Option B). De-Googled; gated on the Phase 0 result. See

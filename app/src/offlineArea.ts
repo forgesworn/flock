@@ -14,6 +14,10 @@ import type { Geofence, NoReportZone } from '@forgesworn/flock'
 
 const opfsName = (circleId: string): string => `flock-basemap-${circleId}.pmtiles`
 
+// Same-origin by default (proxied → extract service); overridable at build time
+// for the native shell (no same-origin server inside the APK) and self-hosters.
+const EXTRACT_URL = import.meta.env.VITE_EXTRACT_URL || '/api/extract'
+
 /** OPFS is the durable, near-native store for the (few-MB) basemap file. */
 function opfsRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory()
@@ -24,7 +28,7 @@ function opfsRoot(): Promise<FileSystemDirectoryHandle> {
 export async function saveArea(circleId: string, fences: Geofence[], zones: NoReportZone[] = []): Promise<{ bytes: number } | null> {
   const bbox = areaBounds(fences, zones, { bufferMetres: 2000 })
   if (!bbox) return null
-  const res = await fetch('/api/extract', {
+  const res = await fetch(EXTRACT_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ bbox: [bbox.minLon, bbox.minLat, bbox.maxLon, bbox.maxLat], maxzoom: 15 }),

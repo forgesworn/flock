@@ -24,11 +24,14 @@ android/
 ios/
 .gradle/
 *.keystore
+native/keystore.properties
 
 # Env & secrets
 .env
 .env.*
 !.env.example
+# Not a secret: the native (APK) build's proxy endpoints — see app/.env.native
+!.env.native
 
 # Editor / OS
 .DS_Store

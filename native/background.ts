@@ -1,29 +1,25 @@
-// Native background-geolocation bridge (Capacitor) — REFERENCE SCAFFOLD.
+// Native background-geolocation bridge (Capacitor shell).
 //
-// This file is not part of the web build or the library gates. It documents the
-// exact integration to add once the Capacitor shell is set up (see
-// native/README.md). It reuses the SAME flock policy + transport as the PWA, so
-// background fixes follow the identical disclosure-on-event rules:
-//   - family : emit nothing unless a geofence breach (full precision)
-//   - nightout: emit a coarse beacon, throttled
-// "help"/SOS stays a foreground, user-initiated action.
+// A thin fix-forwarder ONLY. It starts the plugin's watcher (platform
+// LocationManager + a foreground service — no Google APIs, so it works on
+// GrapheneOS) and hands every fix to the app's normal pipeline. ALL policy
+// stays in app.ts's onFix → autoEmit path: breadcrumbs, off-grid, no-report
+// zones, accuracy-aware breach decisions and cadence gating apply identically
+// to foreground and background fixes — the disclosure rules cannot diverge
+// (FLOCK.md §6). This module must never decide *whether* to emit.
 //
 // Plugin: @capacitor-community/background-geolocation (free; LocationManager +
-// foreground service — no Google APIs, so it works on GrapheneOS).
+// foreground service — no Google APIs). The OS shows a persistent notification
+// while the watcher runs; it is tied strictly to the sharing toggle, so hiding
+// (decoy) and stop-sharing tear it down.
 
 import { registerPlugin } from '@capacitor/core'
-import { encode } from 'geohash-kit'
-import {
-  decideEmission,
-  signalTypeForReason,
-  buildLocationSignal,
-} from '@forgesworn/flock'
-import * as store from '../app/src/store'
-import * as svc from '../app/src/services'
-import { makeLocalSigner } from '../app/src/signer'
+
+/** Mirrors app/src/services.ts `Fix` (at = unix seconds). */
+export interface BgFix { lat: number; lon: number; accuracy: number; at: number }
 
 interface BgLocation { latitude: number; longitude: number; accuracy: number; time: number }
-interface BgError { code: string; message: string }
+interface BgError { code?: string; message?: string }
 
 interface BackgroundGeolocationPlugin {
   addWatcher(
@@ -41,56 +37,40 @@ interface BackgroundGeolocationPlugin {
 
 const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation')
 
-let lastBeacon = 0
-
-/** Start the background watcher. Call once on app start when on a native platform. */
-export function startBackgroundWatch(): Promise<string> {
+/**
+ * Start the background watcher. Fixes flow to `onFix`; a permission failure
+ * (background location revoked / "Allow all the time" refused) flows to
+ * `onDenied` so the caller can keep the sharing toggle honest — the same
+ * contract as a foreground watch denial. Returns the watcher id.
+ */
+export function startBackgroundWatch(
+  onFix: (fix: BgFix) => void,
+  onDenied?: () => void,
+): Promise<string> {
   return BackgroundGeolocation.addWatcher(
     {
       backgroundTitle: 'flock is keeping watch',
-      backgroundMessage: 'Your location is only shared if you leave a safe zone or raise help.',
+      backgroundMessage: 'Location is only shared if you leave a safe place or raise help.',
       requestPermissions: true,
       stale: false,
       distanceFilter: 25, // metres — battery-friendly; only fires on real movement
     },
     (location, error) => {
-      if (error || !location) return
-      void onBackgroundFix(location)
+      if (error) {
+        if (error.code === 'NOT_AUTHORIZED') onDenied?.()
+        return
+      }
+      if (!location) return
+      onFix({
+        lat: location.latitude,
+        lon: location.longitude,
+        accuracy: location.accuracy,
+        at: Math.floor(location.time / 1000),
+      })
     },
   )
 }
 
 export function stopBackgroundWatch(id: string): Promise<void> {
   return BackgroundGeolocation.removeWatcher({ id })
-}
-
-async function onBackgroundFix(loc: BgLocation): Promise<void> {
-  const s = store.load()
-  // The background watcher emits for the circle currently in focus.
-  const circle = s.circles.find((c) => c.id === s.activeCircleId) ?? s.circles[0]
-  if (!circle || !s.identity?.skHex) return // background path assumes a local key
-  const position = { lat: loc.latitude, lon: loc.longitude }
-
-  const plan = decideEmission({
-    mode: circle.mode,
-    position,
-    trigger: 'none',
-    geofences: circle.mode === 'family' ? s.geofences : undefined,
-  })
-  const type = signalTypeForReason(plan.reason)
-  if (!type || type === 'help' || plan.action === 'withhold') return // withheld: emit nothing
-
-  const now = Math.floor(Date.now() / 1000)
-  if (plan.reason === 'nightout' && now - lastBeacon < 45) return // throttle coarse beacons
-  lastBeacon = now
-
-  const geohash = encode(position.lat, position.lon, plan.precision)
-  const template = await buildLocationSignal({
-    groupId: circle.id,
-    seedHex: circle.seedHex,
-    signalType: type,
-    geohash,
-    precision: plan.precision,
-  })
-  await svc.publishEvent(s.relayUrls, template, makeLocalSigner(s.identity.skHex))
 }

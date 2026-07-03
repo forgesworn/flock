@@ -65,6 +65,14 @@ npm run deploy
 # override: HOST=user@host REMOTE_DIR=/srv/flock npm run deploy
 ```
 
+**Android APK (`/downloads/flock.apk`, linked from `/get.html`):** when a signed
+release build exists locally (`npm run apk:release` — see `native/README.md`),
+`npm run deploy` also ships it to `downloads/` with a `flock.apk.sha256`
+alongside. `downloads/` sits outside the rsync `--delete` sweep, so app-only
+deploys never remove the hosted APK. The `/downloads/*.apk` headers and the CORS
+block for the shell's `https://localhost` origin live in `deploy/Caddyfile` —
+re-apply the conf.d drop-in (one-time setup commands above) after changing it.
+
 ## Offline-basemap extract service (`/api/extract`)  ✅ LIVE
 
 Powers "save this area" (offline vector maps). `server/extract.mjs` is a small Node

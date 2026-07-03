@@ -94,6 +94,9 @@
     "test:e2e:report": "playwright show-report",
     "dev": "vite",
     "build:app": "vite build",
+    "build:native": "vite build --mode native",
+    "apk": "sh native/build-apk.sh debug",
+    "apk:release": "sh native/build-apk.sh release",
     "build:spike": "vite build -c vite.spike.config.ts",
     "preview:app": "vite preview",
     "deploy": "sh deploy/deploy.sh"
@@ -124,6 +127,13 @@
     "rendezvous-kit": "^1.21.6"
   },
   "devDependencies": {
+    "@capacitor-community/background-geolocation": "^1.2.26",
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/geolocation": "^8.2.0",
+    "@capacitor/preferences": "^8.0.1",
     "@eslint/js": "^10.0.1",
     "@fontsource-variable/fraunces": "^5.2.5",
     "@fontsource-variable/hanken-grotesk": "^5.2.5",

@@ -24,6 +24,7 @@ import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
+import { isNativeShell } from './native'
 import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
@@ -1262,7 +1263,8 @@ function onboardingView(): string {
         <button class="btn ghost" data-action="join">Join with a code</button>
         <button class="btn ghost" data-action="restore">Restore from backup</button>
         ${signetRow}
-      </div>`
+      </div>
+      ${isNativeShell() ? '' : '<div class="note" style="margin-top:16px">On Android or GrapheneOS? <a href="./get.html">Get the app</a> — it can keep watch in the background; the website only works while open.</div>'}`
   }
   return `<main class="screen onboard fade-in">${inner}</main><div class="toast" id="toast"></div>`
 }
@@ -2720,6 +2722,7 @@ function startSharing(): void {
   if (sharing) return
   sharing = true
   syncWatch()
+  void startBgWatch()
   render()
 }
 
@@ -2728,7 +2731,51 @@ function stopSharing(): void {
   breachActive = false
   geoIssue = null
   syncWatch()
+  void stopBgWatch()
   render()
+}
+
+// ── Native shell: background watch (native/background.ts) ───────────────────
+// The PWA can only sample in the foreground; inside the Capacitor shell the
+// sharing toggle extends to a background watcher (foreground service — the OS
+// shows a persistent notification while it runs). Fixes enter through the SAME
+// onFix pipeline as foreground fixes, so breadcrumbs, off-grid, no-report
+// zones and cadence gating apply identically (FLOCK.md §6). Tied strictly to
+// `sharing`: stop-sharing, reset and hide tear it down — nothing may run (or
+// show a notification) on a fresh, reset or decoy install.
+let bgWatchId: string | null = null
+let bgWatchStarting = false
+
+async function startBgWatch(): Promise<void> {
+  if (!isNativeShell() || bgWatchId || bgWatchStarting) return
+  if (!persisted.identity || !persisted.circles.length) return
+  bgWatchStarting = true
+  try {
+    const bg = await import('../../native/background')
+    bgWatchId = await bg.startBackgroundWatch(
+      (f) => onFix(f),
+      () => {
+        // Background permission revoked — keep the toggle honest, same as a
+        // foreground 'denied': revert sharing and show the actionable card.
+        geoIssue = 'denied'
+        sharing = false
+        void stopBgWatch()
+        syncWatch()
+        render()
+      },
+    )
+  } catch { /* plugin unavailable — foreground-only sharing still works */ }
+  finally { bgWatchStarting = false }
+}
+
+async function stopBgWatch(): Promise<void> {
+  const id = bgWatchId
+  bgWatchId = null
+  if (!id) return
+  try {
+    const bg = await import('../../native/background')
+    await bg.stopBackgroundWatch(id)
+  } catch { /* watcher already gone */ }
 }
 
 function onFix(f: svc.Fix): void {
@@ -3183,6 +3230,9 @@ async function hideNow(): Promise<void> {
   const cfg = persisted.decoy
   if (!cfg) return
   if (localStorage.getItem(DECOY_CACHE_KEY)) { toast("Couldn't hide — free up some storage and try again"); return }
+  // Native shell: the background watcher's persistent notification would be a
+  // tell on a "fresh install" — await its teardown BEFORE sealing and reloading.
+  await stopBgWatch()
   const sealed = await sealState(JSON.stringify(persisted), cfg.salt, cfg.key)
   store.lockSaves()
   localStorage.setItem(DECOY_CACHE_KEY, sealed)
@@ -3322,6 +3372,7 @@ function resetDevice(): void {
   store.disarmRest()
   void burnLock()
   stopWatch?.(); stopWatch = null
+  void stopBgWatch() // native shell: the foreground service (and its notification) must not outlive the reset
   stopAllSubs()
   stopInviteSub?.(); stopInviteSub = null
   inviteSubKey = ''

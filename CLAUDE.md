@@ -47,9 +47,16 @@ night-out sharing over Nostr.
 - `src/styles.css` — calm dusk design system
 - `public/` — manifest, service worker, icon
 
-### Native (`native/`) — Capacitor shell (scaffold)
+### Native (`native/`) — Capacitor shell (Android ships)
 
-Background geofencing on iOS/Android/GrapheneOS. See `docs/plans/2026-06-30-phase0-graphene-spike.md`.
+Background geofencing on Android/GrapheneOS (no Google APIs). `npm run apk` /
+`npm run apk:release` build a sideloadable APK (`native/build-apk.sh`); the
+generated `android/` project is gitignored — all native config lives in the
+committed scripts (`patch-android.mjs`, `native/assets/`). Background fixes
+flow through the SAME `onFix → autoEmit` policy pipeline as foreground; the
+watcher is tied to the sharing toggle and torn down on reset/hide. Reliability
+measurement on real hardware is still gated by the Phase 0 spike
+(`docs/plans/2026-06-30-phase0-graphene-spike.md`).
 
 ## Security-critical paths
 

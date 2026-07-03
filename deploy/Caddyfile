@@ -33,6 +33,25 @@ flock.forgesworn.dev {
 		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; base-uri 'self'; form-action 'self'"
 	}
 
+	# CORS for the native (Capacitor) APK: inside the shell the app's origin is
+	# https://localhost (Android) / capacitor://localhost (iOS), so its calls to
+	# the privacy proxies below are cross-origin. These routes proxy public,
+	# credential-less services, so a wildcard is safe — it widens nothing (the
+	# endpoints were always publicly reachable) and the privacy property lives in
+	# the proxying itself, not in who may call it. `header_down` SETS the header,
+	# so an upstream's own ACAO (OSM sends one) is replaced, never duplicated.
+	@apiPreflight {
+		method OPTIONS
+		path /tiles/* /nominatim/* /overpass/* /api/extract
+	}
+	handle @apiPreflight {
+		header Access-Control-Allow-Origin "*"
+		header Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		header Access-Control-Allow-Headers "Content-Type, Accept"
+		header Access-Control-Max-Age "86400"
+		respond "" 204
+	}
+
 	# Map tiles — reverse-proxied through this origin so the third-party tile CDN
 	# only ever sees this server, never the user's IP + viewport (which is roughly
 	# where the circle is). The user talks only to flock.forgesworn.dev, which they
@@ -48,6 +67,7 @@ flock.forgesworn.dev {
 			header_up -X-Forwarded-Host
 			header_up User-Agent "flock/1.0 (+https://flock.forgesworn.dev)"
 			header_down Cache-Control "public, max-age=604800"
+			header_down Access-Control-Allow-Origin "*"
 		}
 	}
 
@@ -63,6 +83,7 @@ flock.forgesworn.dev {
 			header_up -X-Forwarded-Host
 			header_up User-Agent "flock/1.0 (+https://flock.forgesworn.dev)"
 			header_down Cache-Control "private, no-store"
+			header_down Access-Control-Allow-Origin "*"
 		}
 	}
 
@@ -79,6 +100,7 @@ flock.forgesworn.dev {
 			header_up -X-Forwarded-Host
 			header_up User-Agent "flock/1.0 (+https://flock.forgesworn.dev)"
 			header_down Cache-Control "private, no-store"
+			header_down Access-Control-Allow-Origin "*"
 		}
 	}
 
@@ -86,7 +108,9 @@ flock.forgesworn.dev {
 	# Clips a bbox from the Protomaps build server-side so the browser only ever talks
 	# to this origin. `handle` (not handle_path) preserves the /api/extract path.
 	handle /api/extract {
-		reverse_proxy 127.0.0.1:8791
+		reverse_proxy 127.0.0.1:8791 {
+			header_down Access-Control-Allow-Origin "*"
+		}
 	}
 
 	# Service worker must never be stale (so app updates land); hashed assets are immutable.
@@ -101,4 +125,11 @@ flock.forgesworn.dev {
 
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	# Android APK download (get.html). Revalidate so an updated APK lands at once
+	# (file_server's ETag/Last-Modified makes unchanged checks a cheap 304, not a
+	# 30 MB redownload); explicit type so every device offers to install it.
+	@apk path /downloads/*.apk
+	header @apk Cache-Control "no-cache"
+	header @apk Content-Type application/vnd.android.package-archive
 }
