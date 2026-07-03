@@ -52,6 +52,11 @@ flock.forgesworn.dev {
 		respond "" 204
 	}
 
+	# The APK's update check (app.ts checkForUpdate) fetches this cross-origin
+	# from the shell; it's a public one-liner, so the wildcard widens nothing.
+	@versionJson path /version.json
+	header @versionJson Access-Control-Allow-Origin "*"
+
 	# Map tiles — reverse-proxied through this origin so the third-party tile CDN
 	# only ever sees this server, never the user's IP + viewport (which is roughly
 	# where the circle is). The user talks only to flock.forgesworn.dev, which they
