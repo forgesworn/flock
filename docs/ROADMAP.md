@@ -267,11 +267,18 @@ Two halves that compose into one feature:
     gained the CORS headers the shell's `https://localhost` origin needs
     (`deploy/Caddyfile` — **manual conf.d re-drop needed on the host**).
     `allowBackup=false` keeps plaintext localStorage out of adb/cloud backups.
+  - [x] **Tier 1 on-device functional validation (2026-07-03)** — Samsung Galaxy
+    A32 (Android 13), sideloaded via adb: install → onboarding → circle creation →
+    map tiles through the CORS'd production proxy → native location permission →
+    safety watch → **foreground service + "keeping watch" notification while
+    backgrounded** (OS location indicator on) → stop-sharing tears both down.
+    The whole native loop works on real hardware.
   - [ ] **Reliability gate stays OPEN** — Phase 0 spike harness ready
-    (`native/spike/`, `docs/plans/2026-06-30-phase0-graphene-spike.md`); **no test
-    devices yet**. The Tier 0 emulator only validates the functional path (route →
-    fix → breach), not cadence / Doze / battery on real GrapheneOS. Sideload the
-    APK + run the spike when hardware lands.
+    (`native/spike/`, `docs/plans/2026-06-30-phase0-graphene-spike.md`). The
+    Tier 1 handset (stock Android) now enables the real-world spike runs —
+    walking breach detection, Doze survival, battery %/h — a strong *proxy* for
+    GrapheneOS. The de-Googled question itself (Tier 2) still needs a
+    **GrapheneOS Pixel**.
 - [ ] **Inbound alerts (app closed)** — receive SOS/breach with flock closed.
   Persistent foreground-service relay socket (Option A, recommended) →
   UnifiedPush + bridge (Option B). De-Googled; gated on the Phase 0 result. See
