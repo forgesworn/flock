@@ -374,16 +374,19 @@ function memberDark(circleId: string, pk: string): boolean {
 function nameFor(pk: string): string {
   const pet = persisted.petnames[pk]
   if (pet) return pet
+  const handle = persisted.handles?.[pk] // what they call themselves (came in encrypted)
+  if (handle) return handle
   if (persisted.showProfiles) { const p = getProfile(pk); if (p?.name) return p.name }
   try { return `Member ${npubEncode(pk).slice(-4)}` } catch { return `Member ${pk.slice(0, 4)}` }
 }
 
-/** Short label for a map pin: my private petname → public name (opted-in) → 2-char
- *  initials. Falls back to initials, never a long npub, so the pin tag stays tidy;
- *  caps a long name so one member can't stretch the tag across the map. Rendered via
- *  textContent in map.ts, so it is not (and must not be double-) HTML-escaped here. */
+/** Short label for a map pin: my private petname → their announced handle →
+ *  public name (opted-in) → 2-char initials. Falls back to initials, never a
+ *  long npub, so the pin tag stays tidy; caps a long name so one member can't
+ *  stretch the tag across the map. Rendered via textContent in map.ts, so it
+ *  is not (and must not be double-) HTML-escaped here. */
 function pinLabel(pk: string): string {
-  const name = (persisted.petnames[pk] || (persisted.showProfiles ? getProfile(pk)?.name : '') || '').trim()
+  const name = (persisted.petnames[pk] || persisted.handles?.[pk] || (persisted.showProfiles ? getProfile(pk)?.name : '') || '').trim()
   if (!name) return initials(pk)
   return name.length > 14 ? `${name.slice(0, 13)}…` : name
 }
@@ -530,8 +533,21 @@ function joinFromLink(code: string): void {
     adding = false
     tab = 'home'
     render()
-    toast(`You've joined ${circle.name}`)
+    toast(persisted.myHandle
+      ? `You've joined ${circle.name}`
+      : `You've joined ${circle.name} — add your name under You so friends recognise you`)
   } catch { toast('That join link is not valid — ask for a fresh one.') }
+}
+
+/** Save my handle and re-announce it to every circle — the same encrypted
+ *  "I'm here" a join sends, so members' rosters pick up the new name. */
+function saveHandle(): void {
+  const input = document.getElementById('my-handle') as HTMLInputElement | null
+  const v = (input?.value ?? '').trim().slice(0, 40)
+  persisted.myHandle = v || undefined
+  store.save(persisted)
+  for (const c of persisted.circles) announceJoin(c)
+  toast(v ? `Your circles will now see you as "${v}"` : 'Name cleared — you appear as an anonymous member')
 }
 
 /** Tell the circle I exist (location-free, reveals nothing beyond what seed
@@ -542,7 +558,7 @@ function joinFromLink(code: string): void {
 function announceJoin(circle: store.Circle): void {
   const me = persisted.identity
   if (!me) return
-  void buildJoinedSignal({ groupId: circle.id, seedHex: circle.seedHex, member: me.pk })
+  void buildJoinedSignal({ groupId: circle.id, seedHex: circle.seedHex, member: me.pk, handle: persisted.myHandle })
     .then((ev) => publishSignal(ev, circle))
     .catch(() => { /* offline — the relay-replayed wrap or first signal covers it */ })
 }
@@ -980,6 +996,9 @@ function youView(): string {
     <div class="card stack">
       <div class="kv"><span class="k">Your invite key</span><span>${shortNpub(me.pk)}</span></div>
       <div class="kv"><span class="k">Sign-in</span><span>${persisted.authMethod === 'signet' ? 'External signer' : 'Quick start (this device only)'}</span></div>
+      <div class="field"><label for="my-handle">Name your circles see</label><input class="input" id="my-handle" maxlength="40" placeholder="Dave, Mum, a nickname…" value="${esc(persisted.myHandle ?? '')}" /></div>
+      <button class="btn small" data-action="save-handle">Save name</button>
+      <div class="note">Optional, and a made-up name is fine. It travels encrypted — only your circle members can read it; the servers in between never see it. Without one you appear as "Member ${(() => { try { return npubEncode(me.pk).slice(-4) } catch { return me.pk.slice(0, 4) } })()}".</div>
       <button class="btn small ghost" data-action="copy-npub">Copy my invite key</button>
       <div class="note">${persisted.authMethod === 'signet'
         ? 'Your key lives in your signer (Signet, Amber, a bunker…) and never touches flock.'
@@ -2514,6 +2533,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'pickup-close': pickupPanel = null; pickupOutcome = null; showDuressWord = false; render(); break
     case 'pickup-check-run': void runSpokenCheck(); break
     case 'copy-invite': void copyInvite(); break
+    case 'save-handle': saveHandle(); break
     case 'copy-npub': copyNpub(); break
     case 'send-invite': void sendInvite(); break
     case 'reseed': void reseedCircle(); break
@@ -3655,10 +3675,15 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       render()
       return
     } else if (t === JOINED_SIGNAL_TYPE) {
-      // A newcomer saying "I'm here" — carries nothing; the roster update below
-      // is the whole point. Nobody can announce anyone but themselves.
+      // A newcomer saying "I'm here" (optionally "…and I go by Dave") — the
+      // roster update below is the point. Nobody can announce anyone but
+      // themselves, and their handle is a suggestion: petnames always win.
       const j = await decryptJoined(c.seedHex, e.content)
       if (j.member !== e.pubkey) return
+      if (j.handle && me && j.member !== me.pk && persisted.handles?.[j.member] !== j.handle) {
+        persisted.handles = { ...persisted.handles, [j.member]: j.handle }
+        store.save(persisted)
+      }
     } else {
       return
     }

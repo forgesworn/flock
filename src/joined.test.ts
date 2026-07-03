@@ -36,4 +36,24 @@ describe('buildJoinedSignal / decryptJoined', () => {
     const content = await encryptEnvelope(deriveGroupKey(SEED), JSON.stringify({ member: 'not-a-key', timestamp: 1 }))
     await expect(decryptJoined(SEED, content)).rejects.toThrow(/member/)
   })
+
+  it('round-trips an optional handle, trimmed', async () => {
+    const event = await buildJoinedSignal({ groupId: 'g', seedHex: SEED, member: A, timestamp: 1, handle: '  Dave  ' })
+    const back = await decryptJoined(SEED, event.content)
+    expect(back.handle).toBe('Dave')
+  })
+
+  it('omits an empty handle', async () => {
+    const event = await buildJoinedSignal({ groupId: 'g', seedHex: SEED, member: A, timestamp: 1, handle: '   ' })
+    const back = await decryptJoined(SEED, event.content)
+    expect(back.handle).toBeUndefined()
+  })
+
+  it('rejects an overlong handle on build and on decrypt', async () => {
+    await expect(buildJoinedSignal({ groupId: 'g', seedHex: SEED, member: A, handle: 'x'.repeat(41) })).rejects.toThrow(/handle/)
+    const { deriveGroupKey, encryptEnvelope } = await import('canary-kit/sync')
+    const content = await encryptEnvelope(deriveGroupKey(SEED), JSON.stringify({ member: A, timestamp: 1, handle: 'x'.repeat(200) }))
+    const back = await decryptJoined(SEED, content)
+    expect(back.handle).toBeUndefined() // malformed extra field is dropped, not fatal
+  })
 })

@@ -19,27 +19,41 @@ export const JOINED_SIGNAL_TYPE = 'joined'
 
 const HEX_64_RE = /^[0-9a-f]{64}$/
 
+/** Handles are for recognition, not essays. */
+export const MAX_HANDLE = 40
+
 /** A decrypted joined announcement. */
 export interface Joined {
   /** The newcomer's pubkey (64-char hex) — must match the signal's sender. */
   member: string
   /** Unix seconds. */
   timestamp: number
+  /** Self-chosen display handle ("Dave") — a SUGGESTION for other members'
+   *  private nicknames, never an authenticated identity. Travels only inside
+   *  this encrypted payload; the relay never sees it. */
+  handle?: string
 }
 
 /**
  * Build an unsigned kind-20078 joined signal, encrypted with the group envelope key.
  *
- * @throws {Error} If `member` is not a valid hex pubkey.
+ * @throws {Error} If `member` is not a valid hex pubkey, or `handle` exceeds MAX_HANDLE.
  */
 export async function buildJoinedSignal(params: {
   groupId: string
   seedHex: string
   member: string
   timestamp?: number
+  handle?: string
 }): Promise<UnsignedEvent> {
   if (!HEX_64_RE.test(params.member)) throw new Error('member must be a 64-character lowercase hex pubkey')
-  const payload: Joined = { member: params.member, timestamp: params.timestamp ?? Math.floor(Date.now() / 1000) }
+  const handle = params.handle?.trim()
+  if (handle !== undefined && handle.length > MAX_HANDLE) throw new Error(`handle must be at most ${MAX_HANDLE} characters`)
+  const payload: Joined = {
+    member: params.member,
+    timestamp: params.timestamp ?? Math.floor(Date.now() / 1000),
+    ...(handle ? { handle } : {}),
+  }
   const encryptedContent = await encryptEnvelope(deriveGroupKey(params.seedHex), JSON.stringify(payload))
   return buildSignalEvent({ groupId: params.groupId, signalType: JOINED_SIGNAL_TYPE, encryptedContent })
 }
@@ -60,5 +74,10 @@ export async function decryptJoined(seedHex: string, content: string): Promise<J
   if (typeof o.timestamp !== 'number' || !Number.isFinite(o.timestamp)) {
     throw new Error('Invalid joined: timestamp must be a number')
   }
-  return { member: o.member, timestamp: o.timestamp }
+  // A malformed handle is dropped rather than fatal — the announcement itself
+  // (roster membership) must not hinge on a cosmetic field.
+  const handle = typeof o.handle === 'string' && o.handle.trim() && o.handle.trim().length <= MAX_HANDLE
+    ? o.handle.trim()
+    : undefined
+  return { member: o.member, timestamp: o.timestamp, ...(handle ? { handle } : {}) }
 }

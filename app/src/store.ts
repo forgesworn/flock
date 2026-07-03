@@ -80,6 +80,14 @@ export interface Persisted {
   offGridUntil?: number
   /** Local, private nicknames for members (pubkey → name). Never leaves the device. */
   petnames: Record<string, string>
+  /** My self-chosen handle, announced INSIDE encrypted joined signals so circle
+   *  members can recognise me — the relay never sees it. Optional; a pseudonym
+   *  is fine (recognition, not identity). */
+  myHandle?: string
+  /** Handles members announced for THEMSELVES (pubkey → handle). A suggestion
+   *  only: your own petnames always win, and the "new phone joined" notice
+   *  remains the check that a handle isn't impersonating someone. */
+  handles?: Record<string, string>
   /** Cached member beacons per circle (id → beacons) so map pins survive a refresh
    *  or a PWA relaunch. A convenience cache only — pruned by age + circle existence
    *  on load; live beacons always overwrite. On-device only, like everything here. */
