@@ -149,6 +149,21 @@ let inviteSubKey = ''
 let awaitingInvite = false
 let pendingInviteNpub: string | null = null // a scanned invite-key link, prefilled into the send form
 let showInviteLinkText = false // clipboard copy failed — render the link as selectable text instead
+let updateAvailable = false // native shell only: the hosted deploy is newer than this build
+
+/** Compare this build's stamp against the hosted deploy's /version.json.
+ *  Only the download-page nudge on Home hangs off it — never an auto-update. */
+async function checkForUpdate(): Promise<void> {
+  try {
+    const res = await fetch(`${shareOrigin()}/version.json`, { cache: 'no-store' })
+    if (!res.ok) return
+    const v = (await res.json()) as { build?: string }
+    if (v.build && v.build !== __FLOCK_BUILD__ && !updateAvailable) {
+      updateAvailable = true
+      render()
+    }
+  } catch { /* offline — checked again on the next boot or 6-hour tick */ }
+}
 let showAdvanced = false // You-tab advanced settings fold (session-only)
 let awaitSince = 0 // when the remote-invite wait began — drives the 'still waiting' guidance
 const AWAIT_GUIDE_MS = 60_000
@@ -468,7 +483,13 @@ function bootUnlocked(): void {
   })
   // In the APK a tapped/scanned flock link arrives as an Android intent, not a
   // navigation — bridge it onto the same hashchange path (native/deeplink.ts).
-  if (isNativeShell()) void import('../../native/deeplink').then((d) => d.watchDeepLinks())
+  // And since sideloaded APKs never auto-update, quietly compare this build
+  // against the hosted deploy (boot + 6-hourly) — the web app needs neither.
+  if (isNativeShell()) {
+    void import('../../native/deeplink').then((d) => d.watchDeepLinks())
+    window.setTimeout(() => { void checkForUpdate() }, 15_000)
+    window.setInterval(() => { void checkForUpdate() }, 21_600_000)
+  }
   void restoreSignet()
 }
 
@@ -627,6 +648,12 @@ function homeView(): string {
   const s = orbState()
   return `
     ${topbar(true)}
+    ${updateAvailable ? `
+    <div class="card stack" style="margin-bottom:14px">
+      <div><strong>A newer version of flock is ready</strong></div>
+      <div class="note">Download it and install over the top — everything on this phone stays put.</div>
+      <a class="btn small primary" href="https://flock.forgesworn.dev/get.html">Get the update</a>
+    </div>` : ''}
     <div class="orb-wrap ${s.cls}"${s.action ? ` data-action="${s.action}" role="button" tabindex="0"` : ''}>
       <div class="orb"><div class="orb-inner">
         <div class="orb-state"><span class="orb-dot"></span>${esc(s.label)}</div>
@@ -971,7 +998,7 @@ function youView(): string {
     </div>
     <button class="btn ghost" data-action="toggle-advanced" style="margin-top:18px" aria-expanded="${showAdvanced}">${showAdvanced ? 'Hide advanced settings' : 'Advanced settings…'}</button>
     ${showAdvanced ? advancedSections(me, c) : ''}
-    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose</div>`
+    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose<br/>version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
 }
 
 /** The sharp tools, folded away by default: servers, security, disband, reset.

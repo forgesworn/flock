@@ -62,7 +62,9 @@ files into `native/` before building.
 - **`patch-android.mjs`** — location + foreground-service permissions,
   `allowBackup=false` (with the app lock off, localStorage is plaintext — it
   must not be extractable via adb/cloud backup), and the **verified App Links
-  intent filter** for `https://flock.forgesworn.dev`.
+  intent filter** for `https://flock.forgesworn.dev` — claiming **only path
+  `/`** (invite fragments live there), so `/get.html` and the APK download
+  stay reachable in the browser on phones that have flock installed.
 - **`deeplink.ts`** — a scanned/tapped flock invite arrives in the shell as an
   Android *intent* (the WebView never navigates); this bridge re-injects just
   the `#join=`/`#invite=` fragment so the app's normal hashchange consumer

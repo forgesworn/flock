@@ -53,19 +53,28 @@ if (xml.includes('android:allowBackup="true"')) {
 
 // Verified App Link for invite links/QRs. Appended after the MAIN/LAUNCHER
 // intent filter of the only activity in the generated manifest.
+//
+// Claim ONLY path "/" — invite links are `https://host/#join=…`, whose path is
+// "/" (the secret rides in the fragment). Claiming every path would swallow
+// /get.html and /downloads/flock.apk into the app, making the "get the update"
+// flow (and the download page generally) unreachable on any phone with flock
+// installed.
 const APP_LINK_HOST = 'flock.forgesworn.dev'
-if (!xml.includes(`android:host="${APP_LINK_HOST}"`)) {
-  xml = xml.replace(
-    '</intent-filter>',
-    `</intent-filter>
-
-            <intent-filter android:autoVerify="true">
+const APP_LINK_FILTER = `<intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="${APP_LINK_HOST}" />
-            </intent-filter>`,
+                <data android:scheme="https" android:host="${APP_LINK_HOST}" android:path="/" />
+            </intent-filter>`
+if (xml.includes(`android:host="${APP_LINK_HOST}"`) && !xml.includes('android:path="/"')) {
+  // Older patch claimed every path — replace that filter with the narrow one.
+  xml = xml.replace(
+    /<intent-filter android:autoVerify="true">[\s\S]*?<\/intent-filter>/,
+    APP_LINK_FILTER,
   )
+  changed = true
+} else if (!xml.includes(`android:host="${APP_LINK_HOST}"`)) {
+  xml = xml.replace('</intent-filter>', `</intent-filter>\n\n            ${APP_LINK_FILTER}`)
   changed = true
 }
 
