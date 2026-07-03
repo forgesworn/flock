@@ -153,6 +153,7 @@ let awaitingInvite = false
 let pendingInviteNpub: string | null = null // a scanned invite-key link, prefilled into the send form
 let showInviteLinkText = false // clipboard copy failed — render the link as selectable text instead
 let updateAvailable = false // native shell only: the hosted deploy is newer than this build
+let pendingJoin: store.Circle | null = null // a link/QR join awaiting the guest's name (join-name screen)
 
 /** Compare this build's stamp against the hosted deploy's /version.json.
  *  Only the download-page nudge on Home hangs off it — never an auto-update. */
@@ -530,24 +531,64 @@ function inviteFromLink(npub: string): void {
   toast('Key filled in — tap Send encrypted invite')
 }
 
-/** Join straight from a scanned/tapped link — the same path as a pasted code. */
+/** Join straight from a scanned/tapped link — the same path as a pasted code.
+ *  A guest without a handle is asked for one FIRST (join-name screen): the
+ *  moment they land in the circle is exactly when "who is this?" matters. */
 function joinFromLink(code: string): void {
   try {
     const circle = store.decodeInvite(store.inviteCodeFrom(code))
     if (persisted.circles.some((c) => c.id === circle.id)) { switchCircle(circle.id); return }
-    persisted.identity ??= store.createIdentity()
-    circle.members = [persisted.identity.pk]
-    circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
-    upsertCircle(circle, true)
-    announceJoin(circle)
-    onboardStep = 'intro'
-    adding = false
-    tab = 'home'
-    render()
-    toast(persisted.myHandle
-      ? `You've joined ${circle.name}`
-      : `You've joined ${circle.name} — add your name under You so friends recognise you`)
+    if (!persisted.myHandle) { pendingJoin = circle; render(); return }
+    completeJoin(circle)
   } catch { toast('That join link is not valid — ask for a fresh one.') }
+}
+
+function completeJoin(circle: store.Circle): void {
+  persisted.identity ??= store.createIdentity()
+  circle.members = [persisted.identity.pk]
+  circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
+  upsertCircle(circle, true)
+  announceJoin(circle)
+  pendingJoin = null
+  onboardStep = 'intro'
+  adding = false
+  tab = 'home'
+  render()
+  toast(persisted.myHandle
+    ? `You've joined ${circle.name}`
+    : `You've joined ${circle.name} — add your name under You so friends recognise you`)
+}
+
+/** The "what should they call you?" step for a link/QR guest. */
+function joinNameView(c: store.Circle): string {
+  return `<main class="screen onboard fade-in">
+    <img class="hero-logo" src="./icon.svg" alt="" />
+    <h1>Joining ${esc(c.name)}</h1>
+    <p class="tagline">What should this circle call you? A first name or nickname is perfect.</p>
+    <div class="actions">
+      <div class="field"><label for="join-handle">Your name</label><input class="input" id="join-handle" maxlength="40" placeholder="Dave · Mum · a nickname" /></div>
+      <button class="btn primary" data-action="join-named">Join ${esc(c.name)}</button>
+      <button class="btn ghost" data-action="join-skip">Join without a name</button>
+    </div>
+    <div class="note onboard-note">Shared only with this circle, encrypted — the servers in between never see it. Skip it and you appear as an anonymous member (you can set a name later under You).</div>
+  </main><div class="toast" id="toast"></div>`
+}
+
+function wireJoinName(): void {
+  root.querySelectorAll('[data-action]').forEach((node) => {
+    node.addEventListener('click', () => {
+      const c = pendingJoin
+      if (!c) return
+      const a = node.getAttribute('data-action')
+      if (a === 'join-named') {
+        const v = (document.getElementById('join-handle') as HTMLInputElement | null)?.value.trim().slice(0, 40)
+        if (v) { persisted.myHandle = v; store.save(persisted) }
+        completeJoin(c)
+      } else if (a === 'join-skip') {
+        completeJoin(c)
+      }
+    })
+  })
 }
 
 /** Save my handle and re-announce it to every circle — the same encrypted
@@ -603,6 +644,12 @@ function render(): void {
   syncRzvTicker() // start/stop the live countdown to match the current screen
   if (persisted.identity) ensureInviteSub()
   const keep = captureFocusedInput()
+  if (pendingJoin) {
+    root.innerHTML = joinNameView(pendingJoin)
+    wireJoinName()
+    restoreFocusedInput(keep)
+    return
+  }
   if (!persisted.identity || !activeCircle() || adding) {
     root.innerHTML = onboardingView()
     wireOnboard()
@@ -1456,7 +1503,7 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   updateMapData()
   wireMapPanel()
   requestAnimationFrame(() => mapView?.map.resize())
-  if (camera) mapView.map.jumpTo({ center: [camera.lng, camera.lat], zoom: camera.zoom }) // a re-init (e.g. label switch) keeps the person's view
+  if (camera) { mapView.map.jumpTo({ center: [camera.lng, camera.lat], zoom: camera.zoom }); mapView.suppressAutoFit() } // a re-init (e.g. label switch) keeps the person's view
   if (offlineMapEnabled()) void refreshOfflineState()
   if (!fix && !camera) void centreOnCurrentPosition() // no live share yet → actively locate for the map
 }
@@ -1464,9 +1511,10 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
 // Centre the map on the user's current position without starting a share. Purely
 // local (nothing is broadcast); silently does nothing if permission is denied or
 // the user has since started placing a zone (we must not yank the view then).
+// With member pins on show, autoFit owns the framing — don't yank to just me.
 async function centreOnCurrentPosition(): Promise<void> {
   const f = await svc.currentPosition()
-  if (f && mapView && !addMode) mapView.flyTo({ lat: f.lat, lon: f.lon }, { instant: true })
+  if (f && mapView && !addMode && memberPoints().length === 0) mapView.flyTo({ lat: f.lat, lon: f.lon }, { instant: true })
 }
 
 // ── Offline map ("save this area") ───────────────────────────────────────────
@@ -1613,6 +1661,15 @@ function updateMapData(): void {
   } else {
     mapView?.setContributorPins([])
     mapView?.setMeetingVenue(null)
+  }
+  // Frame everyone: every shown pin plus my own position, so a circle spread
+  // across town is visible at a glance instead of everyone-but-me off-screen.
+  // autoFit stands down permanently on the first real gesture, and never fires
+  // while placing a zone (yanking the view mid-placement loses the spot).
+  if (!addMode) {
+    const fitPts: { lat: number; lon: number }[] = shown.map((p) => ({ lat: p.lat, lon: p.lon }))
+    if (fix) fitPts.push({ lat: fix.lat, lon: fix.lon })
+    mapView?.autoFit(fitPts)
   }
   // Out-of-area chip: in offline mode, flag any shown pin beyond the saved map's
   // bounds. We never live-fetch to cover it — leaking a viewport mid-event is wrong.

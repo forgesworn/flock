@@ -99,6 +99,7 @@ export class MapView {
   private trailPoints = 0 // count of breadcrumb dots currently drawn (inspection/e2e)
   private memberAreaFeatures = 0 // count of rough-area halos currently drawn (inspection/e2e)
   private contribAreaFeatures = 0 // count of contributor halos currently drawn (inspection/e2e)
+  private userMoved = false // a real gesture happened — the camera is theirs now
 
   // Lazily resolve the basemap style, best first: (1) the circle's saved offline
   // area (OPFS vector — zero network at view time); (2) the bundled demo vector
@@ -139,6 +140,12 @@ export class MapView {
       showAccuracyCircle: true,
     })
     this.map.addControl(this.geolocate, 'top-right')
+    // Auto-fit hands the camera over the moment the person takes it: any manual
+    // drag/zoom (originalEvent present = a real gesture, not our own camera
+    // call) or tapping "locate me" ends automatic re-framing until re-mount.
+    this.map.on('dragstart', (e) => { if ((e as { originalEvent?: unknown }).originalEvent) this.userMoved = true })
+    this.map.on('zoomstart', (e) => { if ((e as { originalEvent?: unknown }).originalEvent) this.userMoved = true })
+    this.geolocate.on('trackuserlocationstart', () => { this.userMoved = true })
     this.map.on('load', () => {
       this.map.addSource('fences', { type: 'geojson', data: fc([]) })
       this.map.addLayer({ id: 'fences-fill', type: 'fill', source: 'fences', paint: { 'fill-color': '#5fd0a8', 'fill-opacity': 0.14 } })
@@ -192,6 +199,22 @@ export class MapView {
     // from the default view; animated when recentring an already-placed map.
     if (opts.instant) this.map.jumpTo(camera)
     else this.map.flyTo(camera)
+  }
+
+  /** A restored camera (re-init) owns the view — no automatic re-framing. */
+  suppressAutoFit(): void { this.userMoved = true }
+
+  /** Frame the view to include every given point (everyone in the circle, plus
+   *  me) — re-fitting as pins move, but only until the person takes the camera
+   *  with a real gesture. Single point = a sensible street-level view. */
+  autoFit(points: { lat: number; lon: number }[]): void {
+    if (this.userMoved || points.length === 0) return
+    if (points.length === 1) { this.flyTo(points[0], { instant: false }); return }
+    const first: [number, number] = [points[0].lon, points[0].lat]
+    const b = points.reduce((acc, p) => acc.extend([p.lon, p.lat]), new maplibregl.LngLatBounds(first, first))
+    // Top padding clears the pin labels (anchored above the dot); maxZoom keeps
+    // two people in the same street from producing a rooftop-level view.
+    this.map.fitBounds(b, { padding: { top: 90, bottom: 60, left: 60, right: 60 }, maxZoom: 15, duration: 600 })
   }
 
   setGeofences(fences: Geofence[]): void {
