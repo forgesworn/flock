@@ -2,7 +2,6 @@
 // library (decideEmission → build signal) to real Nostr publish/subscribe.
 
 import * as store from './store'
-import type { Mode } from './store'
 import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
@@ -10,103 +9,41 @@ import { buildSignInOptions } from './signin'
 import { PRIVATE_RELAYS, parseRelayList } from './relays'
 import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
-import { geocode, reverseGeocode } from './geo'
-import { formatCountdown } from './countdown'
-import { suggestMeetingPoint, rankVenues } from './meetingPoint'
-import { searchMeetingVenues } from './venues'
-import { circleToPolygon } from 'rendezvous-kit'
-import type { RendezvousSuggestion, TransportMode, FairnessStrategy, Venue } from 'rendezvous-kit'
 import { getProfile, fetchProfiles } from './profiles'
-import { encode, decode, precisionToRadius } from 'geohash-kit'
+import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
-import { mapLabelMode, setMapLabelMode, type MapLabelMode } from './lang'
 import { isNativeShell, shareOrigin } from './native'
 import { rotationDue, refreshDue } from './rotation'
-import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
 import { generateStorageSecret, setupPin, unlockWithPin, unlockWithGrace, burnLock } from './lock'
 import {
   decideEmission,
-  DEFAULT_PRECISIONS,
-  classifyContainment,
   haversineMetres,
   signalTypeForReason,
   buildLocationSignal,
-  buildHelpSignal,
   classifyPresence,
-  buildCheckInSignal,
-  decryptCheckIn,
-  classifyCheckins,
-  selfCheckInStatus,
-  buildAckSignal,
-  decryptAck,
-  classifyEscalation,
-  CHECKIN_SIGNAL_TYPE,
-  ACK_SIGNAL_TYPE,
-  pushCrumb,
-  buildTrailSignal,
-  decryptTrail,
-  TRAIL_SIGNAL_TYPE,
-  noReportPolicyAt,
   buildBuzzSignal,
   decryptBuzz,
   DEFAULT_BUZZ_REASONS,
-  buildAllClearSignal,
-  decryptAllClear,
-  ALLCLEAR_SIGNAL_TYPE,
-  buildFencesSignal,
-  decryptFences,
-  isNewerFenceSet,
-  FENCES_SIGNAL_TYPE,
   buildDisbandSignal,
   decryptDisband,
   DISBAND_SIGNAL_TYPE,
   buildJoinedSignal,
   decryptJoined,
   JOINED_SIGNAL_TYPE,
-  buildOffGridSignal,
-  decryptOffGrid,
-  isOffGrid,
-  OFFGRID_SIGNAL_TYPE,
-  type OffGrid,
-  type NoReportZone,
-  assessArrival,
-  buildRendezvousSignal,
-  decryptRendezvous,
-  buildRendezvousStatusSignal,
-  decryptRendezvousStatus,
-  RENDEZVOUS_SIGNAL_TYPE,
-  RENDEZVOUS_STATUS_TYPE,
-  buildMeetingRequestSignal,
-  decryptMeetingRequest,
-  buildMeetingShareSignal,
-  decryptMeetingShare,
-  MEETING_REQUEST_TYPE,
-  MEETING_SHARE_TYPE,
-  type Rendezvous,
-  type RendezvousStatus,
-  type MeetingRequest,
-  type MeetingShare,
-  type TravelMode,
+  buildLostSignal,
+  decryptLost,
+  LOST_SIGNAL_TYPE,
   deriveBeaconKey,
   decryptBeacon,
-  deriveDuressKey,
-  decryptDuressAlert,
-  spokenCounter,
-  spokenWordsFor,
-  checkSpokenWord,
   type MemberBeacon,
-  type CircleGeofence,
-  type Geofence,
-  type CheckIn,
-  type CheckInAck,
-  type Breadcrumb,
-  type Trail,
+  type LostReport,
 } from '@forgesworn/flock'
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -114,10 +51,6 @@ let persisted = store.load()
 let tab: 'home' | 'map' | 'circle' | 'you' = 'home'
 let fix: svc.Fix | null = null
 let sharing = false
-let alertActive = false // MY alert went out (confirmed publish) — sender's view only
-let alertFailed = false // my SOS could not be published — persistent retry state, never a toast
-let alertCircleId: string | null = null // which circle my live alert went to (stand-down target)
-let breachActive = false
 let geoIssue: 'denied' | 'nofix' | null = null // actionable location trouble shown as a card, not a toast
 let stopWatch: (() => void) | null = null
 let hidden = false // app backgrounded (page hidden) — pause sampling; a hidden PWA can't sample reliably anyway
@@ -127,13 +60,10 @@ const subs = new Map<string, () => void>() // circleId@relay@inboxPk → unsubsc
 const beaconCadence = new Map<string, BeaconCadence>()
 // Automatic-emit cadence (seconds). Heartbeats stay well under the 600s presence
 // "stale" window, so a still member keeps reading as "active" without spamming.
-const COARSE_MIN_INTERVAL = 45 // night-out: never faster than this
+const COARSE_MIN_INTERVAL = 45 // never faster than this
 const COARSE_HEARTBEAT = 300 //  …but re-affirm presence every 5 min when still
-const BREACH_MIN_INTERVAL = 30 // breach live-track floor
-const BREACH_HEARTBEAT = 180 //   heartbeat while stationary outside a fence
-// Adaptive sampling (night-out only): back off the GPS poll when stationary,
-// staying under the 600 s presence "stale" window so a still member never reads
-// as "gone home". Family keeps a continuous watch (see syncWatch).
+// Adaptive sampling: back off the GPS poll when stationary, staying under the
+// 600 s presence "stale" window so a still member never reads as "gone home".
 const SAMPLE_POLL_BOUNDS = { minSeconds: 30, maxSeconds: 180 }
 const SAMPLE_MOVE_FLOOR = 30 // metres of jitter to ignore before calling it movement
 let lastSampleFix: svc.Fix | null = null
@@ -142,11 +72,8 @@ let root: HTMLElement
 let toastTimer = 0
 
 let mapView: MapView | null = null
-let offlineSaving = false // "save this area" in flight
-let offlineSavedBytes: number | null = null // saved offline-basemap size for the active circle
 let offlineBBox: BBox | null = null // bounds of the active circle's saved map (null = not offline)
-let addMode = false
-let addRadius = 300
+let focusMemberPk: string | null = null // "see on map" target — frame their cell once the map mounts
 
 let stopInviteSub: (() => void) | null = null
 let inviteSubKey = ''
@@ -172,79 +99,38 @@ async function checkForUpdate(): Promise<void> {
 let showAdvanced = false // You-tab advanced settings fold (session-only)
 let awaitSince = 0 // when the remote-invite wait began — drives the 'still waiting' guidance
 const AWAIT_GUIDE_MS = 60_000
-let armingCheckin = false
-let checkinAlert = false
-let checkinAlertSub = '' // orb subtitle when every missed check-in is being handled
-// Pre-SOS breadcrumbs: a short rolling buffer of my own recent fixes. Memory
-// ONLY — never persisted, never transmitted except inside a help/breach trail.
-let myCrumbs: Breadcrumb[] = []
-const escNotified = new Map<string, number>() // `${cid}:${member}:${missedAt}` → highest escalation level already toasted
-const selfNudged = new Map<string, string>() // circleId → `${lastCheckIn}:${status}` already nudged (self-reminder)
 let monitorTimer = 0
 let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string } | null = null
-let travelMode: TravelMode = 'walk'
-// How the meeting-point search balances travel across the group. Persisted per
-// device; only ever changes which candidate venue is picked (see rankVenues).
-function loadMeetingFairness(): FairnessStrategy {
-  try {
-    const v = localStorage.getItem('flock.fairness')
-    if (v === 'min_max' || v === 'min_total' || v === 'min_variance') return v
-  } catch { /* localStorage may be unavailable */ }
-  return 'min_max'
-}
-let meetingFairness: FairnessStrategy = loadMeetingFairness()
-let rzvDurationMin = 60
-let lastRzvStatus = 0
-let rzvPick = false // picking a rendezvous spot on the map (crosshair mode)
-let rzvTicker = 0 // 1 s interval driving the live countdown; 0 when idle
 
 let onboardStep: 'intro' | 'create' | 'join' | 'await' | 'restore' = 'intro'
-let onboardMode: Mode = 'family'
 let adding = false // adding another circle from within the app (not first-run onboarding)
 let ttlMode: 'ongoing' | 'today' | 'custom' = 'ongoing' // chosen lifetime for a new circle
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
 let resetConfirm = false // inline confirm for the destructive "sign out & reset this device"
 let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
-let covertHelpUntil = 0 // window in which my own covert help echo must NOT surface here
-let goingDark = false // off-grid duration picker is open
-let darkDurSec = 3600 // chosen break length (sec); -1 = custom (read from input)
-let addZoneKind: 'safe' | 'noreport' = 'safe' // which kind of zone the map editor is adding
-let newZonePolicy: 'withhold' | 'coarse' = 'withhold' // suppression strength for a new no-report zone
+let lostConfirmPk: string | null = null // member pk pending an inline "report lost" confirm
 let editingPetname: string | null = null // pubkey whose nickname is being edited inline
-let pickupPanel: 'show' | 'check' | null = null // spoken pick-up verify panel, if open
-let pickupOutcome: 'pass' | 'fail' | null = null // last check result (duress renders as pass — no tell)
-let showDuressWord = false // "prove it's me" tile is silently showing the duress word
+let comeToMeArmed = false // "Come to me" inline confirm is open (it shares an exact spot)
 
-// Per-circle live state — signals are circle-scoped, so beacons/alerts/etc. from
-// one circle must never bleed into another. Keyed by circle id.
+// Per-circle live state — signals are circle-scoped, so beacons from one circle
+// must never bleed into another. Keyed by circle id.
 interface CircleState {
   beacons: Map<string, MemberBeacon>
-  alerts: Map<string, number>
-  checkins: Map<string, CheckIn>
-  /** First responder per missed member (keyed by target); pruned on their next check-in. */
-  acks: Map<string, CheckInAck>
-  /** Latest disclosed breadcrumb trail per member (arrives only with help/breach). */
-  trails: Map<string, Trail>
-  rzvStatuses: Map<string, RendezvousStatus>
-  rendezvous: Rendezvous | null
-  offgrid: Map<string, OffGrid>
-  // Meeting-point search (Phase F "where"): the active proposal, each member's
-  // opt-in coarse contribution, and the fair point the proposer's device computed.
-  meeting: MeetingRequest | null
-  meetingShares: Map<string, MeetingShare>
-  meetingSuggestion: RendezvousSuggestion | null
-  meetingGen: number // bumped per suggestion refresh so a stale venue fetch can't clobber a newer one
-  meetingVenues: Venue[] // venues fetched for the current suggestion; the fairness toggle re-ranks these without re-fetching
+  /** Latest lost-phone report per member (mark or clear — latest wins). */
+  lost: Map<string, LostReport>
 }
 const circleStates = new Map<string, CircleState>()
 function cstate(id: string): CircleState {
   let s = circleStates.get(id)
-  if (!s) { s = { beacons: new Map(), alerts: new Map(), checkins: new Map(), acks: new Map(), trails: new Map(), rzvStatuses: new Map(), rendezvous: null, offgrid: new Map(), meeting: null, meetingShares: new Map(), meetingSuggestion: null, meetingGen: 0, meetingVenues: [] }; circleStates.set(id, s) }
+  if (!s) { s = { beacons: new Map(), lost: new Map() }; circleStates.set(id, s) }
   return s
 }
-// Meeting-point requests I've declined to contribute to (by requestId). Declining
-// sends nothing — this only hides the "share your spot?" prompt on my own device.
-const meetingDismissed = new Set<string>()
+
+/** The live lost report for a member in a circle, or null when not flagged. */
+function memberLost(circleId: string, pk: string): LostReport | null {
+  const r = cstate(circleId).lost.get(pk)
+  return r?.lost ? r : null
+}
 
 // Presence cache — mirror member beacons to localStorage so map pins survive a
 // refresh / PWA relaunch (a peer's next beacon can be up to a heartbeat — 5 min —
@@ -255,15 +141,6 @@ function saveBeacon(circleId: string, b: MemberBeacon): void {
   cstate(circleId).beacons.set(b.member, b)
   persisted.presence[circleId] = [...cstate(circleId).beacons.values()]
   store.save(persisted)
-}
-/** A stand-down ends the emergency disclosure: degrade that member's cached pin
- *  from SOS/breach precision back to the ambient coarse cell, so the map stops
- *  showing the exact spot the alert justified. On-device view only — the events
- *  already on relays age out on their own. */
-function coarsenBeacon(circleId: string, member: string): void {
-  const b = cstate(circleId).beacons.get(member)
-  if (!b || b.precision <= DEFAULT_PRECISIONS.coarse) return
-  saveBeacon(circleId, { ...b, geohash: b.geohash.slice(0, DEFAULT_PRECISIONS.coarse), precision: DEFAULT_PRECISIONS.coarse })
 }
 /** Stopping sharing makes my own cached pins a stale claim of "still sharing" —
  *  drop them everywhere so my map reads honestly. Local only: publishing a
@@ -337,15 +214,13 @@ function switchCircle(id: string): void {
   if (!persisted.circles.some((c) => c.id === id)) return
   persisted.activeCircleId = id
   store.save(persisted)
-  breachActive = false
-  // My live SOS state (alertActive/alertFailed/alertCircleId) deliberately
-  // survives a switch: the emergency isn't over because focus moved, and the
-  // stand-down / retry buttons must stay reachable from any circle.
   disbandConfirm = false
   resetConfirm = false
   removeConfirmPk = null
+  lostConfirmPk = null
+  comeToMeArmed = false
   tab = 'home'
-  syncWatch() // re-tier accuracy for the newly-focused circle's mode
+  syncWatch() // re-tier accuracy for the newly-focused circle's precision
   render()
 }
 
@@ -369,10 +244,6 @@ function fmtAgo(sec: number): string {
   return `${Math.floor(sec / 86_400)}d ago`
 }
 
-// Sharing behaviour — plain words, not personas (internal keys stay family/nightout).
-const isLive = (m: Mode): boolean => m === 'nightout'
-const behaviourLabel = (m: Mode): string => (isLive(m) ? 'Share live · coarse' : 'Private until I raise it')
-
 /** Seconds from now until the next local 04:00 — the "Today" window (covers a night that runs past midnight). */
 function todayWindowSec(): number {
   const now = new Date()
@@ -382,13 +253,37 @@ function todayWindowSec(): number {
   return Math.floor((end.getTime() - now.getTime()) / 1000)
 }
 
-/** True while I'm deliberately off-grid ("taking a break"). */
-const isDark = (): boolean => !!persisted.offGridUntil && persisted.offGridUntil > nowSec()
+// ── Location detail (the precision slider) ───────────────────────────────────
+// The slider sets the geohash precision MY beacons carry in this circle — what
+// everyone else sees. 3 (~a whole region or island, e.g. Mallorca) … 9 (~exact
+// spot). It never changes what the phone samples for itself, only what leaves it.
+const PRECISION_MIN = 3
+const PRECISION_MAX = 9
+const PRECISION_DEFAULT = 6
+const COME_TO_ME_PRECISION = 9 // the one-shot "come to me" disclosure
+const PRECISION_NAMES: Record<number, string> = {
+  3: 'Region', 4: 'City', 5: 'Town', 6: 'Neighbourhood', 7: 'Street', 8: 'Building', 9: 'Exact spot',
+}
 
-/** Is this member currently off-grid in the active circle? */
-function memberDark(circleId: string, pk: string): boolean {
-  const o = cstate(circleId).offgrid.get(pk)
-  return !!o && isOffGrid(o, nowSec())
+function sharePrecisionOf(c: store.Circle | null): number {
+  const p = Math.round(c?.sharePrecision ?? PRECISION_DEFAULT)
+  return Math.min(PRECISION_MAX, Math.max(PRECISION_MIN, Number.isFinite(p) ? p : PRECISION_DEFAULT))
+}
+
+/** "~600 m" — how closely a given precision places you. */
+function precisionSize(p: number): string {
+  const r = precisionToRadius(p)
+  if (r >= 10_000) return `~${Math.round(r / 1000)} km`
+  if (r >= 1000) return `~${(r / 1000).toFixed(1)} km`
+  return `~${Math.round(r)} m`
+}
+
+const precisionLabel = (p: number): string => `${PRECISION_NAMES[p] ?? 'Area'} · ${precisionSize(p)}`
+
+function precisionNote(p: number): string {
+  return p >= PRECISION_MAX
+    ? 'Your circle sees your exact spot while you share.'
+    : `Your circle sees roughly where you are — to within about ${precisionSize(p).replace('~', '')}. Never your exact spot.`
 }
 
 /** Display name for a member: my private petname → public profile (if opted-in) →
@@ -451,7 +346,7 @@ function toast(msg: string): void {
  *  explain without cluttering a practised user's screen. */
 function hint(id: string, text: string): string {
   if (!store.hintShown(persisted.hints, id)) return ''
-  // Class is "tip", not "hint" — .sos already uses a .hint span for its hold label.
+  // Class is "tip", not "hint" — "hint" reads as a form-field affordance in CSS.
   return `<div class="tip">
     <span class="tip-i">i</span>
     <span class="tip-text">${esc(text)}</span>
@@ -496,13 +391,7 @@ function bootUnlocked(): void {
   // and only flips on a real visibilitychange, so headless/normal foreground always samples.
   document.addEventListener('visibilitychange', () => { hidden = document.hidden; syncWatch() })
   if (import.meta.env.DEV) (window as unknown as { flockSampling?: () => boolean }).flockSampling = () => !!stopWatch // e2e seam (dev only)
-  // e2e seam (dev only): the active circle's current spoken words — the faithful
-  // stand-in for "the collector reads the word aloud" so a test needn't fake a hold.
-  if (import.meta.env.DEV) (window as unknown as { flockSpoken?: () => { verify: string; duress: string } | null }).flockSpoken = () => {
-    const ctx = spokenCtx()
-    return ctx ? spokenWordsFor(ctx.seedHex, ctx.me, ctx.counter, ctx.members) : null
-  }
-  watchBattery() // battery-aware sampling (conserve when low + discharging, never during an alert)
+  watchBattery() // battery-aware sampling (conserve when low + discharging)
   rehydratePresence() // restore cached member pins so a refresh doesn't blank the map
   // Automatic seed rotation: shortly after boot (letting signer restore + subs
   // settle first), then hourly — the cadence is monthly, precision irrelevant.
@@ -667,8 +556,7 @@ function restoreFocusedInput(keep: ReturnType<typeof captureFocusedInput>): void
 }
 
 function render(): void {
-  if (tab !== 'map' && mapView) { mapView.destroy(); mapView = null; addMode = false; rzvPick = false }
-  syncRzvTicker() // start/stop the live countdown to match the current screen
+  if (tab !== 'map' && mapView) { mapView.destroy(); mapView = null }
   if (persisted.identity) ensureInviteSub()
   const keep = captureFocusedInput()
   if (pendingJoin) {
@@ -694,16 +582,9 @@ function render(): void {
 }
 
 // ── Views: app ───────────────────────────────────────────────────────────────
-function topbar(showModeToggle: boolean): string {
-  const c = activeCircle() as store.Circle
-  const toggle = showModeToggle ? `
-    <div class="mode-toggle" role="group" aria-label="Sharing">
-      <button data-action="mode" data-mode="family" aria-pressed="${c.mode === 'family'}">Private</button>
-      <button data-action="mode" data-mode="nightout" aria-pressed="${c.mode === 'nightout'}">Share live</button>
-    </div>` : ''
+function topbar(): string {
   return `<div class="topbar">
     <div class="brand"><img class="logo" src="./icon.svg" alt=""/><span class="name wordmark">flock</span></div>
-    ${toggle}
   </div>
   ${circleSwitcher()}`
 }
@@ -718,100 +599,103 @@ function fmtTtl(expiresAt?: number): string {
   return `${Math.round(left / 86_400)}d`
 }
 
-/** True while `c` has a live emergency — someone's help alert, or my own SOS
- *  (sent or still failing to send). */
-function circleAlerted(c: store.Circle): boolean {
-  return cstate(c.id).alerts.size > 0 || ((alertActive || alertFailed) && alertCircleId === c.id)
-}
-
-/** Horizontal chip row to switch between circles + add a new one. A circle with
- *  a live SOS is held at the front of the row and flagged, so the emergency
- *  stays one tap away no matter which circle is in focus. */
+/** Horizontal chip row to switch between circles + add a new one. */
 function circleSwitcher(): string {
   if (persisted.circles.length < 1) return ''
   const active = activeCircle()?.id
-  const ordered = [...persisted.circles].sort((a, b) => Number(circleAlerted(b)) - Number(circleAlerted(a)))
-  const chips = ordered.map((c) => {
+  const chips = persisted.circles.map((c) => {
     const ttl = fmtTtl(c.expiresAt)
-    const alert = circleAlerted(c)
-    return `<button class="circle-chip${c.id === active ? ' on' : ''}${alert ? ' alert' : ''}" data-action="switch-circle" data-id="${c.id}">${alert ? '<span class="chip-dot"></span>' : ''}${esc(c.name)}${ttl ? `<span class="ttl">${ttl}</span>` : ''}</button>`
+    return `<button class="circle-chip${c.id === active ? ' on' : ''}" data-action="switch-circle" data-id="${c.id}">${esc(c.name)}${ttl ? `<span class="ttl">${ttl}</span>` : ''}</button>`
   }).join('')
   return `<div class="circle-switch">${chips}<button class="circle-chip add" data-action="add-circle" aria-label="Add a circle">＋</button></div>`
 }
 
-function orbState(): { cls: string; label: string; sub: string; action?: string } {
+function orbState(): { cls: string; label: string; sub: string } {
   const c = activeCircle() as store.Circle
-  // Name the circle when my SOS lives in a non-focused one, so "Help sent"
-  // still makes sense after a switch.
-  const alertCircle = persisted.circles.find((x) => x.id === alertCircleId)
-  const where = alertCircle && alertCircle.id !== c.id ? alertCircle.name : 'Your circle'
-  if (alertFailed) return { cls: 'state-alert', label: "Help didn't send", sub: 'Tap to try again — check your signal', action: 'sos-retry' }
-  if (alertActive) return { cls: 'state-alert', label: 'Help sent', sub: `${where} has been alerted` }
-  const inc = incomingAlert()
-  if (inc) return { cls: 'state-alert', label: `${inc.name} needs help`, sub: 'Tap to see where', action: 'see-alert' }
-  if (checkinAlert) return { cls: 'state-alert', label: 'Check-in missed', sub: checkinAlertSub || "Someone hasn't checked in" }
-  if (isDark()) return { cls: 'state-dark', label: 'Taking a break', sub: `Sharing nothing · back in ${fmtMins((persisted.offGridUntil ?? 0) - nowSec())}` }
-  if (breachActive) return { cls: 'state-alert', label: 'Outside safe place', sub: 'Location shared with your circle' }
-  if (sharing && fix) {
-    return isLive(c.mode)
-      ? { cls: 'state-share', label: 'Sharing live', sub: 'Rough location · your circle can see you' }
-      : { cls: 'state-safe', label: 'On watch', sub: 'Stays hidden unless you raise it' }
-  }
-  if (sharing && !fix) return { cls: 'state-share', label: 'Locating…', sub: 'Getting a GPS fix' }
-  return { cls: 'state-safe', label: 'Private', sub: 'Location hidden until you need it' }
+  if (sharing && fix) return { cls: 'state-share', label: 'Sharing live', sub: `${precisionLabel(sharePrecisionOf(c))} · your circle can see you` }
+  if (sharing && !fix) return { cls: 'state-share', label: 'Locating…', sub: 'Getting a fix' }
+  return { cls: 'state-safe', label: 'Private', sub: 'Location hidden until you share it' }
 }
 
-/** The newest live help alert raised by someone ELSE, across ALL circles — an
- *  alert must surface even while the person is focused on another circle. */
-function incomingAlert(): { who: string; name: string; circleId: string; ts: number } | null {
-  const me = persisted.identity?.pk
-  let best: { who: string; name: string; circleId: string; ts: number } | null = null
-  for (const c of persisted.circles) {
-    for (const [who, ts] of cstate(c.id).alerts) {
-      if (who === me) continue
-      if (!best || ts > best.ts) best = { who, name: nameFor(who), circleId: c.id, ts }
-    }
-  }
-  return best
+/** The precision slider — how closely this circle sees me. Lives on Home next to
+ *  the share toggle because it IS the privacy control of the app. */
+function precisionCard(c: store.Circle): string {
+  const p = sharePrecisionOf(c)
+  return `<div class="card stack" style="margin-top:14px">
+    <div class="row" style="justify-content:space-between">
+      <strong>Location detail</strong>
+      <span class="muted" id="precision-label">${esc(precisionLabel(p))}</span>
+    </div>
+    <input class="slider" id="share-precision" type="range" min="${PRECISION_MIN}" max="${PRECISION_MAX}" step="1" value="${p}" aria-label="How closely your circle sees you" />
+    <div class="note" id="precision-note">${esc(precisionNote(p))}</div>
+    ${hint('precision', 'Slide left to share only a rough area — as wide as a whole region — or right for your exact spot. It changes what your circle sees; nobody gets more than this. The Map shows what they see of you.')}
+  </div>`
+}
+
+/** One-tap "buzz the circle" quick actions. "Come to me" is special: it also
+ *  shares a one-shot exact spot, so it asks first (see doComeToMe). */
+const QUICK_ACTIONS = ['Check in', 'Come to me', 'Where are you?', 'Call me', 'On my way'] as const
+
+function quickActionsCard(c: store.Circle): string {
+  const chip = (r: string): string => r === 'Come to me'
+    ? `<button class="btn small${comeToMeArmed ? ' primary' : ''}" data-action="come-to-me">${esc(r)}</button>`
+    : `<button class="btn small" data-action="quick-buzz" data-reason="${esc(r)}">${esc(r)}</button>`
+  const confirm = comeToMeArmed
+    ? `<div class="note">Buzz everyone and share your <strong>exact spot</strong> with ${esc(c.name)} — just this once? Your slider setting stays as it is.</div>
+       <div class="row" style="gap:10px">
+         <button class="btn small primary" data-action="come-to-me-confirm">Yes — come to me</button>
+         <button class="btn small ghost" data-action="come-to-me-cancel">Cancel</button>
+       </div>`
+    : ''
+  return `<div class="section-title" style="margin-top:22px">Buzz the circle</div>
+  <div class="card stack">
+    <div class="chip-row">${QUICK_ACTIONS.map(chip).join('')}</div>
+    ${confirm}
+    ${hint('quick-buzz', "One tap buzzes everyone's phone with your message. “Come to me” also shares your exact spot once — it asks before it does.")}
+  </div>`
 }
 
 function homeView(): string {
   const c = activeCircle() as store.Circle
   const s = orbState()
   return `
-    ${topbar(true)}
+    ${topbar()}
     ${updateAvailable ? `
     <div class="card stack" style="margin-bottom:14px">
       <div><strong>A newer version of flock is ready</strong></div>
       <div class="note">Download it and install over the top — everything on this phone stays put.</div>
       <a class="btn small primary" href="https://flock.forgesworn.dev/get.html">Get the update</a>
     </div>` : ''}
-    <div class="orb-wrap ${s.cls}"${s.action ? ` data-action="${s.action}" role="button" tabindex="0"` : ''}>
+    <div class="orb-wrap ${s.cls}">
       <div class="orb"><div class="orb-inner">
         <div class="orb-state"><span class="orb-dot"></span>${esc(s.label)}</div>
         <div class="orb-sub">${esc(s.sub)}</div>
       </div></div>
     </div>
     <div class="actions">
-      ${alertActive ? '<button class="btn primary" data-action="im-safe">I\'m safe now</button>' : ''}
       <button class="btn ${sharing ? 'ghost' : 'primary'}" data-action="toggle-share">
-        ${sharing ? 'Stop sharing' : (isLive(c.mode) ? 'Start sharing' : 'Start safety watch')}
+        ${sharing ? 'Stop sharing' : 'Start sharing'}
       </button>
-      ${hint('home-watch', isLive(c.mode)
-        ? 'Sharing live lets your circle see roughly where you are — a neighbourhood, never your exact address.'
-        : 'Keeps an eye on your safe places and stands ready for a pick-up or SOS. Your exact spot stays hidden until you need it.')}
-      <button class="btn warn" data-action="pickup">Pick me up</button>
-      <div class="sos" data-action="sos-hold" data-armed="false" role="button" tabindex="0" aria-label="Hold to send help">
-        <div class="fill"></div>
-        <span class="label">Hold for help</span>
-        <span class="hint">Press and hold to send an SOS</span>
-      </div>
-      ${hint('home-sos', 'Pick me up asks your circle to come and get you. Hold for help is an emergency SOS — it alerts everyone and shares where you are.')}
+      ${hint('home-watch', 'Sharing live lets your circle see where you are — you choose how closely with the slider below. Stop any time; nothing is shared while it\'s off.')}
     </div>
+    ${lostCard(c)}
+    ${precisionCard(c)}
+    ${quickActionsCard(c)}
     ${geoIssueCard()}
-    ${inviteCta()}
-    <div style="margin-top:14px">${breakCard()}</div>
-    <div style="margin-top:14px">${checkinCard()}</div>`
+    ${inviteCta()}`
+}
+
+/** Shown on THIS phone when the circle has flagged it lost — written for
+ *  whoever is holding it (an honest finder, or the owner clearing a mistake). */
+function lostCard(c: store.Circle): string {
+  const me = persisted.identity?.pk
+  const rep = me ? memberLost(c.id, me) : null
+  if (!me || !rep) return ''
+  return `<div class="card stack geo-issue" style="margin-top:14px" role="alert">
+    <strong>This phone was reported lost</strong>
+    <div class="note">${esc(nameFor(rep.by))} flagged it in ${esc(c.name)}. Found this phone? Please help it home — its owner's friends can see roughly where it is.</div>
+    <button class="btn primary" data-action="found-phone" data-pk="${me}">It's not lost — I've got it</button>
+  </div>`
 }
 
 /** Location trouble as an actionable, persistent card — a denied permission is a
@@ -843,83 +727,9 @@ function inviteCta(): string {
   </div>`
 }
 
-/** "Take a break" — go off-grid for a while without worrying anyone. */
-function breakCard(): string {
-  if (isDark()) {
-    const back = fmtMins((persisted.offGridUntil ?? 0) - nowSec())
-    return `<div class="card stack break-on">
-      <div class="row" style="justify-content:space-between">
-        <div><strong>On a break</strong><div class="note">Sharing nothing · back in ${back}. Your circle knows it's planned.</div></div>
-      </div>
-      <button class="btn primary" data-action="come-back">I'm back now</button>
-    </div>`
-  }
-  if (goingDark) {
-    const dur = (sec: number, label: string): string =>
-      `<button class="btn small${darkDurSec === sec ? ' primary' : ''}" data-action="dark-dur" data-sec="${sec}">${label}</button>`
-    return `<div class="card stack">
-      <div class="row" style="justify-content:space-between"><strong>Take a break</strong><button class="btn small ghost" data-action="cancel-dark">Cancel</button></div>
-      <div class="note">Stop sharing for a while. Your circle is told it's planned, so no one worries and no alarm goes off.</div>
-      <div class="chip-row">${dur(3600, '1 hour')}${dur(todayWindowSec(), 'Today')}${dur(-1, 'Custom')}</div>
-      <div id="dark-custom" class="row" style="gap:8px"${darkDurSec === -1 ? '' : ' hidden'}>
-        <input class="input" id="dark-num" type="number" min="1" max="48" value="2" style="max-width:90px" />
-        <span class="muted" style="align-self:center">hours</span>
-      </div>
-      <input class="input" id="dark-why" placeholder="Why? (optional) — e.g. at the cinema" autocapitalize="sentences" />
-      <button class="btn primary" data-action="do-dark">Start break</button>
-    </div>`
-  }
-  return `<button class="btn ghost" data-action="ask-dark">Take a break · pause sharing</button>`
-}
-
-function fmtMins(sec: number): string {
-  if (sec < 60) return `${Math.max(0, Math.round(sec))}s`
-  return `${Math.round(sec / 60)}m`
-}
-
-function checkinCard(): string {
-  const c = activeCircle() as store.Circle
-  const interval = c.checkinInterval ?? 0
-  if (armingCheckin) {
-    return `<div class="card stack">
-      <div class="row" style="justify-content:space-between"><strong>How often to check in</strong><button class="btn small ghost" data-action="cancel-arm">Cancel</button></div>
-      <div class="note">You'll be expected to tap “I'm OK” within this window. Miss it and your circle is alerted.</div>
-      <div class="chip-row">
-        <button class="btn small" data-action="arm" data-interval="900">15 min</button>
-        <button class="btn small" data-action="arm" data-interval="1800">30 min</button>
-        <button class="btn small" data-action="arm" data-interval="3600">1 hour</button>
-      </div>
-      <div class="row">
-        <input class="input" id="custom-interval-mins" type="number" inputmode="numeric" min="5" max="1440" placeholder="Custom · minutes" style="flex:1" />
-        <button class="btn small" data-action="arm-custom">Set</button>
-      </div>
-    </div>`
-  }
-  if (interval > 0) {
-    const me = persisted.identity?.pk
-    const mine = me ? cstate(c.id).checkins.get(me) : undefined
-    const dueIn = mine ? (mine.timestamp + interval) - nowSec() : 0
-    const status = selfCheckInStatus(mine ?? null, nowSec())
-    const alarmed = status === 'overdue' || status === 'missed'
-    const note =
-      status === 'missed' ? 'Missed — your circle has been alerted. Check in now'
-      : status === 'overdue' ? 'Overdue — check in now'
-      : status === 'due-soon' ? `Due soon — ${fmtMins(dueIn)} left`
-      : `Next check-in in ${fmtMins(dueIn)}`
-    return `<div class="card stack checkin-armed${alarmed ? ' overdue' : status === 'due-soon' ? ' due-soon' : ''}">
-      <div class="row" style="justify-content:space-between">
-        <div><strong>Automatic check-in</strong><div class="note">${note}</div></div>
-        <button class="btn small ghost" data-action="disarm-checkin">Turn off</button>
-      </div>
-      <button class="btn primary" data-action="checkin">I'm OK — check in</button>
-    </div>`
-  }
-  return `<button class="btn ghost" data-action="arm-menu">Set up check-ins · an automatic alert if one is missed</button>`
-}
-
 function circleMemberRow(pk: string, mePk: string): string {
-  const cid = activeCircle()?.id ?? ''
   const st = active()
+  const cid = activeCircle()?.id ?? ''
   const isMe = pk === mePk
 
   if (!isMe && editingPetname === pk) {
@@ -931,41 +741,47 @@ function circleMemberRow(pk: string, mePk: string): string {
     </div>`
   }
 
+  if (!isMe && lostConfirmPk === pk) {
+    return `<div class="member editing">
+      ${avatarHtml(pk, isMe)}
+      <div class="meta"><div class="who">${esc(nameFor(pk))}</div><div class="when">Report their phone lost? Everyone sees it flagged, and the phone shows a message for whoever finds it. Nothing about their sharing changes.</div></div>
+      <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="report-lost" data-pk="${pk}">Report lost</button>
+      <button class="btn small ghost" data-action="cancel-lost" aria-label="Cancel">✕</button>
+    </div>`
+  }
+
+  const lost = !!cid && !!memberLost(cid, pk)
   const beacon = st?.beacons.get(pk)
   const presence = beacon ? classifyPresence([beacon], nowSec(), { staleAfterSeconds: 600 })[0] : null
-  const ci = st?.checkins.get(pk)
-  const ciState = ci ? classifyCheckins([ci], nowSec())[0] : null
-  const dark = !isMe && !!cid && memberDark(cid, pk)
-  const ack = ciState?.status === 'missed' ? st?.acks.get(pk) : undefined
-  const escState = ciState?.status === 'missed'
-    ? classifyEscalation([ciState], ack ? [ack] : [], nowSec())[0] : null
-  const onIt = escState?.status === 'acknowledged'
-    ? (escState.acknowledgedBy === mePk ? 'You' : nameFor(escState.acknowledgedBy ?? '')) : null
-  const ackBtn = !isMe && escState?.status === 'unacknowledged'
-    ? `<button class="btn small" data-action="ack-checkin" data-pk="${pk}">I've got this</button>` : ''
+  const pill = lost
+    ? '<span class="pill alert">phone lost</span>'
+    : presence
+      ? (presence.status === 'active'
+        ? `<span class="pill active">out · ${fmtAgo(presence.ageSeconds)}</span>`
+        : `<span class="pill stale">home · ${fmtAgo(presence.ageSeconds)}</span>`)
+      : '<span class="pill">no activity</span>'
 
-  let pill: string
-  if (st?.alerts.has(pk)) pill = '<span class="pill alert">help</span>'
-  else if (dark) pill = '<span class="pill dark">on a break</span>'
-  else if (onIt) pill = `<span class="pill warn">✓ ${esc(onIt)} on it</span>`
-  else if (ciState?.status === 'missed') pill = '<span class="pill alert">missed</span>'
-  else if (ciState?.status === 'overdue') pill = '<span class="pill warn">overdue</span>'
-  else if (ciState) pill = '<span class="pill active">checked in</span>'
-  else if (presence) pill = presence.status === 'active'
-    ? `<span class="pill active">out · ${fmtAgo(presence.ageSeconds)}</span>`
-    : `<span class="pill stale">home · ${fmtAgo(presence.ageSeconds)}</span>`
-  else pill = '<span class="pill">no activity</span>'
-
-  const trail = st?.trails.get(pk)
-  const trailNote = trail && nowSec() - trail.timestamp <= 1800 ? ' · recent trail on the map' : ''
-  const battNote = ci?.battery ? ` · battery ${ci.battery}` : ''
-  const sub = (beacon ? (isMe ? 'you · on the map' : 'location on the map') : isMe ? 'you' : 'in this circle') + trailNote + battNote
+  // "Last seen" — the lost-phone breadcrumb: even after a phone stops beaconing
+  // (battery dead, left in a taxi), everyone still holds where and when it last
+  // spoke, at the detail its owner allowed. Absolute time on purpose: "23:41"
+  // is what you tell the taxi firm, "2h ago" isn't.
+  const seenAt = beacon ? new Date(beacon.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+  const sub = beacon
+    ? `${isMe ? 'you · ' : ''}on the map · within ${precisionSize(beacon.precision).replace('~', '')} · last seen ${seenAt}`
+    : isMe ? 'you' : 'in this circle'
+  const locate = beacon ? `<button class="icon-btn" data-action="see-on-map" data-pk="${pk}" aria-label="See on the map">📍</button>` : ''
+  // Lost phone: anyone can flag a member's phone, anyone can clear it — a
+  // coordination flag, deliberately not gated on the owner (they don't have
+  // their phone; that's the point).
+  const lostBtn = lost
+    ? `<button class="btn small" data-action="found-phone" data-pk="${pk}">Found it</button>`
+    : isMe ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`
   const edit = isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`
   const isNew = (activeCircle()?.unseenMembers ?? []).includes(pk)
   return `<div class="member${isNew ? ' unseen' : ''}">
     ${avatarHtml(pk, isMe)}
     <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}${isNew ? ' <span class="pill new">new</span>' : ''}</div><div class="when">${sub}</div></div>
-    ${ackBtn}${pill}${edit}
+    ${pill}${locate}${lostBtn}${edit}
   </div>`
 }
 
@@ -1009,7 +825,7 @@ function circleView(): string {
       </div>`
     : ''
   return `
-    ${topbar(false)}
+    ${topbar()}
     <h2 style="margin-bottom:14px">${esc(c.name)}</h2>
     ${joinNotice}
     ${lead}
@@ -1028,68 +844,14 @@ function circleView(): string {
       <div class="note">A gentle alert to everyone — their phone buzzes with your reason.</div>
     </div>
 
-    ${pickupCard()}
-
-    ${meetingCard()}
-
-    ${rzvCard()}
-
     ${alone ? '' : inviteSections()}`
-}
-
-// Spoken pick-up verification — "is this really my parent, and are they safe?".
-// A face-to-face, on-device check: one person reads the circle's rotating word
-// aloud, the other confirms it in their flock. Nothing is published (see
-// spokenverify.ts) — an impostor can't know the word. Under coercion the reader
-// gives their duress word instead: it looks ordinary, verifies as a normal ✓, and
-// silently raises the circle alarm for everyone else.
-function pickupCard(): string {
-  return `<div class="section-title" style="margin-top:22px">Pick-up check</div>
-    <div class="card stack">
-      ${pickupPanel === 'show' ? pickupShowInner()
-        : pickupPanel === 'check' ? pickupCheckInner()
-        : `${hint('pickup-check', "Confirm a person face-to-face with a secret word only your circle knows — for school pick-ups or meeting up in a crowd.")}
-           <div class="note">Confirm who's collecting — face to face, no signal needed. An impostor can't fake the word.</div>
-           <div class="row" style="gap:10px">
-             <button class="btn small primary" data-action="pickup-show">Prove it's me</button>
-             <button class="btn small" data-action="pickup-check">Check someone</button>
-           </div>`}
-    </div>`
-}
-
-// "Prove it's me": show my word to read aloud. Long-pressing the tile silently
-// swaps in my duress word (no label, identical styling) — the coercion channel.
-function pickupShowInner(): string {
-  const ctx = spokenCtx()
-  if (!ctx) return '<div class="note">Add someone to your circle first.</div>'
-  const words = spokenWordsFor(ctx.seedHex, ctx.me, ctx.counter, ctx.members)
-  const word = showDuressWord ? words.duress : words.verify
-  return `<div class="note">Read this word to whoever's checking. They confirm it in their flock.</div>
-    <div class="word-tile" data-action="spoken-reveal">${esc(word)}</div>
-    <div class="note subtle">Rotates automatically. Only your circle can produce it.</div>
-    <button class="btn small ghost" data-action="pickup-close">Done</button>`
-}
-
-// "Check someone": type the word they said. verified / stale / duress all render an
-// identical ✓ (the duress case MUST look ordinary); only a real mismatch shows ✗.
-function pickupCheckInner(): string {
-  const outcome = pickupOutcome === 'pass'
-    ? '<div class="verify-ok">✓ Verified — it’s really them</div>'
-    : pickupOutcome === 'fail'
-      ? '<div class="verify-no">✗ That’s not the word — don’t hand over</div>'
-      : ''
-  return `<div class="note">Ask who's collecting for their word, then type it here.</div>
-    <div class="field"><input class="input" id="spoken-input" placeholder="The word they said" autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck="false" /></div>
-    <button class="btn small primary" data-action="pickup-check-run">Check</button>
-    ${outcome}
-    <button class="btn small ghost" data-action="pickup-close">Done</button>`
 }
 
 function youView(): string {
   const me = persisted.identity as store.Identity
   const c = activeCircle() as store.Circle
   return `
-    ${topbar(false)}
+    ${topbar()}
     <h2 style="margin-bottom:14px">You &amp; settings</h2>
     <div class="section-title">Identity</div>
     <div class="card stack">
@@ -1163,7 +925,6 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
     <div class="section-title" style="margin-top:18px">This circle</div>
     <div class="card stack">
       <div class="kv"><span class="k">Name</span><span>${esc(c.name)}</span></div>
-      <div class="kv"><span class="k">Sharing</span><span>${behaviourLabel(c.mode)}</span></div>
       <div class="kv"><span class="k">Lifetime</span><span>${c.expiresAt ? `temporary · ends in ${fmtTtl(c.expiresAt)}` : 'ongoing'}</span></div>
       <button class="btn ghost" data-action="leave">Leave this circle</button>
       <div class="note">Leaving removes it from this device only. Your other circles and your key stay put.</div>
@@ -1197,7 +958,7 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
     <div class="card stack">
       ${persisted.decoy
         ? `<div class="note">✓ Hiding is on. Hold the <strong>flock</strong> name at the top of any screen for a second — everything disappears and the app looks brand new.</div>
-           <div class="note">To come back: <strong>Restore from backup</strong> on the welcome screen → type anything as the code, your unlock phrase as the passphrase. Under real duress, hold “Stop sharing” first — that quietly alerts your circle — then hide.</div>
+           <div class="note">To come back: <strong>Restore from backup</strong> on the welcome screen → type anything as the code, your unlock phrase as the passphrase.</div>
            <div class="row" style="gap:10px">
              <button class="btn small" data-action="decoy-hide">Hide flock now</button>
              <button class="btn small ghost" data-action="decoy-off">Turn off</button>
@@ -1230,118 +991,25 @@ function navView(): string {
 // ── Map screen ───────────────────────────────────────────────────────────────
 function mapView_screen(): string {
   return `
-    ${topbar(false)}
+    ${topbar()}
     <div class="map-shell">
       <div class="map-stage">
         <div id="map" class="map-canvas"></div>
-        <div id="crosshair" class="crosshair"${addMode || rzvPick ? '' : ' hidden'}></div>
         <div id="offline-oob" class="offline-oob" hidden></div>
       </div>
       <div class="map-panel" id="map-panel">${mapPanelInner()}</div>
     </div>`
 }
 
-function radiusOf(z: Geofence): string {
-  return z.kind === 'circle' ? `${Math.round(z.radiusMetres)} m across` : `${z.vertices.length}-point area`
-}
-
 function mapPanelInner(): string {
-  if (rzvPick) {
-    return `
-      <div class="row" style="justify-content:space-between"><strong>Meeting point</strong></div>
-      <div class="note">Pan the map so the crosshair sits where you'll meet, then set it.</div>
-      <div class="row" style="gap:10px">
-        <button class="btn small primary" data-action="rzv-pick-set">Set meeting point here</button>
-        <button class="btn small ghost" data-action="rzv-pick-cancel">Cancel</button>
-      </div>`
-  }
-  if (addMode) {
-    const noreport = addZoneKind === 'noreport'
-    const kindToggle = `
-      <div class="mode-toggle" role="group" aria-label="Place type" style="margin-bottom:10px">
-        <button data-action="zone-kind" data-kind="safe" aria-pressed="${!noreport}">Safe place</button>
-        <button data-action="zone-kind" data-kind="noreport" aria-pressed="${noreport}">Private place</button>
-      </div>`
-    const policyToggle = noreport ? `
-      <div class="note" style="margin-top:2px">How private?</div>
-      <div class="chip-row">
-        <button class="btn small${newZonePolicy === 'withhold' ? ' primary' : ''}" data-action="zone-policy" data-policy="withhold">Hide completely</button>
-        <button class="btn small${newZonePolicy === 'coarse' ? ' primary' : ''}" data-action="zone-policy" data-policy="coarse">Rough area only</button>
-      </div>` : ''
-    const help = noreport
-      ? 'A spot that stays hidden — like home. Even if you ask for help, the exact place isn’t shared.'
-      : 'Somewhere you’re meant to be. Your circle is told if you leave it.'
-    return `
-      <div class="row" style="justify-content:space-between">
-        <strong>${noreport ? 'New private place' : 'New safe place'}</strong>
-        <span class="muted" id="radius-label">${addRadius} m</span>
-      </div>
-      ${kindToggle}
-      ${policyToggle}
-      <input class="slider" id="radius" type="range" min="100" max="2000" step="50" value="${addRadius}" />
-      <div class="note">${help} Pan so the crosshair sits at the centre, then save.</div>
-      <div class="row" style="gap:10px">
-        <button class="btn small primary" data-action="save-zone">Save</button>
-        <button class="btn small ghost" data-action="cancel-zone">Cancel</button>
-      </div>`
-  }
-  const safe = activeFences()
-  const safeList = safe.length
-    ? safe.map((z, i) => `<div class="zone-row"><span class="dot-safe"></span><span class="zone-meta">Safe place ${i + 1}<small>${radiusOf(z)}</small></span><button class="zone-del" data-action="del-zone" data-i="${i}" aria-label="Delete">✕</button></div>`).join('')
-    : '<div class="note">None yet. Add a safe place and you’ll be told if a circle member leaves it.</div>'
-  const priv = persisted.noReportZones
-  const privList = priv.length
-    ? priv.map((z, i) => {
-        const how = (z.policy ?? 'withhold') === 'coarse' ? 'rough area only' : 'hidden completely'
-        return `<div class="zone-row"><span class="dot-private"></span><span class="zone-meta">${esc(z.label || `Private place ${i + 1}`)}<small>${how}</small></span><button class="zone-del" data-action="del-noreport" data-i="${i}" aria-label="Delete">✕</button></div>`
-      }).join('')
-    : '<div class="note">None yet. A private place (like home) stays hidden — even in an emergency.</div>'
+  const c = activeCircle()
+  const mine = sharing
+    ? `<div class="note">You're sharing at ${esc(precisionLabel(sharePrecisionOf(c)).toLowerCase())} — your own pin and square are exactly what everyone else sees of you. Change the detail on Home.</div>`
+    : `<div class="note">You're not sharing — nothing of yours is on anyone's map. ${fix ? 'The dashed square shows what your circle <em>would</em> see at your current detail setting.' : ''}</div>`
   return `
-    <div class="row" style="justify-content:space-between;margin-bottom:8px"><strong>Safe places</strong><button class="btn small" data-action="add-zone" data-kind="safe">＋ Add</button></div>
-    <div class="note" style="margin-bottom:6px">Shared with everyone in ${esc(activeCircle()?.name ?? 'this circle')} — one person sets them up, every phone uses them.</div>
-    <div class="zone-list">${safeList}</div>
-    <div class="row" style="justify-content:space-between;margin:16px 0 8px"><strong>Private places</strong><button class="btn small" data-action="add-zone" data-kind="noreport">＋ Add</button></div>
-    <div class="note" style="margin-bottom:6px">Yours alone — never leave this phone, apply in every circle.</div>
-    <div class="zone-list">${privList}</div>
-    ${offlineMapControl()}`
-}
-
-// The "save this area" control (see offlineArea.ts). Hidden until the feature flag
-// is on (the extract service must be deployed first — see offlineMapEnabled).
-function offlineMapControl(): string {
-  if (!offlineMapEnabled()) return ''
-  const hasZones = activeFences().length > 0 || persisted.noReportZones.length > 0
-  const saved = offlineSavedBytes != null
-  const mb = saved ? (offlineSavedBytes! / 1e6).toFixed(1) : ''
-  const status = offlineSaving
-    ? '<span class="muted">Saving…</span>'
-    : saved ? `<span class="muted">Saved · ${mb} MB · works offline</span>` : '<span class="muted">Not saved</span>'
-  const buttons = offlineSaving
-    ? '<button class="btn small" disabled>Saving…</button>'
-    : saved
-      ? '<button class="btn small" data-action="save-offline-map">Update</button><button class="btn small ghost" data-action="remove-offline-map">Remove</button>'
-      : `<button class="btn small primary" data-action="save-offline-map"${hasZones ? '' : ' disabled'}>Save map offline</button>`
-  const help = hasZones
-    ? 'Downloads the map around your places once — then it works with no signal, and privately (nobody sees when or where you look).'
-    : 'Add a safe or private place first, then save its map for offline.'
-  // Label language only bites on the offline vector map (raster tiles carry their own
-  // labels), so only offer it once an area is saved. Default is each person's own
-  // language; "Local names" shows what's on the street signs — handy when you're abroad.
-  const labelMode = mapLabelMode()
-  const labelToggle = saved ? `
-    <div class="row" style="justify-content:space-between;margin:16px 0 6px"><strong>Map labels</strong></div>
-    <div class="mode-toggle" role="group" aria-label="Map label language">
-      <button data-action="map-labels" data-mode="device" aria-pressed="${labelMode === 'device'}">My language</button>
-      <button data-action="map-labels" data-mode="local" aria-pressed="${labelMode === 'local'}">Local names</button>
-    </div>
-    <div class="note">${labelMode === 'local'
-      ? 'Place names match the street signs — the same on everyone’s map.'
-      : 'Place names in your device’s language where the map has them.'}</div>` : ''
-  return `
-    <div class="row" style="justify-content:space-between;margin:16px 0 8px"><strong>Offline map</strong>${status}</div>
-    <div class="row" style="gap:10px">${buttons}</div>
-    <div class="note">${help}</div>
-    ${labelToggle}`
+    <div class="row" style="justify-content:space-between"><strong>${esc(c?.name ?? 'Your circle')}</strong></div>
+    <div class="note">Everyone sharing appears here — each somewhere inside their square, at the detail its owner chose; an exact share is a bare pin.</div>
+    ${mine}`
 }
 
 // ── Views: onboarding ────────────────────────────────────────────────────────
@@ -1350,17 +1018,10 @@ function onboardingView(): string {
   if (onboardStep === 'create') {
     const ttlChip = (mode: string, label: string): string =>
       `<button class="btn small${ttlMode === mode ? ' primary' : ''}" data-action="ob-ttl" data-ttl="${mode}">${label}</button>`
-    const pick = (mode: Mode, title: string, desc: string): string =>
-      `<button class="pick${onboardMode === mode ? ' on' : ''}" data-action="ob-mode" data-mode="${mode}" aria-pressed="${onboardMode === mode}"><strong>${title}</strong><span>${desc}</span></button>`
     inner = `
       <h1>New circle</h1>
-      <p class="tagline">Give it a name, choose how it shares, and how long it lasts.</p>
-      <div class="field" style="text-align:left;margin-bottom:14px"><label for="cname">Name</label><input class="input" id="cname" placeholder="The Smiths · Lads' trip · Sat night" /></div>
-      <div class="field" style="text-align:left;margin-bottom:8px"><label>How it shares</label></div>
-      <div class="share-pick" style="margin-bottom:18px">
-        ${pick('family', 'Private', 'Hidden until you ask for help, ask for a pick-up, or leave a safe place.')}
-        ${pick('nightout', 'Share live', 'Friends see roughly where you are — handy for "who\'s still out?".')}
-      </div>
+      <p class="tagline">Give it a name and choose how long it lasts.</p>
+      <div class="field" style="text-align:left;margin-bottom:14px"><label for="cname">Name</label><input class="input" id="cname" placeholder="Mallorca trip · The Smiths · Sat night" /></div>
       <div class="field" style="text-align:left;margin-bottom:6px"><label>How long</label></div>
       <div class="chip-row" role="group" aria-label="Lifetime" style="margin-bottom:10px;justify-content:center">
         ${ttlChip('ongoing', 'Ongoing')}${ttlChip('today', 'Today')}${ttlChip('custom', 'Custom')}
@@ -1430,12 +1091,12 @@ function onboardingView(): string {
       ? ''
       : /android/i.test(navigator.userAgent)
         ? `<a class="btn get" href="./get.html">⬇&nbsp; Get the Android app</a>
-           ${hint('get-app', "The app can keep watch in the background and tell you if someone leaves a safe place, even with the phone in a pocket. This website only works while it's open.")}`
-        : '<div class="note onboard-note">On Android or GrapheneOS? <a href="./get.html">Get the app</a>. It can keep watch in the background. This website only works while open.</div>'
+           ${hint('get-app', "The app can keep sharing in the background, even with the phone in a pocket. This website only works while it's open.")}`
+        : '<div class="note onboard-note">On Android or GrapheneOS? <a href="./get.html">Get the app</a>. It can keep sharing in the background. This website only works while open.</div>'
     inner = `
       <img class="hero-logo" src="./icon.svg" alt="" />
       <h1>Stay close,<br/>stay private.</h1>
-      <p class="tagline">Your location stays hidden. It is shared only when you ask for a pick-up, raise help, or step outside a safe area.</p>
+      <p class="tagline">Share where you are with the people you choose — as roughly or as exactly as you like. Nobody else can see a thing.</p>
       <div class="actions">
         <button class="btn primary" data-action="create">Create a circle</button>
         <button class="btn ghost" data-action="join">Join with a code</button>
@@ -1472,15 +1133,6 @@ function wireOnboard(): void {
       else if (a === 'restore') { onboardStep = 'restore'; rerenderOnboard() }
       else if (a === 'do-restore') void doRestore()
       else if (a === 'back') { onboardStep = 'intro'; awaitingInvite = false; rerenderOnboard() }
-      else if (a === 'ob-mode') {
-        // Flip the behaviour in place. A full re-render here would discard whatever's
-        // half-typed in the #cname field (it's uncontrolled, read only on create).
-        onboardMode = (node as HTMLElement).dataset.mode as Mode
-        root.querySelectorAll<HTMLElement>('[data-action="ob-mode"]').forEach((b) => {
-          const on = b.dataset.mode === onboardMode
-          b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on))
-        })
-      }
       else if (a === 'ob-ttl') {
         // Update in place too, for the same reason as ob-mode.
         ttlMode = (node as HTMLElement).dataset.ttl as 'ongoing' | 'today' | 'custom'
@@ -1513,21 +1165,44 @@ function wireApp(): void {
     } catch { qrEl.remove() }
   }
   root.querySelectorAll('[data-action]').forEach((node) => {
-    if ((node as HTMLElement).closest('#map-panel')) return // wired by wireMapPanel
     const action = node.getAttribute('data-action') as string
-    if (action === 'sos-hold') { wireSos(node as HTMLElement); return }
-    if (action === 'spoken-reveal') { wireDuressReveal(node as HTMLElement); return }
-    // Coercion points: a silent long-press on these performs the identical visible
-    // action AND raises a covert help alarm — or, for "I'm safe now", sends a
-    // coerced all-clear the circle ignores (see wasCovertHold / FLOCK.md §6.1).
-    if (action === 'toggle-share' || action === 'disarm-checkin' || action === 'do-dark' || action === 'im-safe') {
-      node.addEventListener('pointerdown', () => beginHold(action))
-    }
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   })
+  wirePrecisionSlider()
   const brand = root.querySelector<HTMLElement>('.topbar .brand')
   if (brand) wireHideHold(brand)
   if (tab === 'map') void initMap()
+}
+
+/** The Home-screen "location detail" slider. `input` patches the labels in place
+ *  (a full render mid-drag would tear the control out from under the thumb);
+ *  `change` commits: persist, re-tier sampling, and re-emit promptly so the
+ *  circle sees the new detail level straight away. */
+function wirePrecisionSlider(): void {
+  const slider = document.getElementById('share-precision') as HTMLInputElement | null
+  if (!slider) return
+  slider.addEventListener('input', () => {
+    const p = Number(slider.value)
+    const l = document.getElementById('precision-label')
+    if (l) l.textContent = precisionLabel(p)
+    const n = document.getElementById('precision-note')
+    if (n) n.textContent = precisionNote(p)
+  })
+  slider.addEventListener('change', () => commitSharePrecision(Number(slider.value)))
+}
+
+function commitSharePrecision(value: number): void {
+  const c = activeCircle()
+  if (!c) return
+  const p = Math.min(PRECISION_MAX, Math.max(PRECISION_MIN, Math.round(value)))
+  if (p === sharePrecisionOf(c)) return
+  patchActive({ sharePrecision: p })
+  // The gate keys on the last-sent cell: drop it so the next beacon isn't held
+  // back by the min-interval floor — a changed slider should show up promptly.
+  beaconCadence.delete(c.id)
+  syncWatch() // crossing the street/neighbourhood boundary re-tiers GPS vs low-power
+  if (sharing) void autoEmit()
+  else refresh()
 }
 
 // ── Map controller ───────────────────────────────────────────────────────────
@@ -1538,24 +1213,34 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
   mapView = await MapView.create(container, fix ?? undefined, { circleId: activeCircle()?.id })
   if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
-  mapView.setGeofences(activeFences())
-  mapView.setNoReportZones(persisted.noReportZones)
-  mapView.onMove(() => { if (addMode) updatePreview() })
   updateMapData()
-  wireMapPanel()
   requestAnimationFrame(() => mapView?.map.resize())
-  if (camera) { mapView.map.jumpTo({ center: [camera.lng, camera.lat], zoom: camera.zoom }); mapView.suppressAutoFit() } // a re-init (e.g. label switch) keeps the person's view
+  if (camera) { mapView.map.jumpTo({ center: [camera.lng, camera.lat], zoom: camera.zoom }); mapView.suppressAutoFit() } // a re-init keeps the person's view
+  // "See on map": frame the chosen member's whole disclosed cell (a Region cell
+  // needs a very different zoom from a street one), then hand the camera over.
+  if (focusMemberPk) {
+    const b = active()?.beacons.get(focusMemberPk)
+    focusMemberPk = null
+    if (b) {
+      const bb = bounds(b.geohash)
+      mapView.autoFit([{ lat: bb.minLat, lon: bb.minLon }, { lat: bb.maxLat, lon: bb.maxLon }])
+      mapView.suppressAutoFit()
+    }
+  }
   if (offlineMapEnabled()) void refreshOfflineState()
   if (!fix && !camera) void centreOnCurrentPosition() // no live share yet → actively locate for the map
 }
 
 // Centre the map on the user's current position without starting a share. Purely
-// local (nothing is broadcast); silently does nothing if permission is denied or
-// the user has since started placing a zone (we must not yank the view then).
+// local (nothing is broadcast); silently does nothing if permission is denied.
 // With member pins on show, autoFit owns the framing — don't yank to just me.
 async function centreOnCurrentPosition(): Promise<void> {
   const f = await svc.currentPosition()
-  if (f && mapView && !addMode && memberPoints().length === 0) mapView.flyTo({ lat: f.lat, lon: f.lon }, { instant: true })
+  if (!f) return
+  fix = f // remembered locally so the "what they'd see" preview can draw pre-share
+  if (mapView && memberPoints().length === 0) mapView.flyTo({ lat: f.lat, lon: f.lon }, { instant: true })
+  updateMapData() // the preview ring can draw now a fix exists
+  renderMapPanel()
 }
 
 // ── Offline map ("save this area") ───────────────────────────────────────────
@@ -1572,85 +1257,20 @@ function offlineMapEnabled(): boolean {
 async function refreshOfflineState(): Promise<void> {
   const id = activeCircle()?.id
   const oa = await import('./offlineArea')
-  offlineSavedBytes = id ? (await oa.savedAreaInfo(id))?.bytes ?? null : null
   offlineBBox = id ? await oa.savedAreaBBox(id) : null
-  renderMapPanel()
   updateMapData() // re-evaluate the out-of-area chip against the loaded bounds
-}
-
-async function saveOfflineMap(): Promise<void> {
-  const id = activeCircle()?.id
-  if (!id || offlineSaving) return
-  offlineSaving = true
-  renderMapPanel()
-  try {
-    const { saveArea } = await import('./offlineArea')
-    const r = await saveArea(id, activeFences(), persisted.noReportZones)
-    offlineSavedBytes = r?.bytes ?? offlineSavedBytes
-    offlineSaving = false
-    await initMap() // re-init so the map now renders from the saved OPFS basemap
-  } catch {
-    offlineSaving = false
-    toast('Could not save the map — is the extract service running?')
-    renderMapPanel()
-  }
-}
-
-async function removeOfflineMap(): Promise<void> {
-  const id = activeCircle()?.id
-  if (!id) return
-  await (await import('./offlineArea')).removeSavedArea(id)
-  offlineSavedBytes = null
-  await initMap()
-}
-
-// Switch the offline map's labels between the device language and local/native names.
-// Re-init so the vector style rebuilds with the new language (same pattern as save/remove).
-async function setMapLabels(mode: MapLabelMode): Promise<void> {
-  if (mode !== 'device' && mode !== 'local') return
-  if (mapLabelMode() === mode) return
-  setMapLabelMode(mode)
-  // Swapping the style re-creates the map — carry the camera across, or the
-  // toggle yanks you back to your own pin and reads as a glitch.
-  const c = mapView?.map.getCenter()
-  const camera = c && mapView ? { lng: c.lng, lat: c.lat, zoom: mapView.map.getZoom() } : undefined
-  renderMapPanel()
-  await initMap(camera)
-}
-
-function wireMapPanel(): void {
-  const slider = document.getElementById('radius') as HTMLInputElement | null
-  if (slider) {
-    slider.addEventListener('input', () => {
-      addRadius = Number(slider.value)
-      const l = document.getElementById('radius-label')
-      if (l) l.textContent = `${addRadius} m`
-      updatePreview()
-    })
-  }
-  document.querySelectorAll('#map-panel [data-action]').forEach((n) => {
-    n.addEventListener('click', () => handleAction(n.getAttribute('data-action') as string, n as HTMLElement))
-  })
 }
 
 function renderMapPanel(): void {
   const panel = document.getElementById('map-panel')
   if (panel) panel.innerHTML = mapPanelInner()
-  const ch = document.getElementById('crosshair')
-  if (ch) (ch as HTMLElement).hidden = !addMode && !rzvPick
-  wireMapPanel()
-}
-
-function updatePreview(): void {
-  if (!mapView) return
-  const c = mapView.center()
-  mapView.setPreview({ kind: 'circle', centre: { lat: c.lat, lon: c.lon }, radiusMetres: addRadius } as CircleGeofence)
 }
 
 function memberPoints(): MapPoint[] {
   const me = persisted.identity?.pk
+  const cid = activeCircle()?.id
   const st = active()
-  if (!st) return []
+  if (!st || !cid) return []
   return classifyPresence([...st.beacons.values()], nowSec(), { staleAfterSeconds: 600 }).map((e) => {
     const d = decode(e.geohash)
     const precision = st.beacons.get(e.member)?.precision
@@ -1659,101 +1279,47 @@ function memberPoints(): MapPoint[] {
       lat: d.lat,
       lon: d.lon,
       label: e.member === me ? 'You' : pinLabel(e.member),
-      status: st.alerts.has(e.member) ? 'alert' as const : e.status,
+      // A lost phone's pin reads as an alert — the taxi trail everyone watches.
+      status: memberLost(cid, e.member) ? 'alert' as const : e.status,
       // Show the disclosed area at its true precision, so a coarse share reads as
-      // "roughly here" rather than a deceptively exact pin.
-      ...(precision ? { radiusMetres: precisionToRadius(precision) } : {}),
+      // "roughly here" rather than a deceptively exact pin. The cell rectangle is
+      // the honest shape: the member is guaranteed inside the SQUARE the geohash
+      // names, and its centre is the grid's, never their position.
+      ...(precision ? { radiusMetres: precisionToRadius(precision), cell: bounds(e.geohash) } : {}),
     }
   })
 }
 function updateMapData(): void {
-  const st = active()
-  const me = persisted.identity?.pk
-  const r = st?.rendezvous
-  // While the proposer is running a meeting search (no rendezvous yet), the
-  // contributor cells take over the map — the same people at the same coarse cells,
-  // so drawing presence too would just double every blob (see setContributorPins).
-  const runningMeeting = !!(st && st.meeting && st.meeting.setBy === me && !r)
-  const pts = runningMeeting ? [] : memberPoints()
+  const pts = memberPoints()
   mapView?.setMembers(pts)
-  mapView?.setRendezvous(r ? { lat: r.place.lat, lon: r.place.lon, label: r.place.label || r.place.address?.split(',')[0] } : null)
-  // Breadcrumb trails — where an alerted member had been. Only ever present
-  // after a help/breach disclosure; fades out of relevance after 30 minutes.
-  const trailPts = st ? [...st.trails.values()]
-    .filter((t) => nowSec() - t.timestamp <= 1800)
-    .flatMap((t) => t.crumbs.map((cr) => { const d = decode(cr.geohash); return { lat: d.lat, lon: d.lon } })) : []
-  mapView?.setTrail(trailPts)
-  // Meeting-point overlays — each contributor's cell at its disclosed precision + the
-  // suggested venue, so the proposer can eyeball the inputs and the pick on the map.
-  let shown = pts
-  if (runningMeeting && st) {
-    const contrib: MapPoint[] = [...st.meetingShares.values()].map((s) => {
-      const d = decode(s.geohash)
-      return {
-        member: s.member, lat: d.lat, lon: d.lon,
-        label: s.member === me ? 'You' : pinLabel(s.member),
-        status: 'active' as const, radiusMetres: precisionToRadius(s.precision),
-      }
-    })
-    mapView?.setContributorPins(contrib)
-    const v = st.meetingSuggestion?.venue
-    mapView?.setMeetingVenue(v ? { lat: v.lat, lon: v.lon, label: v.venueType === 'centroid' ? 'Fair spot' : v.name } : null)
-    shown = contrib
+  // "See what they see" preview: while NOT sharing, ghost the cell the circle
+  // WOULD get at the current slider setting (dashed — clearly not a live pin).
+  // While sharing, my real pin/square is already exactly what everyone else sees.
+  const c = activeCircle()
+  if (!sharing && fix && c) {
+    // Others get the CELL, not my raw fix — the square is the whole disclosure.
+    const bb = bounds(encode(fix.lat, fix.lon, sharePrecisionOf(c)))
+    mapView?.setPreview({ kind: 'polygon', vertices: [
+      { lat: bb.minLat, lon: bb.minLon }, { lat: bb.minLat, lon: bb.maxLon },
+      { lat: bb.maxLat, lon: bb.maxLon }, { lat: bb.maxLat, lon: bb.minLon },
+    ] })
   } else {
-    mapView?.setContributorPins([])
-    mapView?.setMeetingVenue(null)
+    mapView?.setPreview(null)
   }
   // Frame everyone: every shown pin plus my own position, so a circle spread
   // across town is visible at a glance instead of everyone-but-me off-screen.
-  // autoFit stands down permanently on the first real gesture, and never fires
-  // while placing a zone (yanking the view mid-placement loses the spot).
-  if (!addMode) {
-    const fitPts: { lat: number; lon: number }[] = shown.map((p) => ({ lat: p.lat, lon: p.lon }))
-    if (fix) fitPts.push({ lat: fix.lat, lon: fix.lon })
-    mapView?.autoFit(fitPts)
-  }
+  // autoFit stands down permanently on the first real gesture.
+  const fitPts: { lat: number; lon: number }[] = pts.map((p) => ({ lat: p.lat, lon: p.lon }))
+  if (fix) fitPts.push({ lat: fix.lat, lon: fix.lon })
+  mapView?.autoFit(fitPts)
   // Out-of-area chip: in offline mode, flag any shown pin beyond the saved map's
   // bounds. We never live-fetch to cover it — leaking a viewport mid-event is wrong.
   const el = document.getElementById('offline-oob')
   if (!el) return
   const bbox = offlineBBox
-  const outside = bbox ? shown.filter((p) => !bboxContains(bbox, p.lat, p.lon)) : []
+  const outside = bbox ? pts.filter((p) => !bboxContains(bbox, p.lat, p.lon)) : []
   el.hidden = outside.length === 0
   if (outside.length) el.textContent = `⚠ ${outside.length} ${outside.length === 1 ? 'pin' : 'pins'} outside your saved map`
-}
-
-function saveZone(): void {
-  if (!mapView) return
-  const c = mapView.center()
-  const area: CircleGeofence = { kind: 'circle', centre: { lat: c.lat, lon: c.lon }, radiusMetres: addRadius }
-  if (addZoneKind === 'noreport') {
-    const zone: NoReportZone = { area, policy: newZonePolicy, label: `Private place ${persisted.noReportZones.length + 1}` }
-    persisted.noReportZones = [...persisted.noReportZones, zone]
-    toast('Private place added — it stays hidden')
-  } else {
-    setActiveFences([...activeFences(), area])
-    toast('Safe place added')
-  }
-  store.save(persisted)
-  addMode = false
-  addZoneKind = 'safe'
-  mapView.setPreview(null)
-  mapView.setGeofences(activeFences())
-  mapView.setNoReportZones(persisted.noReportZones)
-  renderMapPanel()
-}
-
-function delZone(i: number): void {
-  setActiveFences(activeFences().filter((_, idx) => idx !== i))
-  mapView?.setGeofences(activeFences())
-  renderMapPanel()
-}
-
-function delNoReport(i: number): void {
-  persisted.noReportZones = persisted.noReportZones.filter((_, idx) => idx !== i)
-  store.save(persisted)
-  mapView?.setNoReportZones(persisted.noReportZones)
-  renderMapPanel()
 }
 
 /** Re-render without tearing down a live map. */
@@ -1761,8 +1327,22 @@ function refresh(): void {
   // Never rebuild while an onboarding / add-circle form is on screen — a background
   // refresh would discard a half-typed circle name (the inputs are uncontrolled).
   if (adding || !persisted.identity || !activeCircle()) return
-  if (tab === 'map' && mapView) { updateMapData(); renderMapPanel() }
+  if (tab === 'map' && mapView) { updateMapData(); renderMapPanel(); patchBuzzBanner() }
   else render()
+}
+
+/** Swap the buzz banner in or out WITHOUT a full render — on the map tab a
+ *  rebuild would tear down the live map, and an incoming "Come to me" while
+ *  you're looking at the map is exactly when the banner matters. */
+function patchBuzzBanner(): void {
+  root.querySelector('.buzz-banner')?.remove()
+  if (!activeBuzz) return
+  const tmp = document.createElement('div')
+  tmp.innerHTML = buzzBanner()
+  const el = tmp.firstElementChild as HTMLElement | null
+  if (!el) return
+  el.addEventListener('click', () => handleAction('dismiss-buzz', el))
+  root.prepend(el)
 }
 
 // ── Signer (LocalSigner or SignetSigner) ─────────────────────────────────────
@@ -1821,31 +1401,6 @@ async function publishSignal(unsigned: { kind: number; content: string; tags: st
 // ── Members, invites & reseed ────────────────────────────────────────────────
 function members(): string[] { return activeCircle()?.members ?? [] }
 
-// ── Safe places (per-circle, synced) ─────────────────────────────────────────
-function activeFences(): Geofence[] { return activeCircle()?.geofences ?? [] }
-
-/** Apply a local safe-place edit and sync the full set to the circle.
- *  The clock is forced strictly past the last applied edit, so two same-second
- *  edits by the same person still read as newer on every other device. */
-function setActiveFences(fences: Geofence[]): void {
-  const c = activeCircle()
-  if (!c) return
-  const by = persisted.identity?.pk
-  const updatedAt = Math.max(nowSec(), (c.fencesUpdatedAt ?? 0) + 1)
-  patchCircleById(c.id, { geofences: fences, fencesUpdatedAt: updatedAt, ...(by ? { fencesBy: by } : {}) })
-  if (by) void publishFences({ ...c, geofences: fences, fencesUpdatedAt: updatedAt, fencesBy: by })
-}
-
-/** Broadcast a circle's current safe-place set (group-envelope + gift wrap). */
-async function publishFences(c: store.Circle): Promise<void> {
-  const by = c.fencesBy ?? persisted.identity?.pk
-  if (!by || c.fencesUpdatedAt === undefined) return
-  try {
-    const set = { fences: c.geofences ?? [], updatedAt: c.fencesUpdatedAt, by }
-    await publishSignal(await buildFencesSignal({ groupId: c.id, seedHex: c.seedHex, set }), c)
-  } catch { toast("Couldn't sync safe places — they're saved here and will sync on your next edit") }
-}
-
 function ensureMember(circle: store.Circle, pk: string, expected = false): void {
   // Re-read the live roster rather than trusting the captured `circle`: two
   // first-contact signals arriving together each `await` decryption, and a stale
@@ -1859,10 +1414,6 @@ function ensureMember(circle: store.Circle, pk: string, expected = false): void 
   // Seed possession = membership, so a leaked invite code grants a SILENT member.
   // Surface every unexpected roster addition until it's acknowledged (FLOCK §6).
   if (patch.unseenMembers) toast(`〰️ A new phone joined ${current.name}`)
-  // Bounded retention (FLOCK §6.6): stored wraps expire, so a newcomer may never
-  // get the fence set from relay replay — its author starts a fresh window for them.
-  const live = persisted.circles.find((c) => c.id === circle.id)
-  if (live?.fencesBy && live.fencesBy === persisted.identity?.pk) void publishFences(live)
 }
 
 function ensureInviteSub(): void {
@@ -1880,17 +1431,12 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
   const signer = getSigner()
   if (!signer) return
   const payload = await readInvite(signer, e)
-  if (!payload) {
-    // Not an invite/reseed — maybe a targeted EXACT meeting share to my personal inbox.
-    const exact = await readMeetingExactWrap(signer, e)
-    if (exact) await onExactMeetingShare(exact)
-    return
-  }
+  if (!payload) return
   if (payload.t === 'invite') {
     if (persisted.circles.some((c) => c.id === payload.id)) return // already a member
     const joined: store.Circle = {
       id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m,
-      members: [signer.pubkey], checkinInterval: 0, joinedAt: nowSec(), reseededAt: nowSec(), ...(payload.x ? { expiresAt: payload.x } : {}),
+      members: [signer.pubkey], joinedAt: nowSec(), reseededAt: nowSec(), ...(payload.x ? { expiresAt: payload.x } : {}),
     }
     upsertCircle(joined, true)
     announceJoin(joined) // the inviter expected me, but the REST of the circle didn't
@@ -1905,28 +1451,12 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     if (!existing) return
     if (existing.seedHex === payload.s) return // a refresh echo of the seed we already hold — nothing to do
     patchCircleById(existing.id, { seedHex: payload.s, reseededAt: nowSec() })
-    const st = cstate(existing.id)
-    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.trails.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
-    st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
+    cstate(existing.id).beacons.clear()
+    cstate(existing.id).lost.clear()
     beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(existing.id) // old-key pins are meaningless under the new seed
     toast("This circle's security was reset")
     refresh()
-  }
-}
-
-// A contributor sent me (the proposer) their EXACT spot for a meeting I'm running —
-// only I could decrypt it. Merge it (preferring the finer disclosure) and recompute.
-async function onExactMeetingShare(share: MeetingShare): Promise<void> {
-  const me = persisted.identity?.pk
-  for (const c of persisted.circles) {
-    const st = cstate(c.id)
-    if (st.meeting?.id !== share.requestId || st.meeting.setBy !== me) continue // I'm the proposer of a live search
-    if (mergeMeetingShare(st, share)) {
-      await refreshMeetingSuggestion(c.id)
-      refresh()
-    }
-    return
   }
 }
 
@@ -1964,15 +1494,10 @@ async function reseedCircle(removePk?: string, circle: store.Circle | null = act
       for (const w of wraps) await svc.publishSigned(persisted.relayUrls, w as never)
     }
     patchCircleById(c.id, { seedHex: seed, epoch, reseededAt: nowSec(), seedRefreshedAt: nowSec(), members: (c.members ?? []).filter((pk) => pk !== removePk) })
-    const st = cstate(c.id)
-    st.beacons.clear(); st.alerts.clear(); st.checkins.clear(); st.acks.clear(); st.trails.clear(); st.rzvStatuses.clear(); st.rendezvous = null; st.offgrid.clear()
-    st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null
+    cstate(c.id).beacons.clear()
+    cstate(c.id).lost.clear()
     beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
     dropPresence(c.id) // old-key pins are meaningless under the new seed
-    // Replay the safe-place set under the new key (same clock — an echo to current
-    // members, but anyone joining after the reseed finds it on the new inbox).
-    const reseeded = persisted.circles.find((x) => x.id === c.id)
-    if (reseeded && reseeded.fencesUpdatedAt !== undefined) void publishFences(reseeded)
     if (!silent) toast(removePk ? 'Member removed — circle security reset' : 'Circle security reset')
     render()
   } catch { if (!silent) toast("Couldn't reset security — try again") }
@@ -1987,7 +1512,7 @@ async function reseedCircle(removePk?: string, circle: store.Circle | null = act
 async function maybeRotateSeeds(): Promise<void> {
   const me = persisted.identity?.pk
   const signer = getSigner()
-  if (!me || !signer || isDark()) return // deliberately dark — no automatic traffic at all
+  if (!me || !signer) return
   const now = nowSec()
   for (const c of [...persisted.circles]) {
     if (rotationDue(c, me, now)) {
@@ -2005,113 +1530,6 @@ async function maybeRotateSeeds(): Promise<void> {
   }
 }
 
-// ── Check-in / dead-man's-switch ─────────────────────────────────────────────
-async function sendCheckIn(): Promise<void> {
-  const c = activeCircle()
-  const id = persisted.identity
-  if (!c || !id) return
-  const interval = c.checkinInterval ?? 0
-  try {
-    // A guardian reading a later missed check-in should know the phone was
-    // already dying — a dead battery and deliberate silence must not read alike.
-    const battery = batteryState()
-    const tmpl = await buildCheckInSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, intervalSeconds: interval, ...(battery ? { battery } : {}) })
-    await publishSignal(tmpl, c)
-    const ck = cstate(c.id).checkins
-    if (interval > 0) ck.set(id.pk, { member: id.pk, timestamp: nowSec(), intervalSeconds: interval, ...(battery ? { battery } : {}) })
-    else ck.delete(id.pk)
-    cstate(c.id).acks.delete(id.pk) // my fresh check-in resolves any episode being handled
-    toast(interval > 0 ? "Checked in — you're OK" : 'Checked out')
-  } catch { toast('Check-in failed') }
-  refresh()
-}
-
-function armCheckin(intervalSeconds: number): void {
-  if (!activeCircle()) return
-  patchActive({ checkinInterval: intervalSeconds })
-  armingCheckin = false
-  startMonitor()
-  void sendCheckIn()
-}
-
-function disarmCheckin(): void {
-  if (!activeCircle()) return
-  patchActive({ checkinInterval: 0 })
-  void sendCheckIn() // broadcasts a stand-down (interval 0)
-}
-
-function evaluateCheckinAlarm(): void {
-  const me = persisted.identity?.pk
-  let missed = 0
-  let handled = 0
-  let handledNote = ''
-  for (const c of persisted.circles) {
-    const st = cstate(c.id)
-    // A member who pre-announced a break is *meant* to be quiet — never alarm on them.
-    const states = classifyCheckins([...st.checkins.values()], nowSec())
-      .filter((s) => s.member !== me && !memberDark(c.id, s.member))
-    for (const e of classifyEscalation(states, [...st.acks.values()], nowSec())) {
-      missed += 1
-      if (e.status === 'acknowledged') {
-        handled += 1
-        const who = e.acknowledgedBy === me ? 'You' : nameFor(e.acknowledgedBy ?? '')
-        handledNote = `${who} ${e.acknowledgedBy === me ? 'are' : 'is'} checking on ${nameFor(e.member)}`
-        continue
-      }
-      // Nobody has said "I've got this" yet — keep escalating as levels rise.
-      const key = `${c.id}:${e.member}:${e.missedAt}`
-      if (e.level > (escNotified.get(key) ?? -1)) {
-        escNotified.set(key, e.level)
-        const name = nameFor(e.member)
-        // Context matters: a phone that was already dying reads very differently
-        // from silence with a full battery.
-        const batt = st.checkins.get(e.member)?.battery
-        const battNote = batt === 'critical' ? ' — their battery was critical' : batt === 'low' ? ' — their battery was low' : ''
-        toast(e.level === 0 ? `⚠ ${name} missed a check-in${battNote}`
-          : e.level === 1 ? `⚠ Still no word from ${name}${battNote} — can anyone check on them?`
-          : `🚨 No word from ${name} for a while${battNote} — someone step in`)
-        if (e.level > 0) { try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ } }
-      }
-    }
-  }
-  checkinAlert = missed > 0
-  checkinAlertSub = missed > 0 && handled === missed ? handledNote : ''
-}
-
-// Nudge the user BEFORE their own check-in goes overdue. Entirely local —
-// a reminder that emitted traffic would be a tell (FLOCK §6 invariant 1).
-function evaluateSelfReminder(): void {
-  const me = persisted.identity?.pk
-  if (!me) return
-  for (const c of persisted.circles) {
-    if ((c.checkinInterval ?? 0) <= 0) { selfNudged.delete(c.id); continue }
-    const mine = cstate(c.id).checkins.get(me) ?? null
-    const status = selfCheckInStatus(mine, nowSec())
-    if (status === 'ok' || status === 'none') { selfNudged.delete(c.id); continue }
-    const key = `${mine?.timestamp ?? 0}:${status}`
-    if (selfNudged.get(c.id) === key) continue // one nudge per status per episode
-    selfNudged.set(c.id, key)
-    toast(status === 'due-soon' ? `Check-in due soon · ${c.name} — tap "I'm OK"`
-      : status === 'overdue' ? `⚠ Check-in overdue · ${c.name} — check in now`
-      : `🚨 Check-in missed · ${c.name} — your circle may be alerted`)
-    try { navigator.vibrate?.(status === 'due-soon' ? 200 : [300, 120, 300]) } catch { /* no haptics */ }
-  }
-}
-
-async function sendAck(target: string): Promise<void> {
-  const c = activeCircle()
-  const id = persisted.identity
-  if (!c || !id || !target || target === id.pk) return
-  try {
-    const tmpl = await buildAckSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, target })
-    await publishSignal(tmpl, c)
-    cstate(c.id).acks.set(target, { member: id.pk, target, timestamp: nowSec() })
-    evaluateCheckinAlarm()
-    toast(`You're checking on ${nameFor(target)} — the circle can stand down`)
-  } catch { toast("Couldn't send — try again") }
-  refresh()
-}
-
 function isEditing(): boolean {
   const el = document.activeElement
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
@@ -2120,16 +1538,7 @@ function isEditing(): boolean {
 function startMonitor(): void {
   if (monitorTimer) return
   monitorTimer = window.setInterval(() => {
-    // Auto-resume a break the moment its timer runs out.
-    if (persisted.offGridUntil && persisted.offGridUntil <= nowSec()) {
-      persisted.offGridUntil = undefined
-      store.save(persisted)
-      syncWatch() // break timer elapsed → resume sampling if sharing
-      toast('Break over — sharing back on')
-    }
     const expired = sweepExpired()
-    evaluateCheckinAlarm()
-    evaluateSelfReminder()
     if (expired && !adding) { toast('A temporary circle ended'); render(); return }
     if (!isEditing()) refresh()
   }, 30_000)
@@ -2149,6 +1558,25 @@ async function sendBuzz(reason: string, target?: string): Promise<void> {
   } catch { toast('Buzz failed') }
 }
 
+/** Mark (or clear) a member's phone as lost, to the whole circle. Anyone may do
+ *  either — the owner doesn't have their phone, so gating on them is useless.
+ *  Latest report wins on every device (see the lost signal's inner timestamp). */
+async function sendLostReport(pk: string, lost: boolean): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id || !pk) return
+  try {
+    const report: LostReport = { member: pk, by: id.pk, lost, timestamp: nowSec() }
+    await publishSignal(await buildLostSignal({ groupId: c.id, seedHex: c.seedHex, ...report }), c)
+    cstate(c.id).lost.set(pk, report)
+    lostConfirmPk = null
+    toast(lost
+      ? `${nameFor(pk)}'s phone is flagged as lost — keep an eye on its last seen`
+      : pk === id.pk ? "Cleared — your circle knows it's not lost" : `✓ ${nameFor(pk)}'s phone is marked found`)
+  } catch { toast("Couldn't send — check your connection") }
+  refresh()
+}
+
 function buzzBanner(): string {
   if (!activeBuzz) return ''
   const who = activeBuzz.from === persisted.identity?.pk ? 'You' : nameFor(activeBuzz.from)
@@ -2160,464 +1588,47 @@ function buzzBanner(): string {
   </div>`
 }
 
-// ── Off-grid ("take a break") ─────────────────────────────────────────────────
-/** Pre-announce a planned silence (or a cancel, when until<=now) to every circle. */
-async function broadcastOffGrid(until: number, reason?: string): Promise<void> {
-  const id = persisted.identity
-  if (!id) return
-  for (const c of persisted.circles) {
-    try {
-      const tmpl = await buildOffGridSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, until, ...(reason ? { reason } : {}) })
-      await publishSignal(tmpl, c)
-    } catch { /* best effort, per circle */ }
-  }
-}
-
-function goDark(): void {
-  let sec = darkDurSec
-  if (sec === -1) {
-    const n = Number((document.getElementById('dark-num') as HTMLInputElement | null)?.value) || 0
-    sec = Math.max(1, Math.min(48, Math.round(n))) * 3600
-  }
-  const why = (document.getElementById('dark-why') as HTMLInputElement | null)?.value?.trim() || undefined
-  const until = nowSec() + sec
-  persisted.offGridUntil = until
-  store.save(persisted)
-  goingDark = false
-  syncWatch() // stop burning GPS for a break that shares nothing
-  toast('On a break — sharing paused')
-  void broadcastOffGrid(until, why)
-  render()
-}
-
-function comeBack(): void {
-  persisted.offGridUntil = undefined
-  store.save(persisted)
-  syncWatch() // resume sampling if we were sharing before the break
-  toast("You're back on")
-  void broadcastOffGrid(nowSec()) // until≤now tells every circle the break is over
-  render()
-}
-
-// ── Rendezvous ───────────────────────────────────────────────────────────────
-function broadcastRzvStatus(): void {
-  const c = activeCircle()
-  const id = persisted.identity
-  if (!c || !id || !fix) return
-  const st = cstate(c.id)
-  if (!st.rendezvous) return
-  const p = assessArrival(st.rendezvous, id.pk, { lat: fix.lat, lon: fix.lon }, travelMode, nowSec())
-  st.rzvStatuses.set(id.pk, { rendezvousId: st.rendezvous.id, member: id.pk, status: p.status, etaSeconds: p.etaSeconds, timestamp: nowSec() })
-  if (nowSec() - lastRzvStatus < 30) return
-  lastRzvStatus = nowSec()
-  const status = st.rzvStatuses.get(id.pk) as RendezvousStatus
-  void (async () => {
-    try { await publishSignal(await buildRendezvousStatusSignal({ groupId: c.id, seedHex: c.seedHex, status }), c) } catch { /* best effort */ }
-  })()
-}
-
-// Build + broadcast a rendezvous from a resolved place. Shared by the typed path
-// (geocode) and the map-pick path, so both go out over the relay identically.
-async function shareRendezvous(place: Rendezvous['place']): Promise<void> {
+// ── "Come to me" (one-shot exact share) ──────────────────────────────────────
+// A quick action that buzzes the circle AND drops a single exact-precision pin —
+// e.g. "I've found a table, come to me". Confirmed first (see quickActionsCard):
+// it deliberately discloses more than the slider allows, once. On the wire it is
+// an ordinary beacon — indistinguishable from any other (FLOCK §6 invariant 1).
+async function doComeToMe(): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
-  const r: Rendezvous = {
-    id: `rzv-${nowSec().toString(36)}`,
-    place,
-    deadline: nowSec() + rzvDurationMin * 60,
-    mode: c.mode === 'family' ? 'be-back' : 'meet-at',
-    setBy: id.pk,
-    createdAt: nowSec(),
-  }
+  await sendBuzz('Come to me')
+  // Freshest possible spot: a one-shot GPS fix on a short deadline, falling back
+  // to the last watched fix — a coarse ambient share may be running on low-power
+  // location, and "come to me" is exactly when accuracy matters.
+  const fresh = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 5000, timeoutMs: 2500 })
+  if (fresh) fix = fresh
+  const use = fresh ?? fix
+  if (!use) { toast("Buzzed — couldn't attach your spot"); refresh(); return }
+  // Run the disclosure decision with an explicit trigger: a private (no-report)
+  // place still caps or withholds the pin — "come to me" must never leak a refuge.
+  const plan = decideEmission({
+    mode: 'nightout',
+    position: { lat: use.lat, lon: use.lon },
+    trigger: 'pickup',
+    offGrid: false,
+    noReportZones: persisted.noReportZones,
+    accuracyMetres: use.accuracy,
+  }, { coarse: sharePrecisionOf(c), full: COME_TO_ME_PRECISION })
+  if (plan.action === 'withhold') { toast('Buzzed — your spot stays private here'); refresh(); return }
   try {
-    await publishSignal(await buildRendezvousSignal({ groupId: c.id, seedHex: c.seedHex, rendezvous: r }), c)
-    const cs = cstate(c.id)
-    cs.rendezvous = r
-    cs.rzvStatuses.clear()
-    toast('Meeting point set')
-    render()
-  } catch { toast("Couldn't set the meeting point") }
+    const geohash = encode(use.lat, use.lon, plan.precision)
+    const template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: 'beacon', geohash, precision: plan.precision })
+    await publishSignal(template, c)
+    // One-shot by design: beaconCadence is NOT touched, so the ambient share
+    // carries on at the slider's precision and its next beacon reverts this
+    // exact pin on everyone's map. The slider value itself never changes.
+    saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
+    toast('Buzzed — your exact spot is on their map')
+  } catch { toast("Buzzed — couldn't send your spot") }
+  refresh()
 }
 
-async function setRendezvous(): Promise<void> {
-  const q = (document.getElementById('rzv-place') as HTMLInputElement | null)?.value?.trim() ?? ''
-  if (q) {
-    toast('Finding the place…')
-    const g = await geocode(q)
-    if (!g) { toast("Couldn't find that — try a fuller address"); return }
-    await shareRendezvous({ lat: g.lat, lon: g.lon, label: q, address: g.address, geohash: encode(g.lat, g.lon, 10) })
-  } else if (fix) {
-    await shareRendezvous({ lat: fix.lat, lon: fix.lon, geohash: encode(fix.lat, fix.lon, 10) })
-  } else {
-    toast('Type a place/address, or start sharing to use your spot')
-  }
-}
-
-// Map-pick: pan the map so the crosshair sits on the meeting spot, then read the
-// centre — the same idiom as the safe/private-place editor.
-function pickRzvOnMap(): void {
-  rzvPick = true
-  addMode = false // never both crosshair modes at once
-  tab = 'map'
-  render()
-}
-
-async function setRzvFromMap(): Promise<void> {
-  if (!mapView) return
-  const c = mapView.center()
-  rzvPick = false
-  tab = 'circle'
-  toast('Setting the meeting point…')
-  const g = await reverseGeocode(c.lat, c.lon) // bounded, best-effort; null just means "no street address"
-  await shareRendezvous({
-    lat: c.lat,
-    lon: c.lon,
-    geohash: encode(c.lat, c.lon, 10),
-    ...(g ? { label: g.address.split(',')[0], address: g.address } : {}),
-  })
-}
-
-function cancelRzvPick(): void {
-  rzvPick = false
-  tab = 'circle'
-  render()
-}
-
-function clearRendezvous(): void {
-  const st = active()
-  if (st) { st.rendezvous = null; st.rzvStatuses.clear() }
-  render()
-}
-
-function copyRzvForTaxi(): void {
-  const r = active()?.rendezvous
-  if (!r) return
-  const parts = [r.place.label, r.place.address, `${r.place.lat.toFixed(5)}, ${r.place.lon.toFixed(5)}`].filter(Boolean)
-  navigator.clipboard?.writeText(parts.join(' — ')).then(() => toast('Copied — paste into your taxi app'), () => toast('Copy failed'))
-}
-
-// The live countdown to a rendezvous deadline. A dedicated 1 s ticker updates just
-// the #rzv-countdown text — never a full re-render (that would fight input focus and
-// waste work) — and only runs while a rendezvous is actually on screen (Circle tab),
-// so it costs nothing the rest of the time (minimal-footprint north star).
-function countdownLabel(dueInSeconds: number): string {
-  return dueInSeconds > 0 ? `in ${formatCountdown(dueInSeconds)}` : 'now'
-}
-
-function tickRzvCountdown(): void {
-  const r = active()?.rendezvous
-  const el = document.getElementById('rzv-countdown')
-  if (!r || !el) { syncRzvTicker(); return } // rendezvous or screen gone → wind down
-  const dueIn = r.deadline - nowSec()
-  el.textContent = countdownLabel(dueIn)
-  el.classList.toggle('overdue', dueIn <= 0)
-}
-
-function syncRzvTicker(): void {
-  const want = tab === 'circle' && !adding && !!activeCircle() && !!active()?.rendezvous
-  if (want && !rzvTicker) rzvTicker = window.setInterval(tickRzvCountdown, 1000)
-  else if (!want && rzvTicker) { clearInterval(rzvTicker); rzvTicker = 0 }
-}
-
-// ── Meeting point — the "where" of Phase F ────────────────────────────────────
-// "Some of us are in one bar, some in another — where do we all go?" A member
-// proposes; each other member may opt in and contribute a COARSE spot; the
-// proposer's device computes a fair midpoint on-device and turns it into an
-// ordinary rendezvous. Coordinates never leave except as a neighbourhood geohash
-// cell, and only from those who actively tap "share" (withhold-by-default holds).
-const MEETING_PRECISION = 6 // geohash chars ≈ neighbourhood; exactly policy's `coarse`
-const MEETING_EXACT_PRECISION = 9 // geohash chars ≈ 5 m; the "Exact" rung, shared only with a named individual
-const MEETING_TIME_BUDGET_MIN = 30 // reachability budget for the on-device isochrones
-const VENUE_SEARCH_RADIUS_M = 1500 // hunt for real venues within ~18 min walk of the fair point
-// Human labels for the fairness strategies (design doc). Only offered when there
-// are ≥2 candidate venues to balance between — with one spot, there's no choice.
-const FAIRNESS_OPTIONS: ReadonlyArray<readonly [FairnessStrategy, string]> = [
-  ['min_max', 'Fairest'],
-  ['min_total', 'Least total'],
-  ['min_variance', 'Most equal'],
-]
-const kitMode = (m: TravelMode): TransportMode => (m === 'transit' ? 'public_transit' : m)
-
-async function proposeMeeting(): Promise<void> {
-  const c = activeCircle()
-  const id = persisted.identity
-  if (!c || !id) return
-  const request: MeetingRequest = {
-    id: `mtg-${nowSec().toString(36)}`,
-    setBy: id.pk,
-    mode: travelMode,
-    maxTimeMinutes: MEETING_TIME_BUDGET_MIN,
-    createdAt: nowSec(),
-  }
-  const cs = cstate(c.id)
-  cs.meeting = request
-  cs.meetingShares.clear()
-  cs.meetingSuggestion = null
-  try {
-    await publishSignal(await buildMeetingRequestSignal({ groupId: c.id, seedHex: c.seedHex, request }), c)
-    toast('Asking everyone for a rough spot')
-    render()
-    await contributeMeetingShare() // the proposer opts in too — my own coarse spot, if I have a fix
-  } catch { toast('Could not start the meeting-point search') }
-}
-
-// Publish my COARSE spot toward the active request. Shared by "propose" (proposer
-// auto-contributes) and the explicit "Share my spot" button. Coarsening to a
-// neighbourhood geohash cell happens here at the edge — the exact fix never leaves.
-async function contributeMeetingShare(exact = false): Promise<void> {
-  const c = activeCircle()
-  const id = persisted.identity
-  const cs = c ? cstate(c.id) : null
-  if (!c || !id || !cs?.meeting) return
-  const f = fix
-  if (!f) { toast('Turn on sharing so we can use your rough spot'); return }
-  const share: MeetingShare = { requestId: cs.meeting.id, member: id.pk, geohash: encode(f.lat, f.lon, MEETING_PRECISION), precision: MEETING_PRECISION, mode: travelMode, timestamp: nowSec() }
-  try {
-    // The group inbox always gets only the coarse neighbourhood cell.
-    await publishSignal(await buildMeetingShareSignal({ groupId: c.id, seedHex: c.seedHex, share }), c)
-    mergeMeetingShare(cs, share)
-    // Opt-in: ALSO send my EXACT spot, gift-wrapped to the proposer's personal inbox
-    // — only they can decrypt it; the rest of the group still sees only the cell.
-    if (exact && cs.meeting.setBy !== id.pk) {
-      const signer = getSigner()
-      if (signer) {
-        const exactShare: MeetingShare = { requestId: cs.meeting.id, member: id.pk, geohash: encode(f.lat, f.lon, MEETING_EXACT_PRECISION), precision: MEETING_EXACT_PRECISION, mode: travelMode, timestamp: nowSec() }
-        try {
-          await svc.publishSigned(persisted.relayUrls, await buildMeetingExactWrap(signer, cs.meeting.setBy, exactShare) as never)
-          toast(`Shared your exact spot with ${nameFor(cs.meeting.setBy)}`)
-        } catch { /* best effort — the coarse share already reached the group */ }
-      }
-    }
-    await refreshMeetingSuggestion(c.id)
-    render()
-  } catch { toast('Could not share your spot') }
-}
-
-// Declining contributes nothing — this only hides the prompt on my own device.
-function dismissMeeting(): void {
-  const m = active()?.meeting
-  if (m) meetingDismissed.add(m.id)
-  render()
-}
-
-// The proposer's device recomputes the fair point whenever the contributions
-// change (≥2 needed). Purely on-device: each coarse geohash is decoded back to its
-// cell centre and fed to the isochrone/fairness maths — no network, no raw coords.
-async function refreshMeetingSuggestion(circleId: string): Promise<void> {
-  const st = cstate(circleId)
-  const me = persisted.identity?.pk
-  if (!st.meeting || st.meeting.setBy !== me || st.meetingShares.size < 2) return
-  const reqId = st.meeting.id
-  const gen = ++st.meetingGen // newest refresh wins; a slow venue fetch must not clobber it
-  st.meetingVenues = [] // re-fetched below; empty meanwhile so the fairness toggle stays hidden
-  const opts = { mode: kitMode(st.meeting.mode), maxTimeMinutes: st.meeting.maxTimeMinutes, fairness: meetingFairness }
-  const participants = meetingParticipants(st)
-  const live = () => st.meetingGen === gen && st.meeting?.id === reqId // not superseded/cancelled
-  try {
-    // 1) The on-device fair point — instant, no network. Show it if nothing's up
-    //    yet (don't downgrade a venue already on screen while we re-fetch).
-    const [centroid] = await suggestMeetingPoint(participants, opts)
-    if (!live()) return
-    if (!st.meetingSuggestion) { st.meetingSuggestion = centroid ?? null; render() }
-    if (!centroid) return
-    // 2) Best-effort upgrade to real, named venues everyone can reach. Only a
-    // bounding box around the fair point leaves the device (venues.ts); on any
-    // failure — proxy down, rate-limited, no matches — we keep the centroid. Cache
-    // the venues so the fairness toggle can re-rank them without another fetch.
-    const region = circleToPolygon([centroid.venue.lon, centroid.venue.lat], VENUE_SEARCH_RADIUS_M)
-    const venues = await searchMeetingVenues(region)
-    if (!live()) return
-    st.meetingVenues = venues
-    const [best] = rankVenues(participants, venues, opts)
-    st.meetingSuggestion = best ?? centroid
-    render()
-  } catch { /* best effort — keep the last good suggestion on screen */ }
-}
-
-// The decoded coarse cells of everyone who's shared, as reachability inputs. Each
-// geohash-6 cell is decoded to its centre — the coarse spot, never a raw fix.
-function meetingParticipants(st: CircleState): Array<{ lat: number; lon: number; label: string }> {
-  return [...st.meetingShares.values()].map((s) => {
-    const d = decode(s.geohash)
-    return { lat: d.lat, lon: d.lon, label: nameFor(s.member) }
-  })
-}
-
-// Store a contribution, preferring the FINER disclosure when we already hold one for
-// this member — an exact share (gift-wrapped to me, the proposer) must not be
-// overwritten by a coarser group-inbox echo arriving later, whichever order they
-// land in. Returns whether anything changed (so the caller can skip a recompute).
-function mergeMeetingShare(st: CircleState, share: MeetingShare): boolean {
-  const existing = st.meetingShares.get(share.member)
-  if (existing && share.precision < existing.precision) return false
-  st.meetingShares.set(share.member, share)
-  return true
-}
-
-// Re-rank the already-fetched venues under the current fairness strategy — NO
-// network (the toggle only reorders what we already hold). Falls back to the
-// on-device centroid when no venues were found.
-async function applyMeetingRanking(circleId: string): Promise<void> {
-  const st = cstate(circleId)
-  const me = persisted.identity?.pk
-  if (!st.meeting || st.meeting.setBy !== me || st.meetingShares.size < 2) return
-  const opts = { mode: kitMode(st.meeting.mode), maxTimeMinutes: st.meeting.maxTimeMinutes, fairness: meetingFairness }
-  const participants = meetingParticipants(st)
-  const [best] = rankVenues(participants, st.meetingVenues, opts)
-  if (best) { st.meetingSuggestion = best; render(); return }
-  const [centroid] = await suggestMeetingPoint(participants, opts) // on-device only, no network
-  st.meetingSuggestion = centroid ?? null
-  render()
-}
-
-// The proposer picks how to balance travel across the group. Persisted; re-ranks
-// the venues already on screen in place (see applyMeetingRanking) — no re-fetch.
-function setMeetingFairness(fair: FairnessStrategy): void {
-  meetingFairness = fair
-  try { localStorage.setItem('flock.fairness', fair) } catch { /* localStorage may be unavailable */ }
-  const c = activeCircle()
-  if (c) void applyMeetingRanking(c.id)
-  render()
-}
-
-// Pick the fair point → it becomes an ordinary rendezvous (everyone gets the pin +
-// countdown via the machinery already built). Setting it supersedes the search.
-async function setMeetingAsRendezvous(): Promise<void> {
-  const cs = active()
-  const s = cs?.meetingSuggestion
-  if (!cs || !s) return
-  const { lat, lon } = s.venue
-  const isVenue = s.venue.venueType !== 'centroid'
-  cs.meeting = null
-  cs.meetingShares.clear()
-  cs.meetingSuggestion = null
-  toast('Setting the meeting point…')
-  const g = await reverseGeocode(lat, lon) // bounded, best-effort; fills the taxi address
-  // A real venue names itself; a bare centroid borrows the geocoded street/road.
-  const label = isVenue ? s.venue.name : (g ? g.address.split(',')[0] : 'Meeting point')
-  await shareRendezvous({
-    lat,
-    lon,
-    geohash: encode(lat, lon, 10),
-    label,
-    ...(g ? { address: g.address } : {}),
-  })
-}
-
-function cancelMeeting(): void {
-  const cs = active()
-  if (cs) { cs.meeting = null; cs.meetingShares.clear(); cs.meetingSuggestion = null }
-  render()
-}
-
-// The meeting-point flow card — shown in place of the rendezvous setup while a
-// search is live. Contributors opt in; once ≥2 are in, the proposer sees the fair
-// point and can turn it into the rendezvous.
-function meetingCard(): string {
-  const me = persisted.identity?.pk
-  const cs = active()
-  const m = cs?.meeting
-  if (!cs || !m || cs.rendezvous) return '' // a set rendezvous always wins the display
-  const iProposed = m.setBy === me
-  const iShared = !!me && cs.meetingShares.has(me)
-  const dismissed = meetingDismissed.has(m.id)
-  const count = cs.meetingShares.size
-
-  const proposerName = esc(nameFor(m.setBy))
-  const prompt = (!iShared && !dismissed)
-    ? `<div class="note">Share a rough spot (neighbourhood only) so we can pick somewhere fair.</div>
-       <div class="row" style="gap:10px;flex-wrap:wrap">
-         <button class="btn small primary" data-action="share-meeting">Share my spot</button>
-         ${!iProposed ? `<button class="btn small" data-action="share-meeting-exact">Exact, only to ${proposerName}</button>` : ''}
-         <button class="btn small ghost" data-action="dismiss-meeting">Not now</button>
-       </div>
-       ${!iProposed ? `<div class="note" style="font-size:12px;opacity:0.85">“Exact” shares your precise spot with ${proposerName} alone — the group still sees only your neighbourhood.</div>` : ''}`
-    : `<div class="note">${count === 1 ? '1 person has' : `${count} people have`} shared a rough spot${iShared ? " — you're in" : ''}.</div>`
-
-  let suggestion = ''
-  if (iProposed && cs.meetingSuggestion) {
-    const s = cs.meetingSuggestion
-    const isVenue = s.venue.venueType !== 'centroid'
-    const etas = Object.entries(s.travelTimes)
-      .map(([who, mins]) => `<div class="row" style="gap:10px"><span class="who" style="font-size:14px">${esc(who)}</span><span class="pill warn" style="margin-left:auto">${Math.round(mins)} min</span></div>`)
-      .join('')
-    // A real venue names itself ("The Coach & Horses"); a bare centroid is a fair road-point.
-    const heading = isVenue
-      ? `📍 <strong>${esc(s.venue.name)}</strong> — a fair spot everyone can reach:`
-      : '📍 A fair spot for everyone (as-the-crow-flies):'
-    // Only worth offering when there's more than one candidate venue to balance between.
-    const fairness = cs.meetingVenues.length >= 2
-      ? `<div class="note" style="margin-top:8px">Balance travel</div>
-         <div class="row" style="gap:8px;flex-wrap:wrap">${FAIRNESS_OPTIONS
-        .map(([f, label]) => `<button class="btn small${meetingFairness === f ? ' primary' : ''}" data-action="mtg-fairness" data-fair="${f}">${label}</button>`)
-        .join('')}</div>`
-      : ''
-    suggestion = `<div class="note" style="margin-top:6px">${heading}</div>
-      <div class="list">${etas}</div>
-      ${fairness}
-      <button class="btn small primary" data-action="set-meeting-rzv">Set this as the meeting point</button>`
-  } else if (iProposed) {
-    suggestion = `<div class="note">Waiting for a second spot to work out a fair place…</div>`
-  }
-
-  return `<div class="section-title" style="margin-top:22px">Meeting point</div>
-    <div class="card stack">
-      <div class="row" style="justify-content:space-between"><strong>Finding where to meet</strong><span class="muted">${count} sharing</span></div>
-      ${prompt}
-      ${suggestion}
-      ${iProposed ? '<button class="btn small ghost" data-action="cancel-meeting">Cancel</button>' : ''}
-    </div>`
-}
-
-function rzvCard(): string {
-  const me = persisted.identity?.pk
-  const cs = active()
-  if (cs?.rendezvous) {
-    const r = cs.rendezvous
-    const dueIn = r.deadline - nowSec()
-    const at = new Date(r.deadline * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    const rows = members().map((pk) => {
-      const st = cs.rzvStatuses.get(pk)
-      const isMe = pk === me
-      const pill = !st ? '<span class="pill">no signal</span>'
-        : st.status === 'arrived' ? '<span class="pill active">arrived</span>'
-          : st.status === 'at-risk' ? '<span class="pill alert">at risk</span>'
-            : `<span class="pill warn">${fmtMins(st.etaSeconds)} away</span>`
-      return `<div class="row" style="gap:10px">${avatarHtml(pk, isMe, true)}<span class="who" style="font-size:14px">${isMe ? 'You' : esc(nameFor(pk))}</span><span style="margin-left:auto">${pill}</span></div>`
-    }).join('')
-    const modes = (['walk', 'cycle', 'drive', 'transit'] as const)
-      .map((m) => `<button class="btn small${travelMode === m ? ' primary' : ''}" data-action="rzv-mode" data-mode="${m}">${m}</button>`).join('')
-    return `<div class="section-title" style="margin-top:22px">Meeting point</div>
-      <div class="card stack">
-        <div class="row" style="justify-content:space-between"><strong>${r.mode === 'be-back' ? 'Be back' : 'Meet'} <span id="rzv-countdown" class="rzv-countdown${dueIn <= 0 ? ' overdue' : ''}">${countdownLabel(dueIn)}</span></strong><span class="muted">by ${at}</span></div>
-        <div class="note" style="margin-top:-2px">📍 ${esc(r.place.label || r.place.address || 'a set spot')}</div>
-        <button class="btn small ghost" data-action="copy-rzv">Copy address for a taxi</button>
-        <div class="list">${rows}</div>
-        <div class="note">How you're getting there</div>
-        <div class="chip-row">${modes}</div>
-        ${r.setBy === me ? '<button class="btn small ghost" data-action="clear-rzv">Clear meeting point</button>' : ''}
-      </div>`
-  }
-  // While a meeting-point search is live, the meeting card stands in for the setup.
-  if (cs?.meeting) return ''
-  return `<div class="section-title" style="margin-top:22px">Meeting point</div>
-    <div class="card stack">
-      <div class="field"><input class="input" id="rzv-place" placeholder="The Crown, or an address — blank for here" autocapitalize="words" autocorrect="off" /></div>
-      <div class="note">A place or address (taxi-friendly), or leave blank to use your spot. ETAs are as-the-crow-flies.</div>
-      <div class="chip-row">
-        <button class="btn small${rzvDurationMin === 30 ? ' primary' : ''}" data-action="rzv-dur" data-min="30">30 min</button>
-        <button class="btn small${rzvDurationMin === 60 ? ' primary' : ''}" data-action="rzv-dur" data-min="60">1 hour</button>
-        <button class="btn small${rzvDurationMin === 120 ? ' primary' : ''}" data-action="rzv-dur" data-min="120">2 hours</button>
-      </div>
-      <div class="row" style="gap:10px">
-        <button class="btn small primary" data-action="set-rzv">Set meeting point</button>
-        <button class="btn small ghost" data-action="rzv-pick">📍 Pick on map</button>
-      </div>
-      <div class="note" style="margin-top:2px">Not sure where? Everyone shares a rough spot and flock picks a fair place.</div>
-      <button class="btn small ghost" data-action="propose-meeting">🧭 Find a meeting point</button>
-    </div>`
-}
 
 function handleAction(action: string, node: HTMLElement): void {
   switch (action) {
@@ -2625,22 +1636,17 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'switch-circle': switchCircle(node.dataset.id as string); break
     case 'add-circle': adding = true; onboardStep = 'intro'; render(); break
     case 'go-invite': tab = 'circle'; render(); break
-    case 'mode': setMode(node.dataset.mode as Mode); break
-    case 'toggle-share': {
-      const covert = sharing && wasCovertHold('toggle-share') // only stopping can be coerced
-      sharing ? stopSharing() : startSharing()
-      if (covert) void raiseCovertSelfAlarm()
-      break
-    }
-    case 'pickup': void emit('pickup'); break
-    case 'sos-retry': void emit('help', persisted.circles.find((x) => x.id === alertCircleId) ?? null); break
+    case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'geo-retry': geoIssue = null; sharing = false; startSharing(); break
-    case 'im-safe': { const covert = wasCovertHold('im-safe'); void standDown(covert); break }
-    case 'see-alert': goToAlert(); break
-    case 'pickup-show': pickupPanel = 'show'; showDuressWord = false; pickupOutcome = null; render(); break
-    case 'pickup-check': pickupPanel = 'check'; pickupOutcome = null; render(); break
-    case 'pickup-close': pickupPanel = null; pickupOutcome = null; showDuressWord = false; render(); break
-    case 'pickup-check-run': void runSpokenCheck(); break
+    case 'quick-buzz': void sendBuzz(node.dataset.reason ?? ''); break
+    case 'see-on-map': focusMemberPk = node.dataset.pk ?? null; tab = 'map'; render(); break
+    case 'ask-lost': lostConfirmPk = node.dataset.pk ?? null; render(); break
+    case 'cancel-lost': lostConfirmPk = null; render(); break
+    case 'report-lost': void sendLostReport(node.dataset.pk ?? '', true); break
+    case 'found-phone': void sendLostReport(node.dataset.pk ?? '', false); break
+    case 'come-to-me': comeToMeArmed = !comeToMeArmed; render(); break
+    case 'come-to-me-cancel': comeToMeArmed = false; render(); break
+    case 'come-to-me-confirm': comeToMeArmed = false; render(); void doComeToMe(); break
     case 'copy-invite': void copyInvite(); break
     case 'save-handle': saveHandle(); break
     case 'copy-npub': copyNpub(); break
@@ -2662,61 +1668,12 @@ function handleAction(action: string, node: HTMLElement): void {
       persisted.hints = { on: true, dismissed: [] }
       store.save(persisted); toast('Tips are back on'); render(); break
     case 'remove-member': removeConfirmPk = null; void reseedCircle(node.dataset.pk); break
-    case 'checkin': void sendCheckIn(); break
     case 'buzz': void sendBuzz(node.dataset.reason ?? (document.getElementById('buzz-custom') as HTMLInputElement | null)?.value ?? ''); break
-    case 'dismiss-buzz': activeBuzz = null; render(); break
-    case 'set-rzv': void setRendezvous(); break
-    case 'clear-rzv': clearRendezvous(); break
-    case 'rzv-dur': rzvDurationMin = Number(node.dataset.min); render(); break
-    case 'rzv-mode': travelMode = node.dataset.mode as TravelMode; render(); break
-    case 'copy-rzv': copyRzvForTaxi(); break
-    case 'rzv-pick': pickRzvOnMap(); break
-    case 'rzv-pick-set': void setRzvFromMap(); break
-    case 'rzv-pick-cancel': cancelRzvPick(); break
-    case 'propose-meeting': void proposeMeeting(); break
-    case 'share-meeting': void contributeMeetingShare(); break
-    case 'share-meeting-exact': void contributeMeetingShare(true); break
-    case 'dismiss-meeting': dismissMeeting(); break
-    case 'set-meeting-rzv': void setMeetingAsRendezvous(); break
-    case 'mtg-fairness': setMeetingFairness(node.dataset.fair as FairnessStrategy); break
-    case 'cancel-meeting': cancelMeeting(); break
-    case 'ask-dark': goingDark = true; render(); break
-    case 'cancel-dark': goingDark = false; render(); break
-    case 'dark-dur': {
-      darkDurSec = Number(node.dataset.sec)
-      root.querySelectorAll<HTMLElement>('[data-action="dark-dur"]').forEach((b) => b.classList.toggle('primary', Number(b.dataset.sec) === darkDurSec))
-      const cust = document.getElementById('dark-custom')
-      if (cust) (cust as HTMLElement).hidden = darkDurSec !== -1
-      break
-    }
-    case 'do-dark': {
-      const covert = wasCovertHold('do-dark')
-      goDark()
-      if (covert) void raiseCovertSelfAlarm()
-      break
-    }
-    case 'come-back': comeBack(); break
+    case 'dismiss-buzz': activeBuzz = null; if (tab === 'map' && mapView) patchBuzzBanner(); else render(); break
     case 'edit-petname': editingPetname = node.dataset.pk ?? null; render(); break
     case 'save-petname': savePetname(node.dataset.pk as string); break
     case 'cancel-petname': editingPetname = null; render(); break
     case 'toggle-profiles': toggleProfiles(); break
-    case 'arm-menu': armingCheckin = true; render(); break
-    case 'cancel-arm': armingCheckin = false; render(); break
-    case 'arm': armCheckin(Number(node.dataset.interval)); break
-    case 'arm-custom': {
-      const el = document.getElementById('custom-interval-mins') as HTMLInputElement | null
-      const mins = Math.round(Number(el?.value))
-      if (!Number.isFinite(mins) || mins < 5 || mins > 1440) { toast('Pick between 5 minutes and 24 hours'); break }
-      armCheckin(mins * 60)
-      break
-    }
-    case 'ack-checkin': void sendAck(node.dataset.pk ?? ''); break
-    case 'disarm-checkin': {
-      const covert = wasCovertHold('disarm-checkin')
-      disarmCheckin()
-      if (covert) void raiseCovertSelfAlarm()
-      break
-    }
     case 'save-relay': saveRelay(); break
     case 'leave': leave(); break
     case 'ask-disband': disbandConfirm = true; render(); break
@@ -2733,44 +1690,8 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'lock-enable': void enableLock(); break
     case 'lock-off': void disableLock(); break
     case 'lock-reconfirm': void reconfirmLock(); break
-    case 'add-zone': addMode = true; addZoneKind = (node.dataset.kind as 'safe' | 'noreport') ?? 'safe'; newZonePolicy = 'withhold'; renderMapPanel(); updatePreview(); break
-    case 'zone-kind': addZoneKind = node.dataset.kind as 'safe' | 'noreport'; renderMapPanel(); updatePreview(); break
-    case 'zone-policy': newZonePolicy = node.dataset.policy as 'withhold' | 'coarse'; renderMapPanel(); updatePreview(); break
-    case 'cancel-zone': addMode = false; addZoneKind = 'safe'; mapView?.setPreview(null); renderMapPanel(); break
-    case 'save-zone': saveZone(); break
-    case 'del-zone': delZone(Number(node.dataset.i)); break
-    case 'del-noreport': delNoReport(Number(node.dataset.i)); break
-    case 'save-offline-map': void saveOfflineMap(); break
-    case 'remove-offline-map': void removeOfflineMap(); break
-    case 'map-labels': void setMapLabels(node.dataset.mode as MapLabelMode); break
     default: break
   }
-}
-
-function wireSos(node: HTMLElement): void {
-  const fill = node.querySelector('.fill') as HTMLElement | null
-  const DURATION = 1400
-  let raf = 0
-  let start = 0
-  const reset = (): void => {
-    cancelAnimationFrame(raf)
-    raf = 0
-    start = 0
-    node.dataset.armed = 'false'
-    fill?.style.setProperty('--p', '0')
-  }
-  const step = (ts: number): void => {
-    if (!start) start = ts
-    const p = Math.min(1, (ts - start) / DURATION)
-    fill?.style.setProperty('--p', String(p))
-    if (p >= 1) { reset(); void emit('help'); return }
-    raf = requestAnimationFrame(step)
-  }
-  const begin = (e: Event): void => { e.preventDefault(); node.dataset.armed = 'true'; start = 0; raf = requestAnimationFrame(step) }
-  node.addEventListener('pointerdown', begin)
-  node.addEventListener('pointerup', reset)
-  node.addEventListener('pointerleave', reset)
-  node.addEventListener('pointercancel', reset)
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────────
@@ -2787,7 +1708,7 @@ function doCreate(): void {
     const sec = unit === 'hours' ? n * 3600 : n * 86_400
     expiresAt = sec > 0 ? nowSec() + sec : undefined
   }
-  upsertCircle(store.createCircle(name, onboardMode, persisted.identity.pk, persisted.circleRootHex, expiresAt), true)
+  upsertCircle(store.createCircle(name, 'nightout', persisted.identity.pk, persisted.circleRootHex, expiresAt), true)
   onboardStep = 'intro'
   awaitingInvite = false
   adding = false
@@ -2826,27 +1747,20 @@ function doJoin(): void {
   }
 }
 
-function setMode(mode: Mode): void {
-  if (!activeCircle()) return
-  patchActive({ mode })
-  breachActive = false
-  syncWatch() // Private↔Share-live changes the accuracy tier
-  render()
-}
-
 // The location watch should run only when it can actually do something: we're
-// sharing, not on a deliberate break, and the app is in the foreground. Anything
-// else is GPS burned for nothing — an off-grid break emits nothing, and a hidden
-// PWA can't sample reliably regardless. (Minimal-footprint north star — Phase H.)
+// sharing and the app is in the foreground. Anything else is GPS burned for
+// nothing — a hidden PWA can't sample reliably regardless. (Minimal-footprint
+// north star — Phase H.)
 function shouldSample(): boolean {
-  return sharing && !isDark() && !hidden
+  return sharing && !hidden
 }
 
-// A night-out share is coarse (geohash-6, ~600 m), so low-power network/cell
-// location is ample — and coarser hardware is a privacy win too. Family breach
-// detection needs GPS. (Minimal-footprint north star — Phase H.)
+// Hardware cost tracks disclosure: a coarse share (city…neighbourhood) is ample
+// on low-power network/cell location — and coarser hardware is a privacy win
+// too. Street-level and finer needs GPS, or the "exact" pin would quietly be a
+// network guess. (Minimal-footprint north star — Phase H.)
 function desiredHighAccuracy(): boolean {
-  return activeCircle()?.mode !== 'nightout'
+  return sharePrecisionOf(activeCircle()) >= 7
 }
 let watchHighAccuracy = true // accuracy tier the running watch was armed at
 
@@ -2854,40 +1768,25 @@ function resetSampleCadence(): void { lastSampleFix = null; stationaryStreak = 0
 
 // ── Battery-aware conservation (Phase H) ─────────────────────────────────────
 // A dying phone is itself a safety risk — flock draining the last of it is worse
-// than slower sampling. When the battery is low AND discharging AND no alert is
-// live anywhere, the night-out poll widens (cadence `conserve`). Family's
-// continuous watch is untouched — a safety line, not a battery one. Where the
-// Battery Status API doesn't exist (iOS/Firefox) we simply never conserve.
+// than slower sampling. When the battery is low AND discharging, the poll widens
+// (cadence `conserve`). Where the Battery Status API doesn't exist (iOS/Firefox)
+// we simply never conserve.
 const CONSERVE_BELOW = 0.2
-const BATTERY_CRITICAL_BELOW = 0.08
 let batteryLow = false
 let batteryCharging = true
-let batteryLevel = 1
 function watchBattery(): void {
   type BatteryManager = { level: number; charging: boolean; addEventListener: (t: string, f: () => void) => void }
   const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryManager> }
   nav.getBattery?.().then((b) => {
-    const update = (): void => { batteryLevel = b.level; batteryLow = b.level <= CONSERVE_BELOW; batteryCharging = b.charging }
+    const update = (): void => { batteryLow = b.level <= CONSERVE_BELOW; batteryCharging = b.charging }
     update()
     b.addEventListener('levelchange', update)
     b.addEventListener('chargingchange', update)
   }).catch(() => { /* no API → never conserve */ })
 }
 
-/** Battery standing to ride inside a check-in — absent unless discharging low/critical. */
-function batteryState(): 'low' | 'critical' | undefined {
-  if (batteryCharging) return undefined
-  if (batteryLevel <= BATTERY_CRITICAL_BELOW) return 'critical'
-  if (batteryLevel <= CONSERVE_BELOW) return 'low'
-  return undefined
-}
-
 function conserveNow(): boolean {
-  if (!batteryLow || batteryCharging) return false
-  // Safety wins over battery: any live alert anywhere keeps the full cadence.
-  if (alertActive || alertFailed || checkinAlert || breachActive) return false
-  for (const c of persisted.circles) if (cstate(c.id).alerts.size) return false
-  return true
+  return batteryLow && !batteryCharging
 }
 
 /** Next night-out poll delay (ms): tight while moving, backing off when stationary. */
@@ -2902,10 +1801,10 @@ function sampleDelayMs(f: svc.Fix): number {
   return nextPollDelaySeconds(stationaryStreak, SAMPLE_POLL_BOUNDS, { conserve: conserveNow() }) * 1000
 }
 
-/** Start or stop location sampling to match shouldSample(), re-arming if the tier
- *  changed (e.g. switching to a night-out circle). Family runs a continuous, tight
- *  watch — a breach must be caught fast even for a fast exit, so it never backs off.
- *  Night-out runs an adaptive poll that eases off when stationary (battery). The
+/** Start or stop location sampling to match shouldSample(), re-arming if the
+ *  accuracy tier changed (the slider crossing the street/neighbourhood line, or
+ *  switching circles). Fine precisions run a continuous GPS watch; coarse ones
+ *  run an adaptive low-power poll that eases off when stationary (battery). The
  *  single place sampling is turned on or off. */
 function syncWatch(): void {
   const want = shouldSample()
@@ -2949,7 +1848,6 @@ function startSharing(): void {
 
 function stopSharing(): void {
   sharing = false
-  breachActive = false
   geoIssue = null
   dropMyPresence() // my pin must not keep claiming "sharing" after the toggle is off
   syncWatch()
@@ -2961,8 +1859,8 @@ function stopSharing(): void {
 // The PWA can only sample in the foreground; inside the Capacitor shell the
 // sharing toggle extends to a background watcher (foreground service — the OS
 // shows a persistent notification while it runs). Fixes enter through the SAME
-// onFix pipeline as foreground fixes, so breadcrumbs, off-grid, no-report
-// zones and cadence gating apply identically (FLOCK.md §6). Tied strictly to
+// onFix pipeline as foreground fixes, so the precision slider, no-report zones
+// and cadence gating apply identically (FLOCK.md §6). Tied strictly to
 // `sharing`: stop-sharing, reset and hide tear it down — nothing may run (or
 // show a notification) on a fresh, reset or decoy install.
 let bgWatchId: string | null = null
@@ -3003,75 +1901,38 @@ async function stopBgWatch(): Promise<void> {
 function onFix(f: svc.Fix): void {
   fix = f
   geoIssue = null // any successful fix clears the location-trouble card
-  recordCrumb(f) // local rolling buffer — recording emits nothing, ever
-  if (isDark()) { refresh(); return } // on a break — emit nothing at all
-  broadcastRzvStatus()
   if (sharing) void autoEmit()
   else refresh()
 }
 
-// ── Pre-SOS breadcrumb trail ─────────────────────────────────────────────────
-// The buffer lives in memory only: it must never touch localStorage (location
-// at rest is a coercion target) and never leaves the device except inside an
-// encrypted trail after a help/breach trigger.
-function recordCrumb(f: svc.Fix): void {
-  // A sensitive address must never enter the buffer — no-report zones apply at
-  // RECORD time (fail-safe: an uncertain fix near a zone is skipped too).
-  if (noReportPolicyAt({ lat: f.lat, lon: f.lon }, persisted.noReportZones ?? [], f.accuracy ?? 0) !== null) return
-  try {
-    myCrumbs = pushCrumb(myCrumbs, { geohash: encode(f.lat, f.lon, 9), precision: 9, timestamp: nowSec() })
-  } catch { /* malformed fix — skip */ }
-}
-
-/** Best-effort: the alert itself has already gone out; a lost trail must not fail it. */
-async function sendTrail(c: store.Circle, reason: 'help' | 'breach'): Promise<void> {
-  const id = persisted.identity
-  if (!id || myCrumbs.length === 0) return
-  try {
-    const tmpl = await buildTrailSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, reason, crumbs: myCrumbs })
-    await publishSignal(tmpl, c)
-  } catch { /* best-effort */ }
-}
-
-// Automatic, movement-driven emission for the active circle: a night-out coarse
-// beacon or a family breach disclosure. Unlike emit('pickup'|'help'), it is both
-// rate-limited AND movement-gated (see cadence.ts) — an identical geohash cell is
-// never re-sent, so standing still doesn't spam relays; only a slow heartbeat
-// keeps a stationary member reading as "active". Explicit SOS/pick-up bypass all
-// of this and always send.
+// Automatic, movement-driven emission for the active circle — a beacon at the
+// slider's precision. It is both rate-limited AND movement-gated (see cadence.ts)
+// — an identical geohash cell is never re-sent, so standing still doesn't spam
+// relays; only a slow heartbeat keeps a stationary member reading as "active".
 async function autoEmit(): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id || !fix) { refresh(); return }
-  let f = fix
-  // Family: if a cheap (low-power) fix can't tell which side of a safe-zone edge
-  // we're on, take one sharp GPS fix before deciding — so we neither miss a breach
-  // nor cry wolf on one. Only escalates near an edge, so it stays cheap elsewhere.
-  if (c.mode === 'family' && (c.geofences?.length ?? 0) > 0
-      && classifyContainment({ lat: f.lat, lon: f.lon }, f.accuracy, c.geofences ?? []) === 'uncertain') {
-    const sharp = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 0, timeoutMs: 4000 })
-    if (sharp) { f = sharp; fix = sharp }
-  }
+  const f = fix
+  // Mode is pinned to the share-live path regardless of the circle's stored mode
+  // (legacy 'family' circles behave the same) — the slider drives the precision,
+  // and no-report zones still cap or withhold inside a private place.
   const plan = decideEmission({
-    mode: c.mode,
+    mode: 'nightout',
     position: { lat: f.lat, lon: f.lon },
     trigger: 'none',
-    geofences: c.mode === 'family' ? c.geofences ?? [] : undefined,
-    offGrid: isDark(),
+    offGrid: false,
     noReportZones: persisted.noReportZones,
     accuracyMetres: f.accuracy,
-  })
-  breachActive = plan.reason === 'breach'
+  }, { coarse: sharePrecisionOf(c) })
   const type = signalTypeForReason(plan.reason)
-  // Automatic path never carries 'help' (that's an explicit trigger); the guard
-  // also narrows `type` to a LocationSignalType for buildLocationSignal.
+  // The guard narrows `type` to a LocationSignalType for buildLocationSignal.
   if (!type || type === 'help' || plan.action === 'withhold') { refresh(); return }
   const geohash = encode(f.lat, f.lon, plan.precision)
-  const breach = plan.reason === 'breach'
   const prev = beaconCadence.get(c.id) ?? { lastGeohash: null, lastSentAt: 0 }
   if (!shouldEmitBeacon(geohash, prev, nowSec(), {
-    minIntervalSeconds: breach ? BREACH_MIN_INTERVAL : COARSE_MIN_INTERVAL,
-    heartbeatSeconds: breach ? BREACH_HEARTBEAT : COARSE_HEARTBEAT,
+    minIntervalSeconds: COARSE_MIN_INTERVAL,
+    heartbeatSeconds: COARSE_HEARTBEAT,
   })) { refresh(); return }
   try {
     const template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision })
@@ -3080,204 +1941,8 @@ async function autoEmit(): Promise<void> {
     // transient failure is retried on the next fix rather than silently swallowed.
     saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
     beaconCadence.set(c.id, { lastGeohash: geohash, lastSentAt: nowSec() })
-    if (breach) void sendTrail(c, 'breach') // where I'd been before leaving the safe place
   } catch { /* no relay accepted — leave cadence untouched so the next fix retries */ }
   refresh()
-}
-
-async function emit(trigger: 'pickup' | 'help', circleOverride?: store.Circle | null): Promise<void> {
-  const c = circleOverride ?? activeCircle()
-  const id = persisted.identity
-  if (!c || !id) return
-  // Freshest possible location for an explicit trigger: a one-shot GPS fix on a
-  // short deadline (~2.5 s), falling back to the last watched fix so an alert is
-  // never delayed. Decouples emergency accuracy from the ambient watch (which may be
-  // suspended on a break, or low-power for a night-out circle). (Phase H.)
-  const fresh = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 5000, timeoutMs: 2500 })
-  if (fresh) fix = fresh
-  const use = fresh ?? fix
-  const position = use ? { lat: use.lat, lon: use.lon } : null
-  const plan = decideEmission({
-    mode: c.mode,
-    position,
-    trigger,
-    geofences: c.mode === 'family' ? c.geofences ?? [] : undefined,
-    offGrid: isDark(),
-    noReportZones: persisted.noReportZones,
-    accuracyMetres: use?.accuracy,
-  })
-  const type = signalTypeForReason(plan.reason)
-  if (!type) {
-    if (trigger === 'pickup') toast('Need your location first — start sharing.')
-    return
-  }
-  try {
-    let template
-    if (type === 'help') {
-      // A no-report zone can cap even an SOS — send help without coordinates, or coarse.
-      const location = position && plan.action !== 'withhold'
-        ? { geohash: encode(position.lat, position.lon, plan.precision), precision: plan.precision, locationSource: 'beacon' as const }
-        : null
-      template = await buildHelpSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, location })
-    } else {
-      if (plan.action === 'withhold' || !position) {
-        if (trigger === 'pickup') toast('Need your location first — start sharing.')
-        return
-      }
-      const geohash = encode(position.lat, position.lon, plan.precision)
-      template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision })
-      saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
-    }
-    await publishSignal(template, c)
-    // "Help sent" only AFTER a confirmed publish — the orb must never claim an
-    // alert went out when it didn't (the most dangerous lie the UI could tell).
-    if (type === 'help') {
-      alertActive = true; alertFailed = false; alertCircleId = c.id
-      void sendTrail(c, 'help') // where I'd been — for a guardian if I keep moving
-    }
-    toast(trigger === 'help' ? 'Help sent to your circle' : 'Pick-up request sent')
-  } catch {
-    // A failed SOS gets a PERSISTENT retry state on the orb, not a vanishing toast.
-    // Remember which circle it was for, so a retry after switching still targets it.
-    if (type === 'help') { alertFailed = true; alertCircleId = c.id }
-    else toast("Couldn't send — check your connection.")
-  }
-  refresh()
-}
-
-// ── Spoken pick-up verification ───────────────────────────────────────────────
-// Current context for the active circle: the shared seed, the full roster (so every
-// member's duress word is checked — never a subset), me, and the time-based counter
-// both devices derive from (canary getCounter) — so the two phones agree with no
-// round-trip and nothing is ever published for the check itself.
-function spokenCtx(): { seedHex: string; members: string[]; me: string; counter: number } | null {
-  const c = activeCircle()
-  const id = persisted.identity
-  if (!c || !id) return null
-  return { seedHex: c.seedHex, members: c.members ?? [], me: id.pk, counter: spokenCounter(nowSec()) }
-}
-
-async function runSpokenCheck(): Promise<void> {
-  const ctx = spokenCtx()
-  if (!ctx) return
-  const input = (document.getElementById('spoken-input') as HTMLInputElement | null)?.value ?? ''
-  const res = checkSpokenWord(input, ctx.seedHex, ctx.members, ctx.counter)
-  // verified / stale / duress → an identical ✓. The duress case MUST be visually
-  // indistinguishable so a coercer watching this screen sees an ordinary success;
-  // only a true 'failed' shows the ✗.
-  pickupOutcome = res.status === 'failed' ? 'fail' : 'pass'
-  render()
-  // Then, silently, raise the circle alarm for a coerced collector — after the
-  // render so nothing about the alarm can surface on this device.
-  if (res.status === 'duress' && res.duressMembers.length) await raiseDuressAlarm(res.duressMembers)
-}
-
-// ── Covert duress on coercion-point actions (FLOCK.md §6.1) ──────────────────
-// "Stop sharing", "turn off the check-in" and "take a break" are the three actions
-// a coercer plausibly forces. A silent long-press performs the IDENTICAL visible
-// action — nothing on this screen differs from a normal tap — and additionally
-// raises the circle help alarm about ME, which only the OTHER members ever see.
-const COVERT_HOLD_MS = 1200
-
-// Keyed by action name, not node — a background re-render mid-hold swaps the
-// button element, and the covert intent must survive it.
-const covertHold: Record<string, number> = {}
-function beginHold(action: string): void { covertHold[action] = Date.now() }
-
-/** True when the click that just fired came from a deliberate long hold. The
- *  10 s ceiling discards stale pointerdowns (e.g. a drag-away that never
- *  clicked), so a later keyboard activation can't misread as covert. */
-function wasCovertHold(action: string): boolean {
-  const t = covertHold[action]
-  delete covertHold[action]
-  return !!t && Date.now() - t >= COVERT_HOLD_MS && Date.now() - t < 10_000
-}
-
-/** Coerced stop/disarm/off-grid: the visible action has already happened,
- *  identically to a normal tap. Raise the silent circle alarm about ME —
- *  `covertHelpUntil` keeps my own relay echo from ever surfacing here. */
-async function raiseCovertSelfAlarm(): Promise<void> {
-  const id = persisted.identity
-  if (!id) return
-  covertHelpUntil = nowSec() + 120
-  await raiseDuressAlarm([id.pk])
-}
-
-// Silently raise the circle's help alarm for a coerced collector spotted during a
-// pick-up check. No toast, no local alert state — a coercer may be watching THIS
-// phone; only the other members' devices light up (see the onIncoming help guard).
-// Location follows the same policy as an SOS, so a no-report refuge is never pinned.
-async function raiseDuressAlarm(members: string[]): Promise<void> {
-  const c = activeCircle()
-  const id = persisted.identity
-  if (!c || !id) return
-  const use = (await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 5000, timeoutMs: 2500 })) ?? fix
-  const position = use ? { lat: use.lat, lon: use.lon } : null
-  const plan = decideEmission({
-    mode: c.mode,
-    position,
-    trigger: 'help',
-    geofences: c.mode === 'family' ? c.geofences ?? [] : undefined,
-    offGrid: isDark(),
-    noReportZones: persisted.noReportZones,
-    accuracyMetres: use?.accuracy,
-  })
-  const location = position && plan.action !== 'withhold'
-    ? { geohash: encode(position.lat, position.lon, plan.precision), precision: plan.precision, locationSource: 'beacon' as const }
-    : null
-  for (const m of members) {
-    try {
-      const template = await buildHelpSignal({ groupId: c.id, seedHex: c.seedHex, member: m, location })
-      await publishSignal(template, c)
-    } catch { /* stay silent even on failure — no tell on this device */ }
-  }
-}
-
-// "I'm safe now" — stand down my help alert for the whole circle. A covert
-// long-press sends a COERCED all-clear instead: this screen behaves identically
-// (a watching coercer sees a normal stand-down, same toast, same calm orb) but
-// receivers ignore it, so the circle stays alarmed (FLOCK §6.1).
-async function standDown(coerced: boolean): Promise<void> {
-  const id = persisted.identity
-  const c = persisted.circles.find((x) => x.id === alertCircleId) ?? activeCircle()
-  if (!id || !c) return
-  try {
-    const tmpl = await buildAllClearSignal({ groupId: c.id, seedHex: c.seedHex, member: id.pk, ...(coerced ? { coerced: true } : {}) })
-    await publishSignal(tmpl, c)
-    alertActive = false
-    alertFailed = false
-    alertCircleId = null
-    cstate(c.id).alerts.delete(id.pk)
-    coarsenBeacon(c.id, id.pk) // emergency over — my pin reverts from precise to coarse
-    toast("Stand-down sent — your circle knows you're OK")
-    render()
-  } catch { toast("Couldn't send — check your connection and try again") }
-}
-
-// The orb said "[Name] needs help — tap to see where": focus that circle, on the
-// map if we already hold a location for them, otherwise on the roster. Not
-// switchCircle(), which would bounce the tab back to home.
-function goToAlert(): void {
-  const inc = incomingAlert()
-  if (!inc) return
-  persisted.activeCircleId = inc.circleId
-  store.save(persisted)
-  syncWatch()
-  tab = cstate(inc.circleId).beacons.has(inc.who) ? 'map' : 'circle'
-  render()
-}
-
-// Silent long-press to reveal the duress word on the "prove it's me" tile. No fill
-// or animation (that would be a tell) — hold ~0.6 s and the word swaps in place.
-function wireDuressReveal(node: HTMLElement): void {
-  const HOLD = 600
-  let timer = 0
-  const begin = (e: Event): void => { e.preventDefault(); timer = window.setTimeout(() => { showDuressWord = !showDuressWord; render() }, HOLD) }
-  const cancel = (): void => { if (timer) { clearTimeout(timer); timer = 0 } }
-  node.addEventListener('pointerdown', begin)
-  node.addEventListener('pointerup', cancel)
-  node.addEventListener('pointerleave', cancel)
-  node.addEventListener('pointercancel', cancel)
 }
 
 async function copyInvite(): Promise<void> {
@@ -3350,10 +2015,6 @@ function leave(): void {
   const c = activeCircle()
   if (!c) return
   removeCircle(c.id)
-  breachActive = false
-  alertActive = false
-  alertFailed = false
-  alertCircleId = null
   disbandConfirm = false
   resetConfirm = false
   removeConfirmPk = null
@@ -3375,10 +2036,6 @@ async function disbandCircle(): Promise<void> {
   disbandConfirm = false
   resetConfirm = false
   removeConfirmPk = null
-  breachActive = false
-  alertActive = false
-  alertFailed = false
-  alertCircleId = null
   tab = 'home'
   toast(`Disbanded ${name}`)
   render()
@@ -3572,14 +2229,15 @@ async function reconfirmLock(): Promise<void> {
   render()
 }
 
-/** The covert hide gesture — hold the topbar wordmark. Fires mid-hold at the
- *  covert threshold (like the duress-word reveal); no visible affordance. */
+/** The covert hide gesture — hold the topbar wordmark. Fires mid-hold; no
+ *  visible affordance (an animation would be a tell). */
+const HIDE_HOLD_MS = 1200
 function wireHideHold(node: HTMLElement): void {
   let timer = 0
   const begin = (e: Event): void => {
     if (!persisted.decoy) return
     e.preventDefault()
-    timer = window.setTimeout(() => { void hideNow() }, COVERT_HOLD_MS)
+    timer = window.setTimeout(() => { void hideNow() }, HIDE_HOLD_MS)
   }
   const cancel = (): void => { if (timer) { clearTimeout(timer); timer = 0 } }
   node.addEventListener('pointerdown', begin)
@@ -3601,28 +2259,18 @@ function resetDevice(): void {
   stopInviteSub?.(); stopInviteSub = null
   inviteSubKey = ''
   if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = 0 }
-  if (rzvTicker) { clearInterval(rzvTicker); rzvTicker = 0 }
   sharing = false
-  alertActive = false
-  alertFailed = false
-  alertCircleId = null
-  breachActive = false
-  checkinAlert = false
-  checkinAlertSub = ''
-  escNotified.clear()
-  selfNudged.clear()
   awaitingInvite = false
-  armingCheckin = false
   adding = false
-  addMode = false
   disbandConfirm = false
   resetConfirm = false
   removeConfirmPk = null
+  lostConfirmPk = null
+  comeToMeArmed = false
   mapView?.destroy()
   mapView = null
   fix = null
   circleStates.clear()
-  meetingDismissed.clear()
   beaconCadence.clear()
   persisted = store.load()
   onboardStep = 'intro'
@@ -3663,68 +2311,13 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
   const c = persisted.circles.find((x) => x.id === circleId)
   const me = persisted.identity
   if (!c) return
-  const st = cstate(c.id)
   const t = e.tags.find((x) => x[0] === 't')?.[1]
   try {
-    if (t === 'help') {
-      const a = await decryptDuressAlert(deriveDuressKey(c.seedHex), e.content)
-      const who = a.member || e.pubkey
-      // Spoken-verify silent duress: an alert whose SUBJECT differs from its SENDER is
-      // only ever produced by a pick-up check (a normal SOS always names its own
-      // sender). If I'm either party — the flagged collector, or the child who
-      // detected it — it must NEVER surface on THIS screen; a coercer may be watching.
-      // Other members surface and act on it as usual.
-      if (me && who !== e.pubkey && (who === me.pk || e.pubkey === me.pk)) return
-      // A covert SELF-alarm (coerced stop / disarm / off-grid) names its own sender.
-      // Its echo must never surface on the device that raised it — a coercer may be
-      // holding it. Every other device alerts as usual. An overt SOS (no covert
-      // window) keeps showing on its own sender's screen, as it always did.
-      if (me && who === me.pk && e.pubkey === me.pk && nowSec() < covertHelpUntil) return
-      st.alerts.set(who, e.created_at)
-      // Receiver state derives from st.alerts (see incomingAlert) — alertActive is
-      // the SENDER's "my alert went out" flag and must never be set on receive.
-      if (!me || e.pubkey !== me.pk) toast(`🚨 Help raised in ${c.name}`)
-      if (a.geohash) saveBeacon(c.id, { member: who, geohash: a.geohash, precision: a.precision, timestamp: a.timestamp || e.created_at })
-    } else if (t === 'beacon' || t === 'breach' || t === 'pickup') {
+    if (t === 'beacon' || t === 'breach' || t === 'pickup') {
+      // Legacy 'breach'/'pickup' types decrypt with the same beacon key — accept
+      // them as plain location beacons so an older app version still shows up.
       const p = await decryptBeacon(deriveBeaconKey(c.seedHex), e.content)
       saveBeacon(c.id, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
-      if (t === 'pickup' && (!me || e.pubkey !== me.pk)) toast(`Pick-up request in ${c.name}`)
-    } else if (t === ALLCLEAR_SIGNAL_TYPE) {
-      const ac = await decryptAllClear(c.seedHex, e.content)
-      // Only the alert's OWNER can stand it down — a member must not be able to
-      // clear someone else's alarm (e.g. a flagged collector clearing a duress flag).
-      if (ac.member !== e.pubkey) return
-      // A coerced stand-down (flag inside the encryption) is ignored: the sender's
-      // screen already shows a normal stand-down, but the circle stays alarmed.
-      if (ac.coerced) return
-      st.alerts.delete(ac.member)
-      st.trails.delete(ac.member) // the emergency is over — stop showing where they'd been
-      coarsenBeacon(c.id, ac.member) // and their pin reverts from SOS-precise to coarse
-      if (me && ac.member === me.pk) { alertActive = false; alertFailed = false }
-      else toast(`${nameFor(ac.member)} is safe — alert stood down`)
-    } else if (t === CHECKIN_SIGNAL_TYPE) {
-      const ci = await decryptCheckIn(c.seedHex, e.content)
-      st.checkins.set(ci.member, ci)
-      st.acks.delete(ci.member) // their fresh check-in resolves the episode the ack was for
-      evaluateCheckinAlarm()
-    } else if (t === TRAIL_SIGNAL_TYPE) {
-      const tr = await decryptTrail(c.seedHex, e.content)
-      // Only your own trail — nobody can plant a fake history for someone else.
-      if (tr.member !== e.pubkey) return
-      const prev = st.trails.get(tr.member)
-      if (prev && prev.timestamp > tr.timestamp) return // keep the newer disclosure
-      st.trails.set(tr.member, tr)
-      updateMapData()
-    } else if (t === ACK_SIGNAL_TYPE) {
-      const ack = await decryptAck(c.seedHex, e.content)
-      // Only the responder themselves can claim they're on it (mirrors all-clear).
-      if (ack.member !== e.pubkey) return
-      // An ack from a previous episode (already resolved by that check-in) is dead.
-      if (ack.timestamp <= (st.checkins.get(ack.target)?.timestamp ?? 0)) return
-      const prev = st.acks.get(ack.target)
-      if (!prev || ack.timestamp < prev.timestamp) st.acks.set(ack.target, ack) // first responder wins
-      if (!me || ack.member !== me.pk) toast(`${nameFor(ack.member)} is checking on ${nameFor(ack.target)}`)
-      evaluateCheckinAlarm()
     } else if (t === 'buzz') {
       const bz = await decryptBuzz(c.seedHex, e.content)
       if (!me || bz.from !== me.pk) {
@@ -3735,52 +2328,30 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
         notifyIfHidden([`${nameFor(bz.from)} buzzed${mine ? ' you' : ''}`, bz.reason, c.name].filter(Boolean).join(' · '))
         try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
       }
-    } else if (t === RENDEZVOUS_SIGNAL_TYPE) {
-      st.rendezvous = await decryptRendezvous(c.seedHex, e.content)
-      st.rzvStatuses.clear()
-      st.meeting = null; st.meetingShares.clear(); st.meetingSuggestion = null // a set rendezvous supersedes any in-flight search
-    } else if (t === RENDEZVOUS_STATUS_TYPE) {
-      const status = await decryptRendezvousStatus(c.seedHex, e.content)
-      st.rzvStatuses.set(status.member, status)
-      if (status.status === 'at-risk' && st.rendezvous?.setBy === me?.pk && status.member !== me?.pk) {
-        toast(`⚠ ${nameFor(status.member)} may miss the meeting point`)
-      }
-    } else if (t === MEETING_REQUEST_TYPE) {
-      const request = await decryptMeetingRequest(c.seedHex, e.content)
-      // A brand-new proposal resets the contributions; an echo of the current one keeps them.
-      if (st.meeting?.id !== request.id) {
-        st.meeting = request
-        st.meetingShares.clear()
-        st.meetingSuggestion = null
-        if (!me || request.setBy !== me.pk) toast(`${nameFor(request.setBy)} wants to find a place to meet`)
-      }
-    } else if (t === MEETING_SHARE_TYPE) {
-      const share = await decryptMeetingShare(c.seedHex, e.content)
-      // Prefer a finer disclosure already held (an exact share via my personal inbox
-      // must not be clobbered by this coarser group echo — see mergeMeetingShare).
-      if (st.meeting && share.requestId === st.meeting.id && mergeMeetingShare(st, share)) {
-        await refreshMeetingSuggestion(c.id) // proposer-only inside; recomputes the fair point
-      }
-    } else if (t === OFFGRID_SIGNAL_TYPE) {
-      const o = await decryptOffGrid(c.seedHex, e.content)
-      const prev = st.offgrid.get(o.from)
-      const wasDark = !!prev && isOffGrid(prev, nowSec())
-      st.offgrid.set(o.from, o)
-      const nowDark = isOffGrid(o, nowSec())
-      if (!me || o.from !== me.pk) {
-        if (nowDark && !wasDark) toast(`${nameFor(o.from)} is taking a break${o.reason ? ` · ${esc(o.reason)}` : ''}`)
-        else if (!nowDark && wasDark) toast(`${nameFor(o.from)} is back`)
-      }
-      evaluateCheckinAlarm() // a planned break clears any false missed-check-in alarm
-    } else if (t === FENCES_SIGNAL_TYPE) {
-      const fs = await decryptFences(c.seedHex, e.content)
-      // Latest-wins against the LIVE circle, not the pre-await snapshot — an edit
-      // applied while we were decrypting must not be clobbered by this older set.
-      const live = persisted.circles.find((x) => x.id === c.id)
-      if (live && isNewerFenceSet(fs, live)) {
-        patchCircleById(c.id, { geofences: fs.fences, fencesUpdatedAt: fs.updatedAt, fencesBy: fs.by })
-        if (c.id === persisted.activeCircleId) mapView?.setGeofences(fs.fences)
-        if (!me || fs.by !== me.pk) toast(`Safe places updated in ${c.name}`)
+    } else if (t === LOST_SIGNAL_TYPE) {
+      const rep = await decryptLost(c.seedHex, e.content)
+      const st = cstate(c.id)
+      const prev = st.lost.get(rep.member)
+      // Latest wins, and a tie goes to the arrival — one-second timestamps make
+      // "mark then immediately clear" land in the same second, and the clear
+      // must not be dropped as a stale echo.
+      if (prev && prev.timestamp > rep.timestamp) return
+      st.lost.set(rep.member, rep)
+      const mine = !!me && rep.member === me.pk
+      const byMe = !!me && rep.by === me.pk
+      if (rep.lost) {
+        if (mine) {
+          // THIS is the lost phone: be loud for whoever is holding it, and show
+          // the finder card on Home (see lostCard).
+          notifyIfHidden(`This phone was reported lost by ${nameFor(rep.by)} — open flock`)
+          try { navigator.vibrate?.([400, 150, 400, 150, 400]) } catch { /* no haptics */ }
+          toast(`${nameFor(rep.by)} reported this phone lost`)
+        } else if (!byMe) {
+          toast(`📵 ${nameFor(rep.by)} reported ${nameFor(rep.member)}'s phone lost`)
+          notifyIfHidden(`${nameFor(rep.member)}'s phone was reported lost · ${c.name}`)
+        }
+      } else if (!byMe) {
+        toast(`✓ ${nameFor(rep.member)}'s phone is marked found`)
       }
     } else if (t === DISBAND_SIGNAL_TYPE) {
       const d = await decryptDisband(c.seedHex, e.content)

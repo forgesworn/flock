@@ -44,6 +44,9 @@ export interface Circle {
   /** Device-local: when this device last re-wrapped the current seed for
    *  offline members (rotation.ts refreshDue). Never synced. */
   seedRefreshedAt?: number
+  /** Geohash precision (4–9) my own beacons are shared at in this circle —
+   *  the "location detail" slider. Undefined = 6 (~neighbourhood). */
+  sharePrecision?: number
 }
 
 /** Right after we join, relay replay delivers the existing members' history —

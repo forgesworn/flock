@@ -49,8 +49,8 @@ export function startBackgroundWatch(
 ): Promise<string> {
   return BackgroundGeolocation.addWatcher(
     {
-      backgroundTitle: 'flock is keeping watch',
-      backgroundMessage: 'Location is only shared if you leave a safe place or raise help.',
+      backgroundTitle: 'flock is sharing with your circle',
+      backgroundMessage: 'Sharing your location with your circle while this is on.',
       requestPermissions: true,
       stale: false,
       distanceFilter: 25, // metres — battery-friendly; only fires on real movement

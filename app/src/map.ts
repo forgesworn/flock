@@ -10,7 +10,10 @@
 
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import type { Geofence, CircleGeofence, NoReportZone } from '@forgesworn/flock'
+import type { Geofence, NoReportZone } from '@forgesworn/flock'
+
+/** A geohash cell's true footprint — the honest shape of a coarse disclosure. */
+export interface CellBounds { minLat: number; maxLat: number; minLon: number; maxLon: number }
 
 export interface MapPoint {
   member: string
@@ -20,15 +23,21 @@ export interface MapPoint {
   status: 'active' | 'stale' | 'alert'
   /**
    * Disclosure uncertainty radius in metres (from the beacon's geohash
-   * precision). A coarse night-out beacon is ~600 m ("somewhere around here");
-   * a full-precision breach/pick-up is a few metres and collapses to the pin.
-   * Drives the translucent "rough area" halo. Omit/0 → no halo.
+   * precision). Drives whether the "rough area" is worth drawing at all —
+   * an exact share is a few metres and collapses to the pin. Omit/0 → no area.
    */
   radiusMetres?: number
+  /**
+   * The disclosed geohash CELL. When present, the rough area is drawn as this
+   * true rectangle — the receiver is guaranteed the member is inside the
+   * square, which a circular halo could only approximate (someone near a cell
+   * corner sits outside the inscribed circle).
+   */
+  cell?: CellBounds
 }
 
-// Below this the halo is smaller than the pin itself, so it reads as a point —
-// don't draw one (breach / pick-up / help are full-precision "we know exactly").
+// Below this the area is smaller than the pin itself, so it reads as a point —
+// don't draw one (an exact share is full-precision "we know exactly").
 const HALO_MIN_METRES = 30
 
 // Same-origin by default (proxied → OSM); overridable at build time so
@@ -80,6 +89,15 @@ function fenceFeature(f: Geofence): PolyFeature {
   return { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: coords } }
 }
 
+/** The closed rectangle of a geohash cell (lon/lat rings, GeoJSON order). */
+function cellRect(c: CellBounds): number[][] {
+  return [
+    [c.minLon, c.minLat], [c.maxLon, c.minLat],
+    [c.maxLon, c.maxLat], [c.minLon, c.maxLat],
+    [c.minLon, c.minLat],
+  ]
+}
+
 const fc = (features: PolyFeature[]): FeatureCollection => ({ type: 'FeatureCollection', features })
 
 export class MapView {
@@ -92,7 +110,7 @@ export class MapView {
   private ready = false
   private pendingFences: Geofence[] | null = null
   private pendingNoReport: NoReportZone[] | null = null
-  private pendingPreview: CircleGeofence | null = null
+  private pendingPreview: Geofence | null = null
   private pendingMembers: MapPoint[] | null = null
   private pendingContrib: MapPoint[] | null = null
   private pendingTrail: { lat: number; lon: number }[] | null = null
@@ -227,7 +245,7 @@ export class MapView {
     ;(this.map.getSource('noreport') as maplibregl.GeoJSONSource).setData(fc(zones.map((z) => fenceFeature(z.area))))
   }
 
-  setPreview(f: CircleGeofence | null): void {
+  setPreview(f: Geofence | null): void {
     if (!this.ready) { this.pendingPreview = f; return }
     ;(this.map.getSource('preview') as maplibregl.GeoJSONSource).setData(fc(f ? [fenceFeature(f)] : []))
   }
@@ -244,21 +262,23 @@ export class MapView {
       ;(el.querySelector('.tag') as HTMLElement).textContent = p.label
       this.markers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(this.map))
     }
-    // "Rough area" halos — one per pin whose disclosed precision is coarse enough
-    // to be worth showing as an area rather than a point.
+    // "Rough area" squares — one per pin whose disclosed precision is coarse
+    // enough to be worth showing as an area rather than a point. The TRUE
+    // geohash cell rectangle when we have it (the member is guaranteed inside
+    // it); the circular approximation only as a fallback.
     if (!this.ready) { this.pendingMembers = points; return }
-    const halos = points
+    const areas = points
       .filter((p) => (p.radiusMetres ?? 0) >= HALO_MIN_METRES)
       .map((p): PolyFeature => ({
         type: 'Feature',
         properties: { status: p.status },
-        geometry: { type: 'Polygon', coordinates: [ring(p.lat, p.lon, p.radiusMetres as number)] },
+        geometry: { type: 'Polygon', coordinates: [p.cell ? cellRect(p.cell) : ring(p.lat, p.lon, p.radiusMetres as number)] },
       }))
-    this.memberAreaFeatures = halos.length
-    ;(this.map.getSource('members-area') as maplibregl.GeoJSONSource).setData(fc(halos))
+    this.memberAreaFeatures = areas.length
+    ;(this.map.getSource('members-area') as maplibregl.GeoJSONSource).setData(fc(areas))
   }
 
-  /** How many "rough area" halos are currently drawn. An inspection aid (used by the e2e). */
+  /** How many "rough area" squares are currently drawn. An inspection aid (used by the e2e). */
   memberAreaCount(): number { return this.memberAreaFeatures }
 
   /**
