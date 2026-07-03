@@ -47,6 +47,11 @@ export interface Circle {
   /** Geohash precision (4–9) my own beacons are shared at in this circle —
    *  the "location detail" slider. Undefined = 6 (~neighbourhood). */
   sharePrecision?: number
+  /** "Find each other" (festival mode): while set and in the future, MY own beacons
+   *  step up to building-level detail so the circle can walk to me in a crowd. A
+   *  deliberate, temporary, device-local choice — auto-reverts to the slider at this
+   *  unix-sec deadline. Never synced; each member opts in for themselves. */
+  festivalUntil?: number
 }
 
 /** Right after we join, relay replay delivers the existing members' history —

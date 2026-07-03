@@ -21,7 +21,9 @@ describe('signer-based NIP-59 gift-wrapped invites', () => {
     const pTag = wrap.tags.find((t) => t[0] === 'p')?.[1]
     expect(pTag).toBe(personalInboxTag(bob.pubkey))
     expect(pTag).not.toBe(bob.pubkey)
-    expect(await readInvite(bob, wrap)).toEqual(payload)
+    // The payload round-trips, and the inviter (Alice) is surfaced as `from` so
+    // Bob can seed his roster with her the instant he joins.
+    expect(await readInvite(bob, wrap)).toEqual({ ...payload, from: alice.pubkey })
   })
 
   it('a non-recipient CANNOT unwrap the seed', async () => {
@@ -39,8 +41,8 @@ describe('signer-based NIP-59 gift-wrapped invites', () => {
     const reseed: InvitePayload = { t: 'reseed', id: 'circle-1', s: 'ff'.repeat(32), n: 'X', m: 'nightout' }
     const wraps = await buildReseedWraps(alice, [bob.pubkey, carol.pubkey], reseed)
     expect(wraps).toHaveLength(2)
-    expect(await readInvite(bob, wraps[0])).toEqual(reseed)
-    expect(await readInvite(carol, wraps[1])).toEqual(reseed)
+    expect(await readInvite(bob, wraps[0])).toEqual({ ...reseed, from: alice.pubkey })
+    expect(await readInvite(carol, wraps[1])).toEqual({ ...reseed, from: alice.pubkey })
     expect(await readInvite(carol, wraps[0])).toBeNull()
   })
 })

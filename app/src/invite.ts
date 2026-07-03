@@ -99,8 +99,11 @@ export async function readDmWrap(signer: FlockSigner, wrap: { pubkey: string; co
   }
 }
 
-/** Unwrap a gift wrap addressed to us (via the signer); returns the invite payload or null. */
-export async function readInvite(signer: FlockSigner, wrap: { pubkey: string; content: string }): Promise<InvitePayload | null> {
+/** Unwrap a gift wrap addressed to us (via the signer); returns the invite payload
+ *  plus `from` (the inviter/reseeder — the seal's real pubkey) or null. Surfacing the
+ *  sender lets a fresh joiner seed their roster with the inviter immediately, so a
+ *  message from them the moment they join isn't dropped as an unknown sender. */
+export async function readInvite(signer: FlockSigner, wrap: { pubkey: string; content: string }): Promise<(InvitePayload & { from: string }) | null> {
   const rumor = await giftUnwrap((pk, ct) => signer.nip44Decrypt(pk, ct), wrap)
   if (!rumor) return null
   try {
@@ -112,6 +115,7 @@ export async function readInvite(signer: FlockSigner, wrap: { pubkey: string; co
         s: o.s,
         n: typeof o.n === 'string' ? o.n : 'Circle',
         m: o.m === 'nightout' ? 'nightout' : 'family',
+        from: rumor.pubkey,
         ...(typeof o.x === 'number' ? { x: o.x } : {}),
       }
     }

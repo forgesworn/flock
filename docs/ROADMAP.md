@@ -76,6 +76,29 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   is indistinguishable from a stalking tool and breaks the invariant that
   disclosure only ever originates from the device's own settings.
 
+## Messaging & map-led Home (2026-07-03)
+
+- [x] **Map-led Home.** The Home tab now opens onto a **live members map** (the old
+  "Private" status orb is gone; its Private/Sharing copy survives as a glass chip
+  over the map, plus a "N people on the map" count). Controls (share toggle,
+  precision, messaging, quick actions, invite) live in a re-renderable `#home-panel`
+  so a presence tick updates them without tearing the map. Tradeoff logged: **maplibre
+  now loads on the default tab** — a footprint bump vs the minimal-footprint north
+  star, accepted because the map *is* the ask; easy to gate later if battery wins.
+- [x] **Free-text messaging.** A compose sheet (preset chips + free text) sends either
+  a **group note** (the existing shared-inbox buzz) or a **private 1:1 DM**. DMs are
+  gift-wrapped to the recipient's **personal inbox** (`buildDmWrap`/`readDmWrap`, the
+  invite rails), encrypted so **only they** can read it — reachable by **tapping their
+  map pin** or the ✉ on their Circle row. Incoming DMs are **gated on circle
+  membership** (a removed member post-reseed, or an npub-scraping stranger, is
+  dropped). Cold-start closed: a remote invite's seal carries the inviter, so a fresh
+  joiner **seeds the inviter into its roster on receipt** and accepts their first
+  message immediately. e2e `message.spec.ts` (group note, private 1:1 with a locked
+  "just you" banner, pin-tap compose, cold-start first-DM) + DM-primitive unit tests
+  incl. the privacy invariant (a third party cannot decrypt). **Open question for
+  Darren:** the members-gate is deliberately strict — confirm that's the wanted
+  posture vs. accepting any DM from someone who knows a circle id.
+
 ## Cross-cutting (apply to everything)
 
 - **Mobile-first** — phone-shaped, large touch targets, one-handed, installable PWA, offline-tolerant.
@@ -166,18 +189,23 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   on reseed/leave/disband — so a reload no longer blanks the map while it waits up to 5 min for a peer's next
   beacon. Cache is on-device only (no new metadata leaves the phone). 6 new unit tests (`store.presence.test.ts`);
   the night-out map e2e now nicknames A, reloads B, and asserts A's rough area **and** petname persist. **Follow-ups:** none.
-- [ ] **Festival mode — find each other in a crowd (2026-07-03).** The use case:
+- [x] **Festival mode — find each other in a crowd (2026-07-03).** The use case:
   a group at a festival wants to see *where each other is* well enough to walk
   over. The night-out coarse beacon (geohash-6, ±~600 m) is deliberately too
   coarse for that — it says "still on site", not "by the left of the main stage".
-  Sketch: a per-circle, time-boxed **"finding each other" precision step-up**
-  (geohash-8, ±~19 m — opt-in, visible to the whole circle, auto-reverts with the
-  circle's expiry or a timer) so precision is a *deliberate, mutual, temporary*
-  choice, never a default. Pairs with what's already shipped: separation ("lost")
-  alerts, the fair meeting point, and the offline PMTiles basemap (festival cell
-  networks are congested — pre-download the site; beacons are tiny and ride the
-  relay socket). Policy change is one precision knob through `decideEmission`;
-  the real work is UX + making the step-up unmistakably consensual.
+  **Shipped as "Find each other":** a device-local, time-boxed precision step-up to
+  **geohash-8 (±~19 m)** on a **1 h / 3 h / 6 h** window (capped by the circle's own
+  expiry), opt-in per person on Home. It only ever *raises* detail (a finer slider
+  wins), the **slider base is never rewritten** (shown separately, restored on
+  expiry), and a **no-report place still caps it** — the boost raises the *coarse*
+  input to `decideEmission`, it doesn't bypass the policy. Turning it on **starts
+  sharing** if it was off; a 30 s monitor **auto-reverts** precision *and* the GPS
+  sampling tier the moment the window closes (a battery + metadata win, not just UI).
+  `festivalUntil` is **device-local, never synced** (each member opts in for
+  themselves — no extra wire metadata). e2e `festival.spec.ts`: A boosts → B's
+  rough-area halo collapses to a bare pin → A stops → the halo returns, base slider
+  untouched throughout. Pairs with the shipped separation ("lost") alerts, fair
+  meeting point, and offline PMTiles basemap (pre-download a congested festival site).
 
 ## Phase D — Identity & social
 

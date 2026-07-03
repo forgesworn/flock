@@ -581,6 +581,13 @@ a.btn { text-decoration: none; }
 .map-status .ms-sub { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .map-status .ms-open { font-size: 18px; color: var(--muted); cursor: pointer; flex: none; padding: 2px 4px; line-height: 1; }
 
+/* ── Find each other (festival mode) — the active boost reads as live ───────── */
+.card.festival-on {
+  border-color: var(--warn-dim);
+  background: linear-gradient(180deg, rgba(244, 184, 96, 0.10), transparent 60%), var(--surface);
+}
+.card.festival-on strong { color: var(--warn); }
+
 /* ── Compose sheet (write a message: group or private 1:1) ──────────────────── */
 .compose-sheet {
   position: fixed; inset: 0; z-index: 300;

@@ -271,9 +271,29 @@ const PRECISION_NAMES: Record<number, string> = {
   3: 'Region', 4: 'City', 5: 'Town', 6: 'Neighbourhood', 7: 'Street', 8: 'Building', 9: 'Exact spot',
 }
 
+// "Find each other" (festival mode): a temporary step-up to building-level detail
+// (±~19 m) so a group in a crowd can actually walk to each other. It never exceeds
+// what "Exact spot" would, and always reverts to the slider on its own.
+const FESTIVAL_PRECISION = 8
+const FESTIVAL_HOURS = [1, 3, 6] as const // offered windows; capped by circle expiry
+
+/** Is "find each other" running for this circle right now? */
+function festivalActive(c: store.Circle | null, now = nowSec()): boolean {
+  return !!c?.festivalUntil && c.festivalUntil > now
+}
+
+/** The slider's own value (3–9), ignoring any festival step-up — this is what the
+ *  precision control shows and edits, so a temporary boost never rewrites the base. */
+function baseSharePrecision(c: store.Circle | null): number {
+  const raw = Math.round(c?.sharePrecision ?? PRECISION_DEFAULT)
+  return Math.min(PRECISION_MAX, Math.max(PRECISION_MIN, Number.isFinite(raw) ? raw : PRECISION_DEFAULT))
+}
+
+/** The precision my beacons ACTUALLY carry now: the slider base, raised to
+ *  building-level while "find each other" is on (never lowered). */
 function sharePrecisionOf(c: store.Circle | null): number {
-  const p = Math.round(c?.sharePrecision ?? PRECISION_DEFAULT)
-  return Math.min(PRECISION_MAX, Math.max(PRECISION_MIN, Number.isFinite(p) ? p : PRECISION_DEFAULT))
+  const base = baseSharePrecision(c)
+  return festivalActive(c) ? Math.max(base, FESTIVAL_PRECISION) : base
 }
 
 /** "~600 m" — how closely a given precision places you. */
@@ -608,6 +628,11 @@ function fmtTtl(expiresAt?: number): string {
   return `${Math.round(left / 86_400)}d`
 }
 
+/** Absolute wall-clock (HH:MM) for a unix-sec instant — "reverts at 23:41". */
+function fmtClock(sec: number): string {
+  return new Date(sec * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
 /** Horizontal chip row to switch between circles + add a new one. */
 function circleSwitcher(): string {
   if (persisted.circles.length < 1) return ''
@@ -640,17 +665,47 @@ function homeMapStatusHtml(): string {
 }
 
 /** The precision slider — how closely this circle sees me. Lives on Home next to
- *  the share toggle because it IS the privacy control of the app. */
+ *  the share toggle because it IS the privacy control of the app. The slider shows
+ *  my BASE setting; a live "find each other" boost is called out separately. */
 function precisionCard(c: store.Circle): string {
-  const p = sharePrecisionOf(c)
+  const p = baseSharePrecision(c)
+  const boosted = festivalActive(c)
   return `<div class="card stack" style="margin-top:14px">
     <div class="row" style="justify-content:space-between">
       <strong>Location detail</strong>
       <span class="muted" id="precision-label">${esc(precisionLabel(p))}</span>
     </div>
     <input class="slider" id="share-precision" type="range" min="${PRECISION_MIN}" max="${PRECISION_MAX}" step="1" value="${p}" aria-label="How closely your circle sees you" />
-    <div class="note" id="precision-note">${esc(precisionNote(p))}</div>
+    <div class="note" id="precision-note">${boosted
+      ? `While “Find each other” is on you're shared at <strong>${esc(precisionLabel(FESTIVAL_PRECISION))}</strong>, above this. It reverts here when the timer ends.`
+      : esc(precisionNote(p))}</div>
     ${hint('precision', 'Slide left to share only a rough area — as wide as a whole region — or right for your exact spot. It changes what your circle sees; nobody gets more than this. The Map shows what they see of you.')}
+  </div>`
+}
+
+/** "Find each other" — a deliberate, temporary step-up to building-level detail so
+ *  a group in a crowd can walk to each other. Opt-in per person, capped by the
+ *  circle's own lifetime, auto-reverting; a no-report place still caps it (the boost
+ *  raises the "coarse" input to decideEmission, it doesn't bypass the policy). */
+function festivalCard(c: store.Circle): string {
+  if (festivalActive(c)) {
+    const until = c.festivalUntil as number
+    return `<div class="section-title" style="margin-top:22px">Find each other</div>
+    <div class="card stack festival-on">
+      <div class="row" style="justify-content:space-between">
+        <strong>📍 Finding each other</strong>
+        <span class="muted">${esc(fmtTtl(until))} left</span>
+      </div>
+      <div class="note">Everyone in ${esc(c.name)} sees you to within <strong>~20 m</strong> until <strong>${esc(fmtClock(until))}</strong> — then you drop back to your usual detail on your own.</div>
+      <button class="btn small ghost" data-action="festival-stop">Stop now</button>
+    </div>`
+  }
+  const chip = (h: number): string => `<button class="btn small" data-action="festival-start" data-hours="${h}">${h}h</button>`
+  return `<div class="section-title" style="margin-top:22px">Find each other</div>
+  <div class="card stack">
+    <div class="note">In a crowd — a festival, a market — your usual detail is too coarse to meet up. Turn this on and everyone in the circle sees you to within <strong>~20 m</strong> for a set time, then it reverts on its own. Each of you turns it on for yourself.</div>
+    <div class="chip-row">${FESTIVAL_HOURS.map(chip).join('')}</div>
+    ${hint('festival', 'A deliberate, temporary boost for meeting up in a crowd — building-level, not your exact door. It ends by itself (or when the circle does), and a place you\'ve marked private still stays private.')}
   </div>`
 }
 
@@ -718,6 +773,7 @@ function homePanelInner(c: store.Circle): string {
     </div>
     ${lostCard(c)}
     ${precisionCard(c)}
+    ${festivalCard(c)}
     ${messageCard(c)}
     ${quickActionsCard(c)}
     ${geoIssueCard()}
@@ -1237,7 +1293,7 @@ function commitSharePrecision(value: number): void {
   const c = activeCircle()
   if (!c) return
   const p = Math.min(PRECISION_MAX, Math.max(PRECISION_MIN, Math.round(value)))
-  if (p === sharePrecisionOf(c)) return
+  if (p === baseSharePrecision(c)) return // compare to the base, not a festival boost
   patchActive({ sharePrecision: p })
   // The gate keys on the last-sent cell: drop it so the next beacon isn't held
   // back by the min-interval floor — a changed slider should show up promptly.
@@ -1245,6 +1301,39 @@ function commitSharePrecision(value: number): void {
   syncWatch() // crossing the street/neighbourhood boundary re-tiers GPS vs low-power
   if (sharing) void autoEmit()
   else refresh()
+}
+
+// ── Find each other (festival mode) ──────────────────────────────────────────
+/** Raise MY detail to building-level for this circle for a set window, capped by
+ *  the circle's own lifetime. Starts sharing if it wasn't (the whole point is to be
+ *  found), and re-emits at once so the circle sees the step-up promptly. */
+function startFestival(hours: number): void {
+  const c = activeCircle()
+  if (!c) return
+  const cap = c.expiresAt ?? Number.MAX_SAFE_INTEGER
+  const until = Math.min(nowSec() + Math.round(hours * 3600), cap)
+  if (until <= nowSec()) { toast('This circle is about to end'); return }
+  patchActive({ festivalUntil: until })
+  festivalWasActive = true
+  beaconCadence.delete(c.id) // the step-up should show up now, not on the next cadence tick
+  if (!sharing) { startSharing(); return } // startSharing emits at the new (festival) precision
+  syncWatch() // building-level → GPS sampling tier
+  void autoEmit()
+  toast(`Find each other on — the circle sees you closely until ${fmtClock(until)}`)
+  refresh()
+}
+
+/** End the boost early and drop back to the slider's detail immediately. */
+function stopFestival(): void {
+  const c = activeCircle()
+  if (!c) return
+  patchActive({ festivalUntil: undefined })
+  festivalWasActive = false
+  beaconCadence.delete(c.id)
+  syncWatch()
+  if (sharing) void autoEmit()
+  toast('Find each other off — back to your usual detail')
+  refresh()
 }
 
 // ── Map controller ───────────────────────────────────────────────────────────
@@ -1514,9 +1603,13 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
   }
   if (payload.t === 'invite') {
     if (persisted.circles.some((c) => c.id === payload.id)) return // already a member
+    // Seed the roster with the inviter (payload.from) as well as myself, so a
+    // message from them the moment I join isn't dropped as an unknown sender
+    // (onIncomingDm gates on membership). They invited me — they're expected.
+    const roster = payload.from && payload.from !== signer.pubkey ? [signer.pubkey, payload.from] : [signer.pubkey]
     const joined: store.Circle = {
       id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m,
-      members: [signer.pubkey], joinedAt: nowSec(), reseededAt: nowSec(), ...(payload.x ? { expiresAt: payload.x } : {}),
+      members: roster, joinedAt: nowSec(), reseededAt: nowSec(), ...(payload.x ? { expiresAt: payload.x } : {}),
     }
     upsertCircle(joined, true)
     announceJoin(joined) // the inviter expected me, but the REST of the circle didn't
@@ -1615,11 +1708,25 @@ function isEditing(): boolean {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
 }
 
+// Track the active circle's boost so we can re-tier + re-emit the moment its window
+// closes — otherwise GPS would keep sampling at the festival (high) tier and the
+// last fine beacon would linger on the circle's maps until an unrelated fix.
+let festivalWasActive = false
+function reconcileFestival(): void {
+  const now = festivalActive(activeCircle())
+  if (festivalWasActive && !now) {
+    syncWatch() // building-level → drop back to the slider's low-power tier
+    if (sharing) void autoEmit() // re-emit coarse so the circle stops seeing me finely
+  }
+  festivalWasActive = now
+}
+
 function startMonitor(): void {
   if (monitorTimer) return
   monitorTimer = window.setInterval(() => {
     const expired = sweepExpired()
     if (expired && !adding) { toast('A temporary circle ended'); render(); return }
+    reconcileFestival()
     if (!isEditing()) refresh()
   }, 30_000)
 }
@@ -1821,6 +1928,8 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'geo-retry': geoIssue = null; sharing = false; startSharing(); break
     case 'quick-buzz': void sendBuzz(node.dataset.reason ?? ''); break
+    case 'festival-start': startFestival(Number(node.dataset.hours ?? '3')); break
+    case 'festival-stop': stopFestival(); break
     case 'msg-group': openCompose('group'); break
     case 'msg-member': openCompose(node.dataset.pk ?? ''); break
     case 'compose-preset': composeSend(node.dataset.reason ?? ''); break

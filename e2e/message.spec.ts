@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, settle } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, settle, joinRemoteAwait, sendRemoteInvite } from './fixtures'
 
 // Free-text messaging: a written note to the whole circle (shared inbox, like a
 // buzz) and a private 1:1 (gift-wrapped to one member's personal inbox — only
@@ -63,5 +63,48 @@ test.describe('messaging — group note & private 1:1', () => {
     await expect(banner).toBeVisible()
     await expect(banner).toContainText('meet you round the back')
     await expect(banner).toContainText('just you')
+  })
+
+  test('tapping a member pin on the map opens a private compose sheet for them', async ({ browser }) => {
+    const A = await newPerson(browser)
+    const B = await newPerson(browser)
+    await createCircle(A, { name: 'The Smiths' })
+    const code = await inviteCode(A)
+    await joinByCode(B, code)
+
+    // Only B shares, so A's map holds exactly one pin — B's (A has no "You" pin).
+    await startSharing(B)
+    await settle(A)
+    await gotoTab(A, 'map')
+
+    const pin = A.locator('.map-pin')
+    await expect(pin.first()).toBeVisible()
+    await pin.first().click()
+
+    // The tap opens the compose sheet aimed at B, marked private (the lock title).
+    await expect(A.locator('#compose-sheet')).toBeVisible()
+    await expect(A.locator('#compose-sheet')).toContainText('private')
+  })
+
+  test('cold start — a freshly-invited member accepts the inviter\'s first DM', async ({ browser }) => {
+    // The members-gate drops DMs from unknown senders. A remote invite carries the
+    // inviter's key in its seal, so the joiner seeds their roster with the inviter
+    // on receipt — and A's very first message (before B has shared anything) lands.
+    const A = await newPerson(browser)
+    const B = await newPerson(browser)
+    await createCircle(A, { name: 'The Smiths' })
+    const npub = await joinRemoteAwait(B)
+    await sendRemoteInvite(A, npub) // A now has B; B, on receipt, seeds A into its roster
+    await settle(B)
+
+    // A messages B immediately — B has never emitted a beacon/buzz/join signal.
+    await gotoTab(A, 'circle')
+    await A.locator('.member [data-action="msg-member"]').first().click()
+    await A.fill('#compose-text', 'welcome aboard')
+    await A.click('[data-action="compose-send"]')
+
+    const banner = B.locator('.buzz-banner.private')
+    await expect(banner).toBeVisible()
+    await expect(banner).toContainText('welcome aboard')
   })
 })
