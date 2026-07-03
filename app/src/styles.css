@@ -554,11 +554,53 @@ a.btn { text-decoration: none; }
   animation: buzzdrop 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 .buzz-banner.for-me { background: var(--warn); }
+/* A private 1:1 message reads as secure (green + lock), never a circle-wide bell. */
+.buzz-banner.private { background: var(--safe); }
+.buzz-banner.private .bz-icon { animation: none; }
 .buzz-banner .bz-icon { font-size: 20px; animation: ring 0.6s ease-in-out 3; transform-origin: 50% 12%; }
 .buzz-banner .bz-text { flex: 1; min-width: 0; }
 .buzz-banner .bz-x { opacity: 0.6; font-size: 13px; }
 @keyframes buzzdrop { from { transform: translateX(-50%) translateY(-100%); } to { transform: translateX(-50%) translateY(0); } }
 @keyframes ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-16deg); } 60% { transform: rotate(16deg); } }
+
+/* ── Home map (the members map, replacing the old status orb) ───────────────── */
+.home-map-shell { position: relative; height: 264px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); margin-bottom: 14px; }
+.home-map-shell > .home-map { position: absolute; inset: 0; }
+/* The old orb copy, now a glass chip laid over the bottom of the map. */
+.map-status {
+  position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 5;
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 12px;
+  background: rgba(11, 14, 18, 0.82); backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+}
+.map-status .ms-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+.map-status.state-share .ms-dot { background: var(--calm); box-shadow: 0 0 8px var(--calm); }
+.map-status .ms-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.map-status .ms-text strong { font-size: 14px; }
+.map-status .ms-sub { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.map-status .ms-open { font-size: 18px; color: var(--muted); cursor: pointer; flex: none; padding: 2px 4px; line-height: 1; }
+
+/* ── Compose sheet (write a message: group or private 1:1) ──────────────────── */
+.compose-sheet {
+  position: fixed; inset: 0; z-index: 300;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  animation: fadein 0.15s ease both;
+}
+.compose-card {
+  width: min(480px, 100%);
+  background: var(--surface); border-top: 1px solid var(--line-strong);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 16px 18px calc(16px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: 12px;
+  box-shadow: var(--shadow);
+  animation: sheetup 0.22s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.compose-card textarea { resize: none; }
+.compose-card .bz-x { background: transparent; border: none; color: var(--muted); font-size: 15px; cursor: pointer; flex: none; }
+@keyframes sheetup { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
 
 /* `.row { display:flex }` outranks the UA `[hidden]` rule — make hidden win. */
 [hidden] { display: none !important; }

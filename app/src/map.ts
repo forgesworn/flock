@@ -118,6 +118,7 @@ export class MapView {
   private memberAreaFeatures = 0 // count of rough-area halos currently drawn (inspection/e2e)
   private contribAreaFeatures = 0 // count of contributor halos currently drawn (inspection/e2e)
   private userMoved = false // a real gesture happened — the camera is theirs now
+  private memberClickCb: ((member: string) => void) | null = null
 
   // Lazily resolve the basemap style, best first: (1) the circle's saved offline
   // area (OPFS vector — zero network at view time); (2) the bundled demo vector
@@ -206,6 +207,10 @@ export class MapView {
 
   onMove(cb: () => void): void { this.map.on('move', cb) }
 
+  /** Tap a member's pin → their pubkey. Used to open a private message to them.
+   *  Set once; every marker (rebuilt on each setMembers) reads this at click time. */
+  onMemberClick(cb: (member: string) => void): void { this.memberClickCb = cb }
+
   center(): { lat: number; lon: number } {
     const c = this.map.getCenter()
     return { lat: c.lat, lon: c.lng }
@@ -260,6 +265,11 @@ export class MapView {
       // profile name (untrusted), so it must never be interpolated into markup.
       el.innerHTML = '<span class="tag"></span><span class="dot"></span>'
       ;(el.querySelector('.tag') as HTMLElement).textContent = p.label
+      // A pin is tappable — send this member a private message. stopPropagation so
+      // the tap doesn't also register as a map gesture (which would end auto-fit).
+      const member = p.member
+      el.style.cursor = 'pointer'
+      el.addEventListener('click', (ev) => { ev.stopPropagation(); this.memberClickCb?.(member) })
       this.markers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(this.map))
     }
     // "Rough area" squares — one per pin whose disclosed precision is coarse

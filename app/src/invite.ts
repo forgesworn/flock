@@ -61,6 +61,44 @@ export async function readMeetingExactWrap(signer: FlockSigner, wrap: { pubkey: 
   }
 }
 
+// A private DIRECT MESSAGE to ONE member — free text, encrypted to their real key
+// and filed under their personal-inbox tag, exactly like an invite. It deliberately
+// does NOT ride the shared circle inbox (a "buzz" does): only the named recipient
+// can read it, so "message just this person" is honest on the wire. Same rumour
+// kind as invites; distinguished by the payload `t`. The sender is recovered from
+// the seal (the rumor's real pubkey), never carried in plaintext.
+interface DmPayload { t: 'dm'; c: string; text: string }
+
+/** A decrypted direct message: who sent it, which circle it belongs to, the text. */
+export interface DirectMessage { from: string; circleId: string; text: string }
+
+// A single wrap can't carry a novel, and an oversized message is a memory/notify
+// hazard — bound it. Trimmed on the way out so a fat paste can't smuggle length.
+const MAX_DM_LEN = 500
+
+/** Gift-wrap a private direct message to one recipient. Encrypted to their real key;
+ *  filed under `personalInboxTag` so the npub stays off the wire. Only they can read it. */
+export function buildDmWrap(signer: FlockSigner, recipientPk: string, msg: { circleId: string; text: string }): Promise<SignedEvent> {
+  const payload: DmPayload = { t: 'dm', c: msg.circleId, text: msg.text.trim().slice(0, MAX_DM_LEN) }
+  return giftWrap(signer, recipientPk, { kind: RUMOR_KIND, content: JSON.stringify(payload), tags: [] }, personalInboxTag(recipientPk))
+}
+
+/** Unwrap a personal-inbox wrap as a direct message; null if it isn't one (or isn't
+ *  addressed to us, or is empty). The sender is the seal's real pubkey. */
+export async function readDmWrap(signer: FlockSigner, wrap: { pubkey: string; content: string }): Promise<DirectMessage | null> {
+  const rumor = await giftUnwrap((pk, ct) => signer.nip44Decrypt(pk, ct), wrap)
+  if (!rumor) return null
+  try {
+    const o = JSON.parse(rumor.content) as Record<string, unknown>
+    if (o.t !== 'dm' || typeof o.c !== 'string' || typeof o.text !== 'string') return null
+    const text = o.text.trim().slice(0, MAX_DM_LEN)
+    if (!text) return null
+    return { from: rumor.pubkey, circleId: o.c, text }
+  } catch {
+    return null
+  }
+}
+
 /** Unwrap a gift wrap addressed to us (via the signer); returns the invite payload or null. */
 export async function readInvite(signer: FlockSigner, wrap: { pubkey: string; content: string }): Promise<InvitePayload | null> {
   const rumor = await giftUnwrap((pk, ct) => signer.nip44Decrypt(pk, ct), wrap)

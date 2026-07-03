@@ -18,7 +18,7 @@ import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { isNativeShell, shareOrigin } from './native'
 import { rotationDue, refreshDue } from './rotation'
-import { buildInviteWrap, buildReseedWraps, readInvite } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite, buildDmWrap, readDmWrap, type DirectMessage } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
 import { generateStorageSecret, setupPin, unlockWithPin, unlockWithGrace, burnLock } from './lock'
@@ -100,7 +100,13 @@ let showAdvanced = false // You-tab advanced settings fold (session-only)
 let awaitSince = 0 // when the remote-invite wait began — drives the 'still waiting' guidance
 const AWAIT_GUIDE_MS = 60_000
 let monitorTimer = 0
-let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string } | null = null
+// The one live incoming alert shown as the top banner. A shared-inbox buzz (whole
+// circle) or a private direct message (just me) — `private` flips the styling and
+// copy so a 1:1 message never reads as a circle-wide buzz.
+let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string; private?: boolean } | null = null
+// The compose sheet, when open: a free-text message aimed at the whole group or one
+// member (their pubkey). Mounted as an overlay so opening it never tears the map.
+let compose: { target: 'group' | string } | null = null
 
 let onboardStep: 'intro' | 'create' | 'join' | 'await' | 'restore' = 'intro'
 let adding = false // adding another circle from within the app (not first-run onboarding)
@@ -556,7 +562,9 @@ function restoreFocusedInput(keep: ReturnType<typeof captureFocusedInput>): void
 }
 
 function render(): void {
-  if (tab !== 'map' && mapView) { mapView.destroy(); mapView = null }
+  // The map now lives on BOTH Home (compact) and the Map tab — keep it alive for
+  // either, tear it down elsewhere. wireApp re-mounts it into the active tab's #map.
+  if (tab !== 'map' && tab !== 'home' && mapView) { mapView.destroy(); mapView = null }
   if (persisted.identity) ensureInviteSub()
   const keep = captureFocusedInput()
   if (pendingJoin) {
@@ -578,6 +586,7 @@ function render(): void {
   const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
   root.innerHTML = `${buzzBanner()}<main class="screen fade-in ${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   wireApp()
+  if (compose) mountCompose() // a full render drops the overlay — put it back
   restoreFocusedInput(keep)
 }
 
@@ -610,11 +619,24 @@ function circleSwitcher(): string {
   return `<div class="circle-switch">${chips}<button class="circle-chip add" data-action="add-circle" aria-label="Add a circle">＋</button></div>`
 }
 
-function orbState(): { cls: string; label: string; sub: string } {
+/** The old status-orb copy, now a compact chip laid over the Home map — the map is
+ *  the hero, but "am I sharing, and how closely?" must still read at a glance. */
+function homeMapStatus(): { cls: string; label: string; sub: string } {
   const c = activeCircle() as store.Circle
   if (sharing && fix) return { cls: 'state-share', label: 'Sharing live', sub: `${precisionLabel(sharePrecisionOf(c))} · your circle can see you` }
   if (sharing && !fix) return { cls: 'state-share', label: 'Locating…', sub: 'Getting a fix' }
   return { cls: 'state-safe', label: 'Private', sub: 'Location hidden until you share it' }
+}
+
+function homeMapStatusHtml(): string {
+  const s = homeMapStatus()
+  const n = memberPoints().filter((p) => p.member !== persisted.identity?.pk).length
+  const seen = n ? `${n} ${n === 1 ? 'person' : 'people'} on the map` : 'No one sharing right now'
+  return `<div class="map-status ${s.cls}" id="home-map-status">
+    <span class="ms-dot"></span>
+    <span class="ms-text"><strong>${esc(s.label)}</strong><span class="ms-sub">${esc(s.sub)} · ${esc(seen)}</span></span>
+    <span class="ms-open" data-action="tab" data-tab="map" aria-label="Open the full map">⤢</span>
+  </div>`
 }
 
 /** The precision slider — how closely this circle sees me. Lives on Home next to
@@ -655,9 +677,19 @@ function quickActionsCard(c: store.Circle): string {
   </div>`
 }
 
+/** "Send a message" — free text to the whole circle, or (by tapping a pin) to one
+ *  person privately. This card is the group entry point; the per-member entry is a
+ *  map pin or a Circle-tab row. */
+function messageCard(c: store.Circle): string {
+  return `<div class="section-title" style="margin-top:22px">Messages</div>
+  <div class="card stack">
+    <button class="btn small primary" data-action="msg-group">✍️ Message everyone in ${esc(c.name)}</button>
+    <div class="note">Send a written note to the whole circle. To message just one person, tap their pin on the map — that message is private to them.</div>
+  </div>`
+}
+
 function homeView(): string {
   const c = activeCircle() as store.Circle
-  const s = orbState()
   return `
     ${topbar()}
     ${updateAvailable ? `
@@ -666,20 +698,27 @@ function homeView(): string {
       <div class="note">Download it and install over the top — everything on this phone stays put.</div>
       <a class="btn small primary" href="https://flock.forgesworn.dev/get.html">Get the update</a>
     </div>` : ''}
-    <div class="orb-wrap ${s.cls}">
-      <div class="orb"><div class="orb-inner">
-        <div class="orb-state"><span class="orb-dot"></span>${esc(s.label)}</div>
-        <div class="orb-sub">${esc(s.sub)}</div>
-      </div></div>
+    <div class="home-map-shell">
+      <div id="map" class="map-canvas home-map"></div>
+      ${homeMapStatusHtml()}
     </div>
+    <div id="home-panel">${homePanelInner(c)}</div>`
+}
+
+/** Everything below the Home map — the share toggle, precision, messaging and
+ *  invite cards. Isolated so a presence tick can re-render it in place, leaving
+ *  the live map above untouched (mirrors the map tab's #map-panel pattern). */
+function homePanelInner(c: store.Circle): string {
+  return `
     <div class="actions">
       <button class="btn ${sharing ? 'ghost' : 'primary'}" data-action="toggle-share">
         ${sharing ? 'Stop sharing' : 'Start sharing'}
       </button>
-      ${hint('home-watch', 'Sharing live lets your circle see where you are — you choose how closely with the slider below. Stop any time; nothing is shared while it\'s off.')}
+      ${hint('home-watch', 'Sharing live lets your circle see where you are — you choose how closely with the slider below. Stop any time; nothing is shared while it\'s off. Tap anyone on the map to message them privately.')}
     </div>
     ${lostCard(c)}
     ${precisionCard(c)}
+    ${messageCard(c)}
     ${quickActionsCard(c)}
     ${geoIssueCard()}
     ${inviteCta()}`
@@ -777,11 +816,14 @@ function circleMemberRow(pk: string, mePk: string): string {
     ? `<button class="btn small" data-action="found-phone" data-pk="${pk}">Found it</button>`
     : isMe ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`
   const edit = isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`
+  // Private message — works whether or not they're on the map right now (a pin tap
+  // is the map-side equivalent). Not for my own row.
+  const msg = isMe ? '' : `<button class="icon-btn" data-action="msg-member" data-pk="${pk}" aria-label="Message ${esc(nameFor(pk))} privately">✉️</button>`
   const isNew = (activeCircle()?.unseenMembers ?? []).includes(pk)
   return `<div class="member${isNew ? ' unseen' : ''}">
     ${avatarHtml(pk, isMe)}
     <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}${isNew ? ' <span class="pill new">new</span>' : ''}</div><div class="when">${sub}</div></div>
-    ${pill}${locate}${lostBtn}${edit}
+    ${pill}${msg}${locate}${lostBtn}${edit}
   </div>`
 }
 
@@ -1171,7 +1213,7 @@ function wireApp(): void {
   wirePrecisionSlider()
   const brand = root.querySelector<HTMLElement>('.topbar .brand')
   if (brand) wireHideHold(brand)
-  if (tab === 'map') void initMap()
+  if (tab === 'map' || tab === 'home') void initMap()
 }
 
 /** The Home-screen "location detail" slider. `input` patches the labels in place
@@ -1212,6 +1254,8 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   if (!container) return
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
   mapView = await MapView.create(container, fix ?? undefined, { circleId: activeCircle()?.id })
+  // Tap a member's pin → message them privately (skip my own pin — that's just me).
+  mapView.onMemberClick((pk) => { if (pk && pk !== persisted.identity?.pk) openCompose(pk) })
   if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
   updateMapData()
   requestAnimationFrame(() => mapView?.map.resize())
@@ -1327,8 +1371,39 @@ function refresh(): void {
   // Never rebuild while an onboarding / add-circle form is on screen — a background
   // refresh would discard a half-typed circle name (the inputs are uncontrolled).
   if (adding || !persisted.identity || !activeCircle()) return
+  // Both map-bearing tabs update in place — a full render would destroy the live
+  // map canvas (and any open compose overlay) under the user on every presence tick.
   if (tab === 'map' && mapView) { updateMapData(); renderMapPanel(); patchBuzzBanner() }
+  else if (tab === 'home' && mapView) { updateMapData(); renderHomePanel(); patchBuzzBanner() }
   else render()
+}
+
+/** Re-render Home's controls in place (share toggle, precision, messaging, invite)
+ *  plus the map status chip, leaving the live map canvas above untouched. Mirrors
+ *  the map tab's renderMapPanel; re-binds only the panel's own actions. */
+function renderHomePanel(): void {
+  const panel = document.getElementById('home-panel')
+  if (panel) {
+    panel.innerHTML = homePanelInner(activeCircle() as store.Circle)
+    panel.querySelectorAll('[data-action]').forEach((node) => {
+      const action = node.getAttribute('data-action') as string
+      node.addEventListener('click', () => handleAction(action, node as HTMLElement))
+    })
+    wirePrecisionSlider()
+  }
+  const status = document.getElementById('home-map-status')
+  if (status) {
+    const tmp = document.createElement('div')
+    tmp.innerHTML = homeMapStatusHtml()
+    const fresh = tmp.firstElementChild as HTMLElement | null
+    if (fresh) {
+      status.replaceWith(fresh)
+      fresh.querySelectorAll('[data-action]').forEach((node) => {
+        const action = node.getAttribute('data-action') as string
+        node.addEventListener('click', () => handleAction(action, node as HTMLElement))
+      })
+    }
+  }
 }
 
 /** Swap the buzz banner in or out WITHOUT a full render — on the map tab a
@@ -1431,7 +1506,12 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
   const signer = getSigner()
   if (!signer) return
   const payload = await readInvite(signer, e)
-  if (!payload) return
+  if (!payload) {
+    // Not an invite/reseed — the same personal inbox also carries private DMs.
+    const dm = await readDmWrap(signer, e)
+    if (dm) onIncomingDm(dm)
+    return
+  }
   if (payload.t === 'invite') {
     if (persisted.circles.some((c) => c.id === payload.id)) return // already a member
     const joined: store.Circle = {
@@ -1581,11 +1661,113 @@ function buzzBanner(): string {
   if (!activeBuzz) return ''
   const who = activeBuzz.from === persisted.identity?.pk ? 'You' : nameFor(activeBuzz.from)
   const where = activeBuzz.circle ? ` · ${esc(activeBuzz.circle)}` : ''
-  return `<div class="buzz-banner${activeBuzz.mine ? ' for-me' : ''}" data-action="dismiss-buzz" role="alert">
-    <span class="bz-icon">🔔</span>
-    <span class="bz-text"><strong>${esc(who)}</strong> · ${esc(activeBuzz.reason)}${where}</span>
+  // A private DM reads as a lock + "just you", never as a circle-wide buzz bell.
+  const priv = activeBuzz.private
+  const icon = priv ? '🔒' : '🔔'
+  const tail = priv ? ' · just you' : ''
+  return `<div class="buzz-banner${activeBuzz.mine ? ' for-me' : ''}${priv ? ' private' : ''}" data-action="dismiss-buzz" role="alert">
+    <span class="bz-icon">${icon}</span>
+    <span class="bz-text"><strong>${esc(who)}</strong> · ${esc(activeBuzz.reason)}${where}${tail}</span>
     <span class="bz-x">✕</span>
   </div>`
+}
+
+// ── Messaging (free text: group buzz, or private 1:1 DM) ─────────────────────
+/** Send a private direct message to ONE member — gift-wrapped to their personal
+ *  inbox, never the shared circle inbox, so only they can read it. */
+async function sendDm(pk: string, text: string): Promise<void> {
+  const c = activeCircle()
+  const signer = getSigner()
+  const id = persisted.identity
+  if (!c || !signer || !id) return
+  const t = text.trim()
+  if (!t) { toast('Type a message first'); return }
+  if (pk === id.pk) { toast("That's you"); return }
+  try {
+    const wrap = await buildDmWrap(signer, pk, { circleId: c.id, text: t })
+    await svc.publishSigned(persisted.relayUrls, wrap as never)
+    toast(`Sent to ${nameFor(pk)}`)
+  } catch { toast('Message failed — check your connection') }
+}
+
+/** Open the compose sheet, aimed at the whole group or one member (their pubkey).
+ *  Mounted as an overlay so it never tears down a live map underneath. */
+function openCompose(target: 'group' | string): void {
+  compose = { target }
+  mountCompose()
+}
+function closeCompose(): void {
+  compose = null
+  document.getElementById('compose-sheet')?.remove()
+}
+function composeTitle(): string {
+  if (!compose) return ''
+  if (compose.target === 'group') return `Message everyone in ${esc(activeCircle()?.name ?? 'your circle')}`
+  return `🔒 Message ${esc(nameFor(compose.target))} · private`
+}
+function composeSheet(): string {
+  if (!compose) return ''
+  const presets = compose.target === 'group' ? DEFAULT_BUZZ_REASONS : QUICK_ACTIONS
+  const chips = presets
+    .filter((r) => r !== 'Come to me') // exact-spot share is a Home-only, confirmed action
+    .map((r) => `<button class="btn small ghost" data-action="compose-preset" data-reason="${esc(r)}">${esc(r)}</button>`).join('')
+  const sub = compose.target === 'group'
+    ? 'Everyone in the circle sees this.'
+    : 'Private — encrypted so only they can read it.'
+  return `<div class="compose-sheet" id="compose-sheet" role="dialog" aria-modal="true">
+    <div class="compose-card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <strong>${composeTitle()}</strong>
+        <button class="bz-x" data-action="compose-cancel" aria-label="Close">✕</button>
+      </div>
+      <div class="chip-row">${chips}</div>
+      <textarea class="input" id="compose-text" rows="2" maxlength="500" placeholder="Type a message…" autocapitalize="sentences"></textarea>
+      <div class="row" style="gap:10px">
+        <button class="btn small primary" data-action="compose-send">Send</button>
+        <button class="btn small ghost" data-action="compose-cancel">Cancel</button>
+      </div>
+      <div class="note">${sub}</div>
+    </div>
+  </div>`
+}
+function mountCompose(): void {
+  document.getElementById('compose-sheet')?.remove()
+  if (!compose) return
+  const tmp = document.createElement('div')
+  tmp.innerHTML = composeSheet()
+  const el = tmp.firstElementChild as HTMLElement | null
+  if (!el) return
+  root.appendChild(el)
+  el.querySelectorAll('[data-action]').forEach((node) => {
+    const action = node.getAttribute('data-action') as string
+    node.addEventListener('click', () => handleAction(action, node as HTMLElement))
+  })
+  ;(el.querySelector('#compose-text') as HTMLTextAreaElement | null)?.focus()
+}
+/** Send whatever's in the compose box (or a tapped preset) to the current target. */
+function composeSend(text: string): void {
+  if (!compose) return
+  const t = text.trim()
+  if (!t) { toast('Type a message first'); return }
+  const target = compose.target
+  closeCompose()
+  if (target === 'group') void sendBuzz(t)
+  else void sendDm(target, t)
+}
+
+/** A private direct message just arrived on my personal inbox. Surface it as the
+ *  top banner (locked, "just you"), notify and buzz — but only from a member of a
+ *  circle I'm actually in, so a stranger who scraped my npub can't spam or spoof a
+ *  circle name at me. */
+function onIncomingDm(dm: DirectMessage): void {
+  const me = persisted.identity
+  if (me && dm.from === me.pk) return // my own message echoed back — never notify myself
+  const c = persisted.circles.find((x) => x.id === dm.circleId)
+  if (!c || !(c.members ?? []).includes(dm.from)) return // not a fellow circle member — drop
+  activeBuzz = { from: dm.from, reason: dm.text, mine: true, circle: c.name, private: true }
+  notifyIfHidden([`${nameFor(dm.from)} messaged you`, dm.text, c.name].filter(Boolean).join(' · '))
+  try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ }
+  refresh()
 }
 
 // ── "Come to me" (one-shot exact share) ──────────────────────────────────────
@@ -1639,6 +1821,11 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'geo-retry': geoIssue = null; sharing = false; startSharing(); break
     case 'quick-buzz': void sendBuzz(node.dataset.reason ?? ''); break
+    case 'msg-group': openCompose('group'); break
+    case 'msg-member': openCompose(node.dataset.pk ?? ''); break
+    case 'compose-preset': composeSend(node.dataset.reason ?? ''); break
+    case 'compose-send': composeSend((document.getElementById('compose-text') as HTMLTextAreaElement | null)?.value ?? ''); break
+    case 'compose-cancel': closeCompose(); break
     case 'see-on-map': focusMemberPk = node.dataset.pk ?? null; tab = 'map'; render(); break
     case 'ask-lost': lostConfirmPk = node.dataset.pk ?? null; render(); break
     case 'cancel-lost': lostConfirmPk = null; render(); break

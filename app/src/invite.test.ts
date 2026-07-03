@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { generateSecretKey } from 'nostr-tools/pure'
 import { makeLocalSigner } from './signer'
-import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap, type InvitePayload } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap, buildDmWrap, readDmWrap, type InvitePayload } from './invite'
 import { personalInboxTag } from './keys'
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
@@ -75,5 +75,47 @@ describe('targeted EXACT meeting-point share (personal-inbox gift-wrap)', () => 
     expect(await readMeetingExactWrap(bob, inviteWrap)).toBeNull() // an invite is not an exact share
     const exactWrap = await buildMeetingExactWrap(alice, bob.pubkey, exactShare)
     expect(await readInvite(bob, exactWrap)).toBeNull() // an exact share is not an invite
+  })
+})
+
+describe('private direct message (personal-inbox gift-wrap)', () => {
+  it('round-trips to the one recipient, filed under their personal-inbox tag, sender attributed', async () => {
+    const alice = signer()
+    const bob = signer()
+    const wrap = await buildDmWrap(alice, bob.pubkey, { circleId: 'circle-1', text: 'on my way to you' })
+    expect(wrap.kind).toBe(1059)
+    // Routed to Bob's derived tag, never his npub — nothing on the wire ties it to him.
+    const pTag = wrap.tags.find((t) => t[0] === 'p')?.[1]
+    expect(pTag).toBe(personalInboxTag(bob.pubkey))
+    expect(pTag).not.toBe(bob.pubkey)
+    // The sender is recovered from the seal (the rumor's pubkey), not carried in plaintext.
+    expect(await readDmWrap(bob, wrap)).toEqual({ from: alice.pubkey, circleId: 'circle-1', text: 'on my way to you' })
+  })
+
+  it('is readable ONLY by the named recipient — the whole circle cannot read it (privacy invariant)', async () => {
+    const alice = signer()
+    const bob = signer()
+    const eve = signer()
+    const wrap = await buildDmWrap(alice, bob.pubkey, { circleId: 'circle-1', text: 'secret' })
+    expect(await readDmWrap(eve, wrap)).toBeNull()
+  })
+
+  it('a whitespace-only message is rejected, and text is trimmed', async () => {
+    const alice = signer()
+    const bob = signer()
+    const blank = await buildDmWrap(alice, bob.pubkey, { circleId: 'c', text: '   ' })
+    expect(await readDmWrap(bob, blank)).toBeNull()
+    const padded = await buildDmWrap(alice, bob.pubkey, { circleId: 'c', text: '  hi  ' })
+    expect((await readDmWrap(bob, padded))?.text).toBe('hi')
+  })
+
+  it('a DM is never mistaken for an invite or exact share (fall-through dispatch)', async () => {
+    const alice = signer()
+    const bob = signer()
+    const dm = await buildDmWrap(alice, bob.pubkey, { circleId: 'c', text: 'hi' })
+    expect(await readInvite(bob, dm)).toBeNull()
+    expect(await readMeetingExactWrap(bob, dm)).toBeNull()
+    const inviteWrap = await buildInviteWrap(alice, bob.pubkey, payload)
+    expect(await readDmWrap(bob, inviteWrap)).toBeNull()
   })
 })
