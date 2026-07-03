@@ -1308,7 +1308,8 @@ function onboardingView(): string {
         ${getApp}
         ${signetRow}
       </div>
-      <div class="note onboard-note">No account, no sign-up. flock makes an anonymous key that lives only on this phone.</div>`
+      <div class="note onboard-note">No account, no sign-up. flock makes an anonymous key that lives only on this phone.</div>
+      <div class="note onboard-note">version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
   }
   return `<main class="screen onboard fade-in">${inner}</main><div class="toast" id="toast"></div>`
 }
