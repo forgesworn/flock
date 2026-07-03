@@ -283,6 +283,13 @@ Two halves that compose into one feature:
   Persistent foreground-service relay socket (Option A, recommended) →
   UnifiedPush + bridge (Option B). De-Googled; gated on the Phase 0 result. See
   `docs/plans/2026-06-30-background-inbound.md`.
+  *Partial (2026-07-03):* the shell now mirrors toasts to system notifications
+  while the app is HIDDEN (`native/notify.ts`) — covers screen-off **while the
+  watcher's foreground service holds the process** (sharing/safety watch on).
+  Confirmed on the A32 that without it, Android stops the activity the moment
+  the screen goes off (`notifyAppStopped`) — nothing is received until reopen,
+  so signals replay silently into a visible app. Sharing-off delivery still
+  needs Option A/B above.
 - [ ] **Go-live hardening (foreground PWA — needs no devices):**
   - [x] **Proxy map tiles + geocoding (Stage 0) — DEPLOYED & LIVE** on
     flock.forgesworn.dev. Tiles (`/tiles/*`) and Nominatim (`/nominatim/*`) are
