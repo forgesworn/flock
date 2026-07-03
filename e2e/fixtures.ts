@@ -12,10 +12,9 @@ export const test = base
 /** Geolocations used across specs (London + a point ~1.4 km away in Soho). */
 export const LONDON = { latitude: 51.5074, longitude: -0.1278 }
 export const SOHO = { latitude: 51.5137, longitude: -0.1337 }
-/** Far enough to sit outside a 1 km London safe zone (Paris). */
+/** Somewhere far away entirely (Paris). */
 export const PARIS = { latitude: 48.8566, longitude: 2.3522 }
 
-export type Mode = 'family' | 'nightout'
 export type Ttl = 'ongoing' | 'today' | 'custom'
 
 /**
@@ -67,8 +66,6 @@ const sel = {
   joinRemote: '[data-action="join-remote"]',
   copyInvite: '[data-action="copy-invite"]',
   sendInvite: '[data-action="send-invite"]',
-  sos: '[data-action="sos-hold"]',
-  pickup: '[data-action="pickup"]',
   toggleShare: '[data-action="toggle-share"]',
   tab: (t: string) => `[data-action="tab"][data-tab="${t}"]`,
 }
@@ -76,12 +73,11 @@ const sel = {
 /** Create a circle from the onboarding hero. Lands on the Circle tab. */
 export async function createCircle(
   page: Page,
-  opts: { name: string; mode?: Mode; ttl?: Ttl } = { name: 'Circle' },
+  opts: { name: string; ttl?: Ttl } = { name: 'Circle' },
 ): Promise<void> {
-  const { name, mode = 'family', ttl = 'ongoing' } = opts
+  const { name, ttl = 'ongoing' } = opts
   await page.click(sel.create)
   await page.fill('#cname', name)
-  await page.click(`[data-action="ob-mode"][data-mode="${mode}"]`)
   await page.click(`[data-action="ob-ttl"][data-ttl="${ttl}"]`)
   await page.click(sel.doCreate)
   // doCreate sets tab='circle' — invite section is the proof we landed.
@@ -135,27 +131,42 @@ export async function gotoTab(page: Page, tab: 'home' | 'map' | 'circle' | 'you'
   await page.click(sel.tab(tab))
 }
 
-/** Press-and-hold the SOS until it fires (>1.4 s), from the Home tab. */
-export async function sendSOS(page: Page): Promise<void> {
-  await gotoTab(page, 'home')
-  const sos = page.locator(sel.sos)
-  await expect(sos).toBeVisible()
-  await sos.dispatchEvent('pointerdown')
-  await page.waitForTimeout(1700) // hold past the 1.4 s arm threshold
-  await sos.dispatchEvent('pointerup')
-}
-
-/** Start foreground location sharing (enables fixes for pick-up / coarse). */
+/** Start foreground location sharing (beacons at the slider's precision). */
 export async function startSharing(page: Page): Promise<void> {
   await gotoTab(page, 'home')
   await page.click(sel.toggleShare)
   await settle(page) // let the first geolocation fix land before we act on it
 }
 
-/** Request a pick-up (needs a location fix first — call startSharing). */
-export async function requestPickup(page: Page): Promise<void> {
+/** Set the Home-screen precision slider (geohash 4–9) and commit it. Driving
+ *  the input via the DOM fires the same `input`+`change` events a thumb-drag
+ *  does, so the persisted value, the re-tiered watch and the forced re-emit
+ *  all go through the real handler. */
+export async function setSharePrecision(page: Page, precision: number): Promise<void> {
   await gotoTab(page, 'home')
-  await page.click(sel.pickup)
+  const slider = page.locator('#share-precision')
+  await expect(slider).toBeVisible()
+  await slider.evaluate((el, p) => {
+    const input = el as HTMLInputElement
+    input.value = String(p)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  }, precision)
+  await settle(page) // let the forced re-emit reach the relay
+}
+
+/** Tap a quick-action chip on Home (Check in / Where are you? / Call me / On my way). */
+export async function quickAction(page: Page, reason: string): Promise<void> {
+  await gotoTab(page, 'home')
+  await page.click(`[data-action="quick-buzz"][data-reason="${reason}"]`)
+}
+
+/** "Come to me" — the confirmed quick action that also shares a one-shot exact spot. */
+export async function comeToMe(page: Page): Promise<void> {
+  await gotoTab(page, 'home')
+  await page.click('[data-action="come-to-me"]')
+  await page.click('[data-action="come-to-me-confirm"]')
+  await settle(page) // buzz + one-shot beacon both go to the relay
 }
 
 /** A member row on the Circle tab, addressed by the pill it currently shows. */
@@ -172,15 +183,6 @@ export async function sendBuzz(page: Page, reason: string): Promise<void> {
   await gotoTab(page, 'circle')
   await page.fill('#buzz-custom', reason)
   await page.click('[data-action="buzz"]:not([data-reason])')
-}
-
-/** Take a 1-hour break (off-grid), optionally with a reason, from Home. */
-export async function takeBreak(page: Page, why?: string): Promise<void> {
-  await gotoTab(page, 'home')
-  await page.click('[data-action="ask-dark"]')
-  await page.click('[data-action="dark-dur"][data-sec="3600"]')
-  if (why) await page.fill('#dark-why', why)
-  await page.click('[data-action="do-dark"]')
 }
 
 /** Expand the You tab's Advanced fold (servers, security, disband, reset). */
@@ -210,67 +212,16 @@ export async function addCircle(page: Page): Promise<void> {
   await expect(page.locator('[data-action="create"]')).toBeVisible()
 }
 
-/** Add a Safe (geofence) or Private (no-report) place via the map editor.
- *  Both are saved at the current map centre (the device's location). */
-export async function addZoneOnMap(page: Page, kind: 'safe' | 'noreport' = 'safe'): Promise<void> {
-  await gotoTab(page, 'map')
-  await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
-  await page.waitForTimeout(1_500) // let the style finish loading before addSource
-  await page.click(`[data-action="add-zone"][data-kind="${kind}"]`)
-  await page.click('[data-action="save-zone"]')
-}
-
 /** Move this device to a new emulated position (optionally with a GPS accuracy radius in metres). */
 export async function setLocation(page: Page, pos: { latitude: number; longitude: number; accuracy?: number }): Promise<void> {
   await page.context().setGeolocation(pos)
   await settle(page)
 }
 
-/**
- * Move to a new position and re-arm sharing so the new spot is sampled now.
- * Emulated geolocation (CDP override) doesn't re-push to an already-running
- * `watchPosition`, so we toggle sharing off→on to take a fresh fix — the
- * equivalent of a phone actually walking out of a safe zone.
- */
-export async function moveAndReshare(page: Page, pos: { latitude: number; longitude: number }): Promise<void> {
-  await page.context().setGeolocation(pos)
-  await gotoTab(page, 'home')
-  await page.click(sel.toggleShare) // stop
-  await page.click(sel.toggleShare) // start → fresh onFix at the new position
-  await settle(page)
-}
-
-/** Arm the dead-man's-switch on Home with the given cadence (seconds: 900/1800/3600). */
-export async function armCheckin(page: Page, intervalSeconds = 900): Promise<void> {
-  await gotoTab(page, 'home')
-  await page.click('[data-action="arm-menu"]')
-  await page.click(`[data-action="arm"][data-interval="${intervalSeconds}"]`)
-}
-
 /** Rotate the circle key (reseed) from the You tab's Advanced fold. */
 export async function reseed(page: Page): Promise<void> {
   await openAdvanced(page)
   await page.click('[data-action="reseed"]')
-}
-
-/**
- * Intercept the same-origin Overpass proxy (`/overpass/*`) on this device so the
- * fair-meeting-point venue search is deterministic and never touches the network.
- * Pass venues to return (each becomes a named Overpass `node`); pass [] to simulate
- * "no venues found", so the flow keeps the on-device centroid. Only the proposer's
- * device queries Overpass, so route it on that page.
- */
-export async function mockOverpass(
-  page: Page,
-  venues: Array<{ name: string; lat: number; lon: number; amenity?: string }> = [],
-): Promise<void> {
-  const elements = venues.map((v, i) => ({
-    type: 'node', id: i + 1, lat: v.lat, lon: v.lon,
-    tags: { name: v.name, amenity: v.amenity ?? 'pub' },
-  }))
-  await page.route('**/overpass/**', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ elements }) }),
-  )
 }
 
 /** This device's own public key (hex), read from local state. */

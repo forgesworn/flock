@@ -7,7 +7,7 @@ test.describe('join notice — a new phone on the roster is never silent (audit 
   test('B joining is news to A; the roster replaying to B is not; "Got it" clears it', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
-    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    await createCircle(A, { name: 'The Smiths' })
     // A's buzz becomes stored relay history — the roster B will replay on joining.
     await sendBuzz(A, 'setup done')
 

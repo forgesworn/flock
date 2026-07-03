@@ -4,7 +4,7 @@ test.describe('invites — both ways', () => {
   test('join by code (in person): the secret travels in the code, no relay needed', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
-    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
     // B now holds the circle (same name in the switcher chip).
@@ -14,7 +14,7 @@ test.describe('invites — both ways', () => {
 
   test('join by link (the QR path): opening the link joins in one tap, then the secret is scrubbed', async ({ browser }) => {
     const A = await newPerson(browser)
-    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    await createCircle(A, { name: 'The Smiths' })
     // The copy button now yields a LINK with the code in the #fragment — a camera
     // app OPENS it (bare-text QRs get offered to a web search, seed and all).
     const link = await inviteCode(A)
@@ -32,7 +32,7 @@ test.describe('invites — both ways', () => {
   test('remote invite (gift-wrap over the relay): B shares a key, A sends, B auto-joins', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
-    await createCircle(A, { name: 'Lads trip', mode: 'nightout' })
+    await createCircle(A, { name: 'Lads trip' })
 
     const npub = await joinRemoteAwait(B) // B reveals npub + subscribes to its own inbox
     await sendRemoteInvite(A, npub) // A gift-wraps the seed to B's key → kind:1059

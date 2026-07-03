@@ -8,7 +8,7 @@ test.describe('typing survives inbound re-renders (audit follow-up)', () => {
   test("B's half-typed buzz reason survives A's incoming buzz", async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
-    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
 

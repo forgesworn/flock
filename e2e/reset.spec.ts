@@ -5,7 +5,7 @@ test.describe('reset device — two-step confirm', () => {
   // (until root backup lands), so a single stray tap must never execute it.
   test('first tap arms, cancel disarms, confirming wipes back to onboarding', async ({ browser }) => {
     const A = await newPerson(browser)
-    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    await createCircle(A, { name: 'The Smiths' })
     await openAdvanced(A)
 
     // First tap only arms — nothing is wiped.

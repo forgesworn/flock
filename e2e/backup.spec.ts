@@ -7,7 +7,7 @@ test.describe('backup & restore — survive losing the device', () => {
   test('A backs up, wipes the device, restores — and still hears B', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
-    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
 

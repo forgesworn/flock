@@ -1,12 +1,12 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz, reseed, sendSOS, settle, gotoTab, memberPill } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz, reseed, settle, gotoTab } from './fixtures'
 
 test.describe('reseed — rotate the circle key', () => {
   // After a reseed, every member moves to a fresh seed (new inbox). Proof it
-  // propagated: A's next alert, sent on the new key, still reaches B.
-  test('A rotates the key and A\'s next alert still reaches B', async ({ browser }) => {
+  // propagated: A's next signal, sent on the new key, still reaches B.
+  test('A rotates the key and A\'s next buzz still reaches B', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
-    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
@@ -18,8 +18,7 @@ test.describe('reseed — rotate the circle key', () => {
     await reseed(A) // new seed → gift-wrapped to B → B re-subscribes to the new inbox
     await settle(B, 3000) // let B receive the reseed and resubscribe
 
-    await sendSOS(A) // sent on the NEW inbox
-    await gotoTab(B, 'circle')
-    await expect(memberPill(B, 'help')).toBeVisible() // only decryptable on the new seed
+    await sendBuzz(A, 'still with you?') // sent on the NEW inbox
+    await expect(B.locator('.buzz-banner')).toContainText('still with you?') // only decryptable on the new seed
   })
 })

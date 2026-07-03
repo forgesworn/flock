@@ -25,7 +25,7 @@ test.describe('app lock — key-at-rest (Phase E)', () => {
   test('ciphertext at rest; the PIN gates a cold boot; live traffic decrypts after unlock', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
-    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
@@ -64,7 +64,7 @@ test.describe('app lock — key-at-rest (Phase E)', () => {
 
   test('lock × decoy: the decoy shows no PIN screen; unhide → re-confirm → locked again', async ({ browser }) => {
     const A = await newPerson(browser)
-    await createCircle(A, { name: 'Real circle', mode: 'family' })
+    await createCircle(A, { name: 'Real circle' })
     await enableLock(A)
 
     // Arm hiding too, then hide.

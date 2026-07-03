@@ -1,15 +1,12 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, memberPill, setPetname, PARIS } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, memberPill, setPetname } from './fixtures'
 
-// Single-person map UI: the two zone kinds the privacy model rests on.
-// "Safe places" (you're told if I leave) and "Private places" (I stay hidden,
-// even in an emergency). Exercises the real maplibre add-flow.
-test.describe('map — safe & private places', () => {
-  test('add a Safe place and a Private place; each lands in its own list', async ({ browser }) => {
+test.describe('map — the circle\'s live locations', () => {
+  test('the map renders with real height (regression guard)', async ({ browser }) => {
     const A = await newPerson(browser)
-    await createCircle(A, { name: 'Home', mode: 'family' })
+    await createCircle(A, { name: 'Home' })
     await gotoTab(A, 'map')
 
-    // Wait for maplibre to construct (style loaded) before editing zones.
+    // Wait for maplibre to construct (style loaded).
     await expect(A.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
     await A.waitForTimeout(1_500)
 
@@ -19,52 +16,17 @@ test.describe('map — safe & private places', () => {
     // collapsed the container to height 0. Tiles still loaded and the canvas stayed
     // "visible", so only an explicit height check catches it.
     expect(await A.locator('#map').evaluate((el) => (el as HTMLElement).clientHeight)).toBeGreaterThan(100)
-
-    // Safe place — saved at the current map centre.
-    await A.click('[data-action="add-zone"][data-kind="safe"]')
-    await A.click('[data-action="save-zone"]')
-    await expect(A.locator('.zone-row', { hasText: 'Safe place' })).toBeVisible()
-
-    // Private place — the inverse geofence (amber dot).
-    await A.click('[data-action="add-zone"][data-kind="noreport"]')
-    await A.click('[data-action="save-zone"]')
-    await expect(A.locator('.dot-private')).toBeVisible()
-  })
-
-  // Regression: opening the map must centre on YOUR location, not the hard-coded
-  // London default. It used to only centre once you'd started sharing and a fix
-  // had landed; a fresh user (no share yet) was stranded in London. The device
-  // here sits in Paris and never shares — a zone saved at the map centre must
-  // therefore land in Paris, proving the view actively located the user.
-  test('opening the map centres on your location, not the London default (no share)', async ({ browser }) => {
-    const A = await newPerson(browser, PARIS)
-    await createCircle(A, { name: 'Trip', mode: 'family' })
-    await gotoTab(A, 'map')
-    await expect(A.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
-    await A.waitForTimeout(1_500) // let the one-shot locate centre the view
-
-    await A.click('[data-action="add-zone"][data-kind="safe"]')
-    await A.click('[data-action="save-zone"]')
-    // Safe places live on the circle (per-circle, synced), not device-globally.
-    const centre = await A.evaluate(() => {
-      const s = JSON.parse(localStorage.getItem('flock:v1') || '{}')
-      const c = (s.circles ?? []).find((x: { id: string }) => x.id === s.activeCircleId)
-      return c?.geofences?.[0]?.centre ?? null
-    })
-    expect(centre, 'a zone should have saved at the map centre').not.toBeNull()
-    expect(centre.lat).toBeCloseTo(PARIS.latitude, 1) // ≈48.86, nowhere near London's 51.51
-    expect(centre.lon).toBeCloseTo(PARIS.longitude, 1) // ≈2.35, nowhere near London's -0.13
   })
 
   // The point of the map: when someone discloses a location, you SEE them on it.
   test('B sees A as a pin on the map once A shares a location', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
-    await createCircle(A, { name: 'Sat night', mode: 'nightout' })
+    await createCircle(A, { name: 'Sat night' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    await startSharing(A) // night-out: a coarse beacon auto-emits on the first fix.
+    await startSharing(A) // a coarse beacon auto-emits on the first fix.
 
     // B receives the beacon (row pill), then opens the map and sees A's pin.
     await gotoTab(B, 'circle')
@@ -74,9 +36,9 @@ test.describe('map — safe & private places', () => {
     await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
     await expect(B.locator('.map-pin')).toBeVisible()
 
-    // A shared coarsely (night-out geohash-6, ~600 m) — so the pin must carry a
-    // "rough area" halo, not a deceptively exact point. Poll the drawn halo count
-    // (the source may populate a beat after the marker on first style load).
+    // A shared coarsely (the slider defaults to geohash-6, ~600 m) — so the pin
+    // must carry a "rough area" halo, not a deceptively exact point. Poll the
+    // drawn halo count (the source may populate a beat after the marker).
     await expect
       .poll(() => B.evaluate(() => (window as unknown as { flockMapView?: { memberAreaCount(): number } }).flockMapView?.memberAreaCount() ?? 0), { timeout: 15_000 })
       .toBeGreaterThan(0)

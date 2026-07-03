@@ -22,7 +22,7 @@ test.describe('decoy view — hide flock under a compelled unlock (FLOCK §6)', 
   test('A hides → a fresh app that stays silent under B\'s signals → the phrase brings everything back', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
-    await createCircle(A, { name: 'The Smiths', mode: 'family' })
+    await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
@@ -59,7 +59,7 @@ test.describe('decoy view — hide flock under a compelled unlock (FLOCK §6)', 
 
   test('the decoy is a real app — usable, resettable, and the hidden state survives it all', async ({ browser }) => {
     const A = await newPerson(browser)
-    await createCircle(A, { name: 'Real circle', mode: 'family' })
+    await createCircle(A, { name: 'Real circle' })
     await enableHiding(A, 'correct horse battery')
 
     // The discoverable path: the button on the card.
@@ -68,7 +68,7 @@ test.describe('decoy view — hide flock under a compelled unlock (FLOCK §6)', 
 
     // A coercer can USE the decoy — create a circle, land on inviting — it is
     // a real working app, observationally identical to a first run.
-    await createCircle(A, { name: 'Coffee club', mode: 'nightout' })
+    await createCircle(A, { name: 'Coffee club' })
 
     // Even wiping the decoy ("Sign out & reset") must not touch the hidden state.
     await openAdvanced(A)
