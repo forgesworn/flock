@@ -331,6 +331,10 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
 .btn.warn { background: var(--warn-dim); border-color: var(--warn-dim); color: var(--warn); }
 .btn.ghost { background: transparent; }
 .btn.small { width: auto; padding: 10px 16px; font-size: 14px; border-radius: 999px; }
+/* The APK download on the welcome screen — a highlighted, positive action
+   (and an <a>, so kill the underline). */
+a.btn { text-decoration: none; }
+.btn.get { background: var(--safe-dim); border-color: var(--safe-dim); color: var(--safe); }
 
 .actions { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 4px; }
 

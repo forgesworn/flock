@@ -1254,6 +1254,14 @@ function onboardingView(): string {
       ? '<div class="note" style="margin-top:16px">✓ Signed in with your signer — your key stays there, never in flock</div>'
       : `<button class="btn ghost" data-action="signet" style="margin-top:10px">Sign in with a signer</button>
          ${hint('signer', 'Use Signet, Amber (Android/GrapheneOS), nsec.app, or any Nostr signing app — your key stays in it, flock never holds it. The strongest option for real use.')}`
+    // The APK download must be unmissable for the people who can use it (Android
+    // browsers) and quiet for everyone else (iPhone/desktop can't install it).
+    const getApp = isNativeShell()
+      ? ''
+      : /android/i.test(navigator.userAgent)
+        ? `<a class="btn get" href="./get.html">Get the Android app</a>
+           ${hint('get-app', "The app can keep watch in the background — you're told if someone leaves a safe place even with the phone in a pocket. The website only works while it's open.")}`
+        : '<div class="note" style="margin-top:16px">On Android or GrapheneOS? <a href="./get.html">Get the app</a> — it can keep watch in the background; the website only works while open.</div>'
     inner = `
       <img class="hero-logo" src="./icon.svg" alt="" />
       <h1>Stay close,<br/>stay private.</h1>
@@ -1262,9 +1270,10 @@ function onboardingView(): string {
         <button class="btn primary" data-action="create">Create a circle</button>
         <button class="btn ghost" data-action="join">Join with a code</button>
         <button class="btn ghost" data-action="restore">Restore from backup</button>
+        ${getApp}
         ${signetRow}
       </div>
-      ${isNativeShell() ? '' : '<div class="note" style="margin-top:16px">On Android or GrapheneOS? <a href="./get.html">Get the app</a> — it can keep watch in the background; the website only works while open.</div>'}`
+      <div class="note" style="margin-top:16px">No account, no sign-up — flock makes an anonymous key that lives only on this phone.</div>`
   }
   return `<main class="screen onboard fade-in">${inner}</main><div class="toast" id="toast"></div>`
 }
