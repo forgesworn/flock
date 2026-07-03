@@ -138,6 +138,7 @@
     "@capacitor/cli": "^8.4.1",
     "@capacitor/core": "^8.4.1",
     "@capacitor/geolocation": "^8.2.0",
+    "@capacitor/local-notifications": "^8.2.0",
     "@capacitor/preferences": "^8.0.1",
     "@eslint/js": "^10.0.1",
     "@fontsource-variable/fraunces": "^5.2.5",

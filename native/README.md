@@ -65,6 +65,11 @@ files into `native/` before building.
   intent filter** for `https://flock.forgesworn.dev` — claiming **only path
   `/`** (invite fragments live there), so `/get.html` and the APK download
   stay reachable in the browser on phones that have flock installed.
+- **`notify.ts`** — toasts render into the WebView, invisible with the screen
+  off — exactly when "🚨 Help raised" matters. While the app is hidden, app.ts
+  mirrors its toasts here as real Android notifications
+  (`@capacitor/local-notifications` — pure AOSP, GrapheneOS-safe). Permission
+  is requested at boot; asking mid-emergency from the background is too late.
 - **`deeplink.ts`** — a scanned/tapped flock invite arrives in the shell as an
   Android *intent* (the WebView never navigates); this bridge re-injects just
   the `#join=`/`#invite=` fragment so the app's normal hashchange consumer

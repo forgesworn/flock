@@ -402,6 +402,14 @@ function avatarHtml(pk: string, isMe: boolean, small = false): string {
 }
 
 function toast(msg: string): void {
+  // Hidden app = invisible toast, and that's exactly when the message matters
+  // (an SOS arriving with the screen off). In the shell, mirror it as a real
+  // system notification. The hidden-gate also filters naturally: while the app
+  // is visible, toasts stay in-app; while hidden, the only toasts firing are
+  // incoming signals and timers — the ones worth waking the phone for.
+  if (document.hidden && isNativeShell()) {
+    void import('../../native/notify').then((n) => n.notify(msg)).catch(() => { /* shell only */ })
+  }
   const t = document.getElementById('toast')
   if (!t) return
   t.textContent = msg
@@ -493,6 +501,9 @@ function bootUnlocked(): void {
   // against the hosted deploy (boot + 6-hourly) — the web app needs neither.
   if (isNativeShell()) {
     void import('../../native/deeplink').then((d) => d.watchDeepLinks())
+    // Ask for notification permission NOW — asking later, from the background,
+    // mid-emergency, is too late to show a prompt (native/notify.ts).
+    void import('../../native/notify').then((n) => n.ensureNotifyPermission())
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
   }
