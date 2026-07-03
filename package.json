@@ -79,6 +79,10 @@
     "./joined": {
       "types": "./dist/joined.d.ts",
       "import": "./dist/joined.js"
+    },
+    "./lost": {
+      "types": "./dist/lost.d.ts",
+      "import": "./dist/lost.js"
     }
   },
   "files": [

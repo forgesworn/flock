@@ -108,6 +108,11 @@ not stored by relays. Core types (`t` → payload / key / trigger):
 | `rzv-status` | `RendezvousStatus {rendezvousId, member, status, etaSeconds, timestamp}` | group envelope key | a member's en-route / arrived / at-risk update |
 | `mtg-req` | `MeetingRequest {id, setBy, mode, maxTimeMinutes, createdAt}` | group envelope key | propose finding a fair meeting point |
 | `mtg-loc` | `MeetingShare {requestId, member, geohash, precision, mode, timestamp}` | group envelope key (coarse) **or** recipient's key via NIP-59 (exact) | **opt-in** spot toward a meeting point — coarse to the group, or exact to one named person |
+| `buzz` | `Buzz {from, reason, target?, timestamp}` | group envelope key | one-tap ping ("Where are you?", "Come to me") — location-free |
+| `joined` | `Joined {member, timestamp, handle?}` | group envelope key | newcomer's "I'm here" (+ optional self-chosen handle) so a QR joiner isn't invisible until their first signal |
+| `offgrid` | `OffGrid {from, until, reason?, timestamp}` | group envelope key | pre-announced planned silence; `until ≤ now` = "I'm back" |
+| `disband` | `Disband {by, timestamp}` | group envelope key | owner ends the circle for everyone (tombstone) |
+| `lost` | `LostReport {member, by, lost, timestamp}` | group envelope key | **peer-reported lost phone** — anyone flags any member's device lost, anyone clears it (`lost: false`); latest inner timestamp per member wins. A social display flag only: it changes what screens *show* (flagged roster row, alert pin, a message for whoever finds the phone) and must never alter what a device *discloses* — no sharing toggle, no precision change (§6) |
 
 `BeaconPayload` (`encryptBeacon`/`decryptBeacon`):
 
