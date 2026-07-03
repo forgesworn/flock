@@ -32,6 +32,7 @@ import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './deco
 import { generateStorageSecret, setupPin, unlockWithPin, unlockWithGrace, burnLock } from './lock'
 import {
   decideEmission,
+  DEFAULT_PRECISIONS,
   classifyContainment,
   haversineMetres,
   signalTypeForReason,
@@ -255,6 +256,27 @@ function saveBeacon(circleId: string, b: MemberBeacon): void {
   persisted.presence[circleId] = [...cstate(circleId).beacons.values()]
   store.save(persisted)
 }
+/** A stand-down ends the emergency disclosure: degrade that member's cached pin
+ *  from SOS/breach precision back to the ambient coarse cell, so the map stops
+ *  showing the exact spot the alert justified. On-device view only — the events
+ *  already on relays age out on their own. */
+function coarsenBeacon(circleId: string, member: string): void {
+  const b = cstate(circleId).beacons.get(member)
+  if (!b || b.precision <= DEFAULT_PRECISIONS.coarse) return
+  saveBeacon(circleId, { ...b, geohash: b.geohash.slice(0, DEFAULT_PRECISIONS.coarse), precision: DEFAULT_PRECISIONS.coarse })
+}
+/** Stopping sharing makes my own cached pins a stale claim of "still sharing" —
+ *  drop them everywhere so my map reads honestly. Local only: publishing a
+ *  "stopped" signal would leak the very metadata stopping is meant to protect. */
+function dropMyPresence(): void {
+  const me = persisted.identity?.pk
+  if (!me) return
+  for (const c of persisted.circles) {
+    const st = cstate(c.id)
+    if (st.beacons.delete(me)) persisted.presence[c.id] = [...st.beacons.values()]
+  }
+  store.save(persisted)
+}
 /** Forget a circle's cached pins (on reseed/leave) so stale positions never resurface. */
 function dropPresence(circleId: string): void {
   if (persisted.presence[circleId]) { delete persisted.presence[circleId]; store.save(persisted) }
@@ -316,9 +338,9 @@ function switchCircle(id: string): void {
   persisted.activeCircleId = id
   store.save(persisted)
   breachActive = false
-  alertActive = false
-  alertFailed = false
-  alertCircleId = null
+  // My live SOS state (alertActive/alertFailed/alertCircleId) deliberately
+  // survives a switch: the emergency isn't over because focus moved, and the
+  // stand-down / retry buttons must stay reachable from any circle.
   disbandConfirm = false
   resetConfirm = false
   removeConfirmPk = null
@@ -402,15 +424,20 @@ function avatarHtml(pk: string, isMe: boolean, small = false): string {
   return `<span class="${cls}">${isMe ? 'You' : initials(pk)}</span>`
 }
 
-function toast(msg: string): void {
-  // Hidden app = invisible toast, and that's exactly when the message matters
-  // (an SOS arriving with the screen off). In the shell, mirror it as a real
-  // system notification. The hidden-gate also filters naturally: while the app
-  // is visible, toasts stay in-app; while hidden, the only toasts firing are
-  // incoming signals and timers — the ones worth waking the phone for.
+/** Mirror a message to a real system notification while the app is hidden —
+ *  an invisible in-app cue is exactly when the message matters (a signal
+ *  arriving with the screen off). Shell only; a silent no-op in the PWA. */
+function notifyIfHidden(msg: string): void {
   if (document.hidden && isNativeShell()) {
     void import('../../native/notify').then((n) => n.notify(msg)).catch(() => { /* shell only */ })
   }
+}
+
+function toast(msg: string): void {
+  // The hidden-gate also filters naturally: while the app is visible, toasts
+  // stay in-app; while hidden, the only toasts firing are incoming signals
+  // and timers — the ones worth waking the phone for.
+  notifyIfHidden(msg)
   const t = document.getElementById('toast')
   if (!t) return
   t.textContent = msg
@@ -691,21 +718,35 @@ function fmtTtl(expiresAt?: number): string {
   return `${Math.round(left / 86_400)}d`
 }
 
-/** Horizontal chip row to switch between circles + add a new one. */
+/** True while `c` has a live emergency — someone's help alert, or my own SOS
+ *  (sent or still failing to send). */
+function circleAlerted(c: store.Circle): boolean {
+  return cstate(c.id).alerts.size > 0 || ((alertActive || alertFailed) && alertCircleId === c.id)
+}
+
+/** Horizontal chip row to switch between circles + add a new one. A circle with
+ *  a live SOS is held at the front of the row and flagged, so the emergency
+ *  stays one tap away no matter which circle is in focus. */
 function circleSwitcher(): string {
   if (persisted.circles.length < 1) return ''
   const active = activeCircle()?.id
-  const chips = persisted.circles.map((c) => {
+  const ordered = [...persisted.circles].sort((a, b) => Number(circleAlerted(b)) - Number(circleAlerted(a)))
+  const chips = ordered.map((c) => {
     const ttl = fmtTtl(c.expiresAt)
-    return `<button class="circle-chip${c.id === active ? ' on' : ''}" data-action="switch-circle" data-id="${c.id}">${esc(c.name)}${ttl ? `<span class="ttl">${ttl}</span>` : ''}</button>`
+    const alert = circleAlerted(c)
+    return `<button class="circle-chip${c.id === active ? ' on' : ''}${alert ? ' alert' : ''}" data-action="switch-circle" data-id="${c.id}">${alert ? '<span class="chip-dot"></span>' : ''}${esc(c.name)}${ttl ? `<span class="ttl">${ttl}</span>` : ''}</button>`
   }).join('')
   return `<div class="circle-switch">${chips}<button class="circle-chip add" data-action="add-circle" aria-label="Add a circle">＋</button></div>`
 }
 
 function orbState(): { cls: string; label: string; sub: string; action?: string } {
   const c = activeCircle() as store.Circle
+  // Name the circle when my SOS lives in a non-focused one, so "Help sent"
+  // still makes sense after a switch.
+  const alertCircle = persisted.circles.find((x) => x.id === alertCircleId)
+  const where = alertCircle && alertCircle.id !== c.id ? alertCircle.name : 'Your circle'
   if (alertFailed) return { cls: 'state-alert', label: "Help didn't send", sub: 'Tap to try again — check your signal', action: 'sos-retry' }
-  if (alertActive) return { cls: 'state-alert', label: 'Help sent', sub: 'Your circle has been alerted' }
+  if (alertActive) return { cls: 'state-alert', label: 'Help sent', sub: `${where} has been alerted` }
   const inc = incomingAlert()
   if (inc) return { cls: 'state-alert', label: `${inc.name} needs help`, sub: 'Tap to see where', action: 'see-alert' }
   if (checkinAlert) return { cls: 'state-alert', label: 'Check-in missed', sub: checkinAlertSub || "Someone hasn't checked in" }
@@ -2592,7 +2633,7 @@ function handleAction(action: string, node: HTMLElement): void {
       break
     }
     case 'pickup': void emit('pickup'); break
-    case 'sos-retry': void emit('help'); break
+    case 'sos-retry': void emit('help', persisted.circles.find((x) => x.id === alertCircleId) ?? null); break
     case 'geo-retry': geoIssue = null; sharing = false; startSharing(); break
     case 'im-safe': { const covert = wasCovertHold('im-safe'); void standDown(covert); break }
     case 'see-alert': goToAlert(); break
@@ -2910,6 +2951,7 @@ function stopSharing(): void {
   sharing = false
   breachActive = false
   geoIssue = null
+  dropMyPresence() // my pin must not keep claiming "sharing" after the toggle is off
   syncWatch()
   void stopBgWatch()
   render()
@@ -3043,8 +3085,8 @@ async function autoEmit(): Promise<void> {
   refresh()
 }
 
-async function emit(trigger: 'pickup' | 'help'): Promise<void> {
-  const c = activeCircle()
+async function emit(trigger: 'pickup' | 'help', circleOverride?: store.Circle | null): Promise<void> {
+  const c = circleOverride ?? activeCircle()
   const id = persisted.identity
   if (!c || !id) return
   // Freshest possible location for an explicit trigger: a one-shot GPS fix on a
@@ -3096,7 +3138,8 @@ async function emit(trigger: 'pickup' | 'help'): Promise<void> {
     toast(trigger === 'help' ? 'Help sent to your circle' : 'Pick-up request sent')
   } catch {
     // A failed SOS gets a PERSISTENT retry state on the orb, not a vanishing toast.
-    if (type === 'help') alertFailed = true
+    // Remember which circle it was for, so a retry after switching still targets it.
+    if (type === 'help') { alertFailed = true; alertCircleId = c.id }
     else toast("Couldn't send — check your connection.")
   }
   refresh()
@@ -3205,14 +3248,15 @@ async function standDown(coerced: boolean): Promise<void> {
     alertFailed = false
     alertCircleId = null
     cstate(c.id).alerts.delete(id.pk)
+    coarsenBeacon(c.id, id.pk) // emergency over — my pin reverts from precise to coarse
     toast("Stand-down sent — your circle knows you're OK")
     render()
   } catch { toast("Couldn't send — check your connection and try again") }
 }
 
 // The orb said "[Name] needs help — tap to see where": focus that circle, on the
-// map if we already hold a location for them, otherwise on the roster. Deliberately
-// NOT switchCircle(), which would clear my own live alert flags.
+// map if we already hold a location for them, otherwise on the roster. Not
+// switchCircle(), which would bounce the tab back to home.
 function goToAlert(): void {
   const inc = incomingAlert()
   if (!inc) return
@@ -3655,6 +3699,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       if (ac.coerced) return
       st.alerts.delete(ac.member)
       st.trails.delete(ac.member) // the emergency is over — stop showing where they'd been
+      coarsenBeacon(c.id, ac.member) // and their pin reverts from SOS-precise to coarse
       if (me && ac.member === me.pk) { alertActive = false; alertFailed = false }
       else toast(`${nameFor(ac.member)} is safe — alert stood down`)
     } else if (t === CHECKIN_SIGNAL_TYPE) {
@@ -3685,6 +3730,9 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       if (!me || bz.from !== me.pk) {
         const mine = !!me && bz.target === me.pk
         activeBuzz = { from: bz.from, reason: bz.reason, mine, circle: c.name }
+        // The buzz banner is in-app only — with the screen off it must still
+        // land as a system notification, like every other incoming signal.
+        notifyIfHidden([`${nameFor(bz.from)} buzzed${mine ? ' you' : ''}`, bz.reason, c.name].filter(Boolean).join(' · '))
         try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
       }
     } else if (t === RENDEZVOUS_SIGNAL_TYPE) {

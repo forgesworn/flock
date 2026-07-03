@@ -19,6 +19,23 @@ test.describe('location disclosure — between people', () => {
     await expect(B.locator('.member .when', { hasText: 'on the map' })).toBeVisible()
   })
 
+  // Stopping sharing must read honestly on my own device: my cached pin is
+  // dropped, so the map/roster can't keep claiming a live (possibly precise)
+  // location that is no longer being shared.
+  test("stop sharing — my own pin is dropped, the roster stops saying 'on the map'", async ({ browser }) => {
+    const A = await newPerson(browser)
+    await createCircle(A, { name: 'Sat night', mode: 'nightout' })
+
+    await startSharing(A) // coarse beacon auto-emits on the first fix
+    await gotoTab(A, 'circle')
+    await expect(A.locator('.member .when', { hasText: 'on the map' })).toBeVisible()
+
+    await gotoTab(A, 'home')
+    await A.click('[data-action="toggle-share"]') // plain tap-stop
+    await gotoTab(A, 'circle')
+    await expect(A.locator('.member .when', { hasText: 'on the map' })).toHaveCount(0)
+  })
+
   // Share-live (night-out) mode: a coarse location streams continuously so the
   // group can see who's still out.
   test('share-live A→B — A streams a coarse location, B sees A is out', async ({ browser }) => {

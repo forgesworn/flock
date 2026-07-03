@@ -170,6 +170,20 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
   padding: 1px 6px;
 }
 .circle-chip.add { color: var(--muted); padding: 7px 12px; font-size: 16px; line-height: 1; }
+.circle-chip.alert { color: var(--alert); border-color: var(--alert-dim); background: var(--alert-dim); }
+.circle-chip.alert.on { color: var(--alert); border-color: var(--alert); }
+.circle-chip .chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--alert);
+  box-shadow: 0 0 8px var(--alert);
+  animation: chip-pulse 1.6s ease-in-out infinite;
+}
+@keyframes chip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 
 /* ── Status orb ────────────────────────────────────────────── */
 .orb-wrap {

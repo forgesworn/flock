@@ -1,4 +1,14 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendSOS, gotoTab, openAdvanced, memberPill } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendSOS, gotoTab, openAdvanced, memberPill, myPubkey } from './fixtures'
+import type { Page } from '@playwright/test'
+
+/** Precisions of every cached pin held for `member`, straight from local state. */
+async function cachedPrecisions(page: Page, member: string): Promise<number[]> {
+  return page.evaluate((pk) => {
+    const s = JSON.parse(localStorage.getItem('flock:v1') as string)
+    return (Object.values(s.presence ?? {}) as { member: string; precision: number }[][])
+      .flat().filter((b) => b.member === pk).map((b) => b.precision)
+  }, member)
+}
 
 test.describe('truthful SOS states (audit Slice 11)', () => {
   // The orb must never claim "Help sent" when nothing went out. Break every relay,
@@ -39,6 +49,15 @@ test.describe('truthful SOS states (audit Slice 11)', () => {
     await A.click('[data-action="im-safe"]')
     await expect(A.locator('.orb-wrap.state-alert')).toHaveCount(0)
     await expect(B.locator('.orb-wrap.state-alert')).toHaveCount(0)
+
+    // The emergency over, A's cached pin degrades from SOS-precise (11) to the
+    // ambient coarse cell — on B's device AND on A's own screen.
+    const aPk = await myPubkey(A)
+    for (const device of [A, B]) {
+      const precisions = await cachedPrecisions(device, aPk)
+      expect(precisions.length).toBeGreaterThan(0)
+      expect(Math.max(...precisions)).toBeLessThanOrEqual(6)
+    }
 
     // Round two — but this time A is COERCED into "tell them you're fine".
     await sendSOS(A)
