@@ -75,6 +75,10 @@
     "./spokenverify": {
       "types": "./dist/spokenverify.d.ts",
       "import": "./dist/spokenverify.js"
+    },
+    "./joined": {
+      "types": "./dist/joined.d.ts",
+      "import": "./dist/joined.js"
     }
   },
   "files": [

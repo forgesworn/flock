@@ -65,6 +65,9 @@ import {
   buildDisbandSignal,
   decryptDisband,
   DISBAND_SIGNAL_TYPE,
+  buildJoinedSignal,
+  decryptJoined,
+  JOINED_SIGNAL_TYPE,
   buildOffGridSignal,
   decryptOffGrid,
   isOffGrid,
@@ -522,12 +525,26 @@ function joinFromLink(code: string): void {
     circle.members = [persisted.identity.pk]
     circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
     upsertCircle(circle, true)
+    announceJoin(circle)
     onboardStep = 'intro'
     adding = false
     tab = 'home'
     render()
     toast(`You've joined ${circle.name}`)
   } catch { toast('That join link is not valid — ask for a fresh one.') }
+}
+
+/** Tell the circle I exist (location-free, reveals nothing beyond what seed
+ *  possession already implies). Joining is otherwise entirely local — without
+ *  this, a QR/link joiner is invisible to every member until their first real
+ *  signal: "my friend joined but I can't see him". Best-effort: membership is
+ *  already saved locally, and they'd still appear on their first signal. */
+function announceJoin(circle: store.Circle): void {
+  const me = persisted.identity
+  if (!me) return
+  void buildJoinedSignal({ groupId: circle.id, seedHex: circle.seedHex, member: me.pk })
+    .then((ev) => publishSignal(ev, circle))
+    .catch(() => { /* offline — the relay-replayed wrap or first signal covers it */ })
 }
 
 // Render-on-state rebuilds the whole DOM, which used to silently discard whatever
@@ -1743,10 +1760,12 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
   }
   if (payload.t === 'invite') {
     if (persisted.circles.some((c) => c.id === payload.id)) return // already a member
-    upsertCircle({
+    const joined: store.Circle = {
       id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m,
       members: [signer.pubkey], checkinInterval: 0, joinedAt: nowSec(), reseededAt: nowSec(), ...(payload.x ? { expiresAt: payload.x } : {}),
-    }, true)
+    }
+    upsertCircle(joined, true)
+    announceJoin(joined) // the inviter expected me, but the REST of the circle didn't
     awaitingInvite = false
     onboardStep = 'intro'
     adding = false
@@ -3635,6 +3654,11 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       toast(`${d.by === me?.pk ? 'You' : nameFor(d.by)} disbanded ${name}`)
       render()
       return
+    } else if (t === JOINED_SIGNAL_TYPE) {
+      // A newcomer saying "I'm here" — carries nothing; the roster update below
+      // is the whole point. Nobody can announce anyone but themselves.
+      const j = await decryptJoined(c.seedHex, e.content)
+      if (j.member !== e.pubkey) return
     } else {
       return
     }
