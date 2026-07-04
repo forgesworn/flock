@@ -38,6 +38,13 @@ export interface Buzz {
   target?: string
   /** Unix seconds. */
   timestamp: number
+  /**
+   * Optional ask riding the buzz. `'location'` = a roll-call: the sender is
+   * asking members to report where they are. Receivers decide FOR THEMSELVES
+   * how (or whether) to answer — an ask is never an automatic disclosure.
+   * Older clients ignore the field and show the buzz text as normal.
+   */
+  ask?: 'location'
 }
 
 function validateReason(reason: string): string {
@@ -59,10 +66,14 @@ export async function buildBuzzSignal(params: {
   reason: string
   target?: string
   timestamp?: number
+  ask?: 'location'
 }): Promise<UnsignedEvent> {
   if (!HEX_64_RE.test(params.from)) throw new Error('from must be a 64-character lowercase hex pubkey')
   if (params.target !== undefined && !HEX_64_RE.test(params.target)) {
     throw new Error('target must be a 64-character lowercase hex pubkey')
+  }
+  if (params.ask !== undefined && params.ask !== 'location') {
+    throw new Error("ask must be 'location' when present")
   }
   const reason = validateReason(params.reason)
   const payload: Buzz = {
@@ -70,6 +81,7 @@ export async function buildBuzzSignal(params: {
     reason,
     timestamp: params.timestamp ?? Math.floor(Date.now() / 1000),
     ...(params.target !== undefined && { target: params.target }),
+    ...(params.ask !== undefined && { ask: params.ask }),
   }
   const encryptedContent = await encryptEnvelope(deriveGroupKey(params.seedHex), JSON.stringify(payload))
   return buildSignalEvent({ groupId: params.groupId, signalType: BUZZ_SIGNAL_TYPE, encryptedContent })
@@ -102,5 +114,8 @@ export async function decryptBuzz(seedHex: string, content: string): Promise<Buz
     reason: o.reason,
     timestamp: o.timestamp,
     ...(typeof o.target === 'string' && { target: o.target }),
+    // Unknown ask values are DROPPED, not fatal — a future ask kind must not
+    // make today's client throw away the human-readable buzz that carries it.
+    ...(o.ask === 'location' && { ask: 'location' as const }),
   }
 }

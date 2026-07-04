@@ -57,4 +57,30 @@ describe('buildBuzzSignal / decryptBuzz', () => {
   it('rejects a malformed target', async () => {
     await expect(buildBuzzSignal({ groupId: 'g', seedHex: SEED, from: A, reason: 'hi', target: 'nope' })).rejects.toThrow()
   })
+
+  it('round-trips a location roll-call ask (check-in)', async () => {
+    const event = await buildBuzzSignal({ groupId: 'g', seedHex: SEED, from: A, reason: 'Check in', ask: 'location', timestamp: 9 })
+    const back = await decryptBuzz(SEED, event.content)
+    expect(back.ask).toBe('location')
+    expect(back.reason).toBe('Check in')
+  })
+
+  it('a plain buzz carries no ask', async () => {
+    const event = await buildBuzzSignal({ groupId: 'g', seedHex: SEED, from: A, reason: 'Come home' })
+    expect((await decryptBuzz(SEED, event.content)).ask).toBeUndefined()
+  })
+
+  it('rejects an unknown ask on build', async () => {
+    await expect(buildBuzzSignal({ groupId: 'g', seedHex: SEED, from: A, reason: 'hi', ask: 'battery' as never })).rejects.toThrow()
+  })
+
+  it('drops (never throws on) an unknown ask when decrypting — forwards-compatible', async () => {
+    // Hand-roll a payload a FUTURE client might send: today's client must keep
+    // the human-readable buzz and simply ignore the ask it doesn't know.
+    const { deriveGroupKey, encryptEnvelope } = await import('canary-kit/sync')
+    const content = await encryptEnvelope(deriveGroupKey(SEED), JSON.stringify({ from: A, reason: 'hi', timestamp: 1, ask: 'battery' }))
+    const back = await decryptBuzz(SEED, content)
+    expect(back.reason).toBe('hi')
+    expect(back.ask).toBeUndefined()
+  })
 })
