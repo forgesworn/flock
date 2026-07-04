@@ -50,4 +50,25 @@ test.describe('remove member — cut someone off (3 people)', () => {
     await settle(C, 2000)
     await expect(C.locator('.buzz-banner')).toHaveCount(0)
   })
+
+  // The security property above is covered end-to-end via the Advanced fold;
+  // this just proves Remove is ALSO reachable right on the Circle tab's member
+  // row — not buried three taps deep in You -> Settings -> Advanced, which is
+  // where someone actually looking at their roster would expect to find it.
+  test('Remove is reachable directly from the Circle tab, not just Advanced settings', async ({ browser }) => {
+    const A = await newPerson(browser)
+    const B = await newPerson(browser)
+    await createCircle(A, { name: 'The Smiths' })
+    const code = await inviteCode(A)
+    await joinByCode(B, code)
+    await sendBuzz(B, 'B here') // seed A's roster with B
+
+    await gotoTab(A, 'circle')
+    const bPk = await myPubkey(B)
+    const row = A.locator('.member', { hasText: 'Member' }).first()
+    await expect(row.locator('[data-action="ask-remove"]')).toBeVisible()
+    await row.locator('[data-action="ask-remove"]').click()
+    await expect(A.locator(`[data-action="remove-member"][data-pk="${bPk}"]`)).toBeVisible()
+    await A.click('[data-action="cancel-remove"]') // don't actually remove — the confirm path is covered above
+  })
 })
