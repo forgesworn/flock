@@ -35,10 +35,17 @@ export const SIGNAL_TYPES = {
   breach: 'breach',
   pickup: 'pickup',
   help: 'help',
+  /** Cover traffic (audit F1 / PRIVACY.md timing hygiene): a decoy publish, wire-
+   *  identical to a real beacon, carrying only caller-supplied filler. Receivers
+   *  match no known handler for `t=cover` and silently drop it (see app.ts's
+   *  `onIncoming`) — it exists purely to narrow the moving-vs-stationary cadence
+   *  gap a logging relay could otherwise read off arrival timing/volume. */
+  cover: 'cover',
 } as const
 
-/** Signal types whose payload is an encrypted location beacon. */
-export type LocationSignalType = 'beacon' | 'breach' | 'pickup'
+/** Signal types whose payload is an encrypted location beacon (or, for `cover`,
+ *  shaped identically but meaningless). */
+export type LocationSignalType = 'beacon' | 'breach' | 'pickup' | 'cover'
 
 /** All flock signal types. */
 export type SignalType = LocationSignalType | 'help'

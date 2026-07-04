@@ -37,11 +37,34 @@ members receive disclosures; `child`/`peer` members emit them.
 All events are canary-kit SSG events. Group ids are hashed (`SHA-256`) into the
 `d` tag of signals for privacy, exactly as canary-kit does.
 
+**What this section describes vs. what a relay actually sees (2026-07-04
+alignment — the relay-privacy audit flagged this as spec drift, ties to F5).**
+Every kind number below (`20078`, `30078`, `8078`) is the shape of the *inner*,
+pre-wrap event as built by canary-kit/flock's builders — never what is
+published bare. In shipped flock, **every** signal is additionally NIP-59
+gift-wrapped (kind `1059`) to a rotating group-inbox key before it ever reaches
+a relay (`docs/PRIVACY.md` item 1, "gift-wrap-everything"); a relay sees only
+opaque `kind:1059` from a throwaway sender, never the `t`/`d` tags or plaintext
+content described here. Do not read this section as "what to publish" — it is
+"what the wrap conceals." A caller that ever publishes one of these bare is
+reintroducing the exact leak (stable d-tag, plaintext type, real pubkey) this
+architecture exists to close; §3.4's spoken-code kind-`8078` reference event is
+the one deliberate exception — and even that carries only a disposable
+reference, never the seed, since the 2026-07-04 hardening.
+
 ### 3.1 Group state — kind `30078` (replaceable)
 
 Built with `buildGroupStateEvent` (canary-kit/nostr). `content` is the NIP-44
 encrypted group config. Tags: `d = ssg/<groupId>`, one `p` per member, NIP-32
 labels, and optionally `rotation`, `tolerance`, and **`expiration`** (NIP-40).
+
+**Not currently published by the shipped PWA.** `buildNightOutGroupEvent` /
+`buildGroupStateEvent` are library-level (canary-kit interop, and available for
+a future relay-visible group-directory use case), but `app/` manages circle
+lifecycle entirely through the gift-wrapped invite/reseed channel (§3.4) plus
+locally-held state — no kind-`30078` event is ever published today. If/when
+something does publish one, it MUST go out gift-wrapped like every other
+signal, never bare (per the note above).
 
 - **Family** groups omit `expiration` (ongoing).
 - **Night-out** groups MUST set `expiration = startedAt + durationSeconds`
@@ -161,6 +184,20 @@ The circle **seed** is the shared secret. Two distribution paths:
   gift wrap (kind 1059), published `#p`-tagged to the recipient. Only they can
   unwrap it; the relay learns neither sender nor contents. The recipient shares
   their npub (public, non-secret) out of band first.
+- **Spoken (6-word code)** — for when neither of the above works (a QR that
+  can't be scanned, no npub exchanged yet): the inviter parks a fresh, one-time
+  **reference** keypair's secret — never the circle seed — encrypted under a
+  scrypt-stretched code, as a plain (not gift-wrapped) kind-`8078` event tagged
+  by a hash of the code (`app/src/wordcode.ts`). The real invite still travels
+  as an ordinary gift-wrapped `{t:'invite', …}` rumour (above), addressed to
+  that reference's pubkey instead of a real npub. A relay that captures the
+  low-entropy-protected event learns nothing but a disposable handle; the
+  joiner deletes it (NIP-09) the moment the real invite is in hand. Weaker than
+  the 256-bit paths above by design (offer both) — hardened 2026-07-04 (6
+  words/66 bits, costlier scrypt, reference-not-seed, delete-on-fetch) after an
+  audit found the original 4-word version parked the seed directly, and that
+  its kind (`20079`) sat in NIP-01's ephemeral range so relays never actually
+  stored it for a joiner to fetch.
 
 **Reseed / member removal** reuses the same primitive: generate a fresh seed and
 `wrapManyEvents` it as `{t:'reseed', …}` to the members you keep. A removed member

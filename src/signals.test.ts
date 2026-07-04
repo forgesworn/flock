@@ -57,6 +57,26 @@ describe('buildLocationSignal', () => {
   })
 })
 
+describe('cover-traffic signal (audit F1 / PRIVACY.md timing hygiene)', () => {
+  it('builds a t=cover signal, wire-identical in shape to a real beacon', async () => {
+    const event = await buildLocationSignal({
+      groupId: GROUP, seedHex: SEED, signalType: SIGNAL_TYPES.cover, geohash: 'zzzzzz', precision: 6,
+    })
+    expect(event.kind).toBe(SIGNAL_KIND)
+    expect(tagValue(event, 't')).toBe('cover')
+    expect(typeof event.content).toBe('string')
+    expect(event.content.length).toBeGreaterThan(0)
+  })
+
+  it('decrypts with the ordinary beacon key like any other location signal (no new crypto)', async () => {
+    const event = await buildLocationSignal({
+      groupId: GROUP, seedHex: SEED, signalType: SIGNAL_TYPES.cover, geohash: 'zzzzzz', precision: 6,
+    })
+    const payload = await decryptBeacon(deriveBeaconKey(SEED), event.content)
+    expect(payload.geohash).toBe('zzzzzz')
+  })
+})
+
 describe('buildHelpSignal', () => {
   it('builds a help signal carrying a decryptable duress alert', async () => {
     const event = await buildHelpSignal({

@@ -6,23 +6,26 @@ import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
 import { buildSignInOptions } from './signin'
-import { PRIVATE_RELAYS, parseRelayList } from './relays'
+import { PRIVATE_RELAYS, ONION_RELAYS, parseRelayList, unknownRelays, effectiveRelays } from './relays'
 import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
-import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
+import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
-import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, buildWordInvite, readWordInvite } from './wordcode'
+import { createMeshBuffer, remember as rememberMeshWrap, liveEntries as liveMeshEntries, type MeshBufferState } from './meshBuffer'
+import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, wordInviteParkKey, buildWordInviteRef, readWordInviteRef, buildWordInviteDeletion } from './wordcode'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
+import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure'
+import { bytesToHex } from '@noble/hashes/utils.js'
 import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { isNativeShell, shareOrigin, isApkUpdateAvailable } from './native'
 import { rotationDue, refreshDue } from './rotation'
-import { buildInviteWrap, buildReseedWraps, readInvite, buildDmWrap, readDmWrap, type DirectMessage } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildDmWrap, readDmWrap, type DirectMessage } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
 import { generateStorageSecret, setupPin, unlockWithPin, unlockWithGrace, burnLock } from './lock'
@@ -68,6 +71,17 @@ const beaconCadence = new Map<string, BeaconCadence>()
 // "stale" window, so a still member keeps reading as "active" without spamming.
 const COARSE_MIN_INTERVAL = 45 // never faster than this
 const COARSE_HEARTBEAT = 300 //  …but re-affirm presence every 5 min when still
+// Timing hygiene (audit F1): jitter softens the exact 45s/300s periods; cover
+// traffic narrows the ~6x moving-vs-still swing with a low-rate decoy publish
+// that fills the quiet stretch between heartbeats (src/signals.ts `cover` type
+// — wire-identical, discarded unread by every receiver). Math.random() here
+// mirrors giftwrap.ts's own NIP-59 timing blur (non-secret, purely obfuscating
+// a fixed schedule).
+const CADENCE_JITTER_FRACTION = 0.2
+const COVER_INTERVAL_SECONDS = 90 // between the move floor and the still heartbeat
+// Last cover-traffic publish per circle — session-scoped is enough, a restart
+// just resumes the low-rate drip promptly (mirrors beaconCadence's reset-on-restart).
+const coverCadence = new Map<string, number>()
 // Adaptive sampling: back off the GPS poll when stationary, staying under the
 // 600 s presence "stale" window so a still member never reads as "gone home".
 const SAMPLE_POLL_BOUNDS = { minSeconds: 30, maxSeconds: 180 }
@@ -91,7 +105,7 @@ let awaitingInvite = false
 let pendingInviteNpub: string | null = null // a scanned invite-key link, prefilled into the send form
 let showInviteLinkText = false // clipboard copy failed — render the link as selectable text instead
 let showInvite = false // Circle page: the top "Invite" button reveals the QR + link panel
-let spokenCode: string[] | null = null // the live 4-word invite code, once generated + parked
+let spokenCode: string[] | null = null // the live 6-word invite code, once generated + parked
 let spokenCodeBusy = false // deriving/publishing a spoken code (scrypt + relay round-trip)
 let updateAvailable = false // native shell only: the hosted deploy is newer than this build
 let pendingJoin: store.Circle | null = null // a link/QR join awaiting the guest's name (join-name screen)
@@ -179,6 +193,16 @@ function markWrapSeen(id: string): boolean {
   if (seenWrapIds.size > 1000) seenWrapIds.delete(seenWrapIds.values().next().value as string)
   return true
 }
+// Mesh v2 store-and-forward (app/src/meshBuffer.ts): wraps seen in crowd-mesh
+// mode are RETAINED (200 wraps / 15 min TTL) and re-offered to later-arriving
+// peers on the next mesh (re)start — today a frame floods only to peers
+// connected at that instant, so a phone walking into range a minute later got
+// nothing. Only touched in mesh mode; discreet mode stays single-hop, as
+// designed. A full peer-connect manifest handshake (DarkFi tips-DAG-style) is
+// hardware-gated — see docs/plans/2026-07-04-ble-mesh-v2-test-plan.md — this
+// is the pure retention half plus a best-effort periodic re-flood using only
+// the EXISTING plugin surface (broadcastBle), needing no native changes.
+let meshBuffer: MeshBufferState = createMeshBuffer()
 // The open private-chat thread sheet, when any: the peer's pubkey. Mounted as an
 // overlay (like the old compose sheet) so opening it never tears the map.
 let dmPeer: string | null = null
@@ -295,6 +319,7 @@ function removeCircle(id: string): void {
   persisted.circles = persisted.circles.filter((c) => c.id !== id)
   circleStates.delete(id)
   beaconCadence.delete(id)
+  coverCadence.delete(id)
   delete persisted.presence[id]
   if (persisted.activeCircleId === id) persisted.activeCircleId = persisted.circles[0]?.id ?? null
   store.save(persisted)
@@ -304,7 +329,7 @@ function sweepExpired(): boolean {
   const now = nowSec()
   const live = persisted.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
   if (live.length === persisted.circles.length) return false
-  for (const c of persisted.circles) if (!live.includes(c)) { circleStates.delete(c.id); beaconCadence.delete(c.id); delete persisted.presence[c.id] }
+  for (const c of persisted.circles) if (!live.includes(c)) { circleStates.delete(c.id); beaconCadence.delete(c.id); coverCadence.delete(c.id); delete persisted.presence[c.id] }
   persisted.circles = live
   if (!live.some((c) => c.id === persisted.activeCircleId)) persisted.activeCircleId = live[0]?.id ?? null
   store.save(persisted)
@@ -506,12 +531,88 @@ async function syncBle(): Promise<void> {
       await ble.startBle({ room: uuid, selfId: id.pk, serviceUuid: uuid, hops }, onBleFrame)
       bleActive = true
       bleMode = mesh ? 'mesh' : 'discreet'
+      // Mesh v2 store-and-forward: re-offer everything still-live in the buffer
+      // on every mesh (re)start — the JS-level approximation of "re-advertise
+      // to later-arriving peers" until a native peer-connect hook exists (see
+      // the test-plan doc). Best-effort; a peer who already has an entry just
+      // dedups it (markWrapSeen on their side).
+      if (bleMode === 'mesh') {
+        for (const entry of liveMeshEntries(meshBuffer, nowSec())) void ble.broadcastBle(entry.data)
+      }
     } else if (bleActive || ble.bleRunning()) {
       await ble.stopBle()
       bleActive = false
       bleMode = 'discreet'
     }
   } catch { bleActive = false; bleMode = 'discreet' /* older shell / BLE unavailable / denied — relay carries on */ }
+}
+
+// ── Tor `.onion` relay endpoint (native, opt-in, fail-loud) ──────────────────
+// docs/plans/2026-07-04-mesh-bridge-goal.md Task B. Off by default; DarkFi
+// reverted Tor-by-default (unreliable on mobile), so this is a deliberate user
+// toggle, never automatic — and it must NEVER silently fall back to clearnet:
+// the user chose the property (no IP exposure to the relay), so a route that
+// isn't ready has to fail loud, not degrade invisibly.
+let orbotDetected = false // refreshed on toggle-on, boot, and app-foreground — native shell only
+
+/** Refresh whether Orbot's SOCKS proxy is reachable. Never throws; leaves
+ *  orbotDetected false on the web PWA, an older shell, or any probe failure —
+ *  activeRelays() below then fails loud rather than silently using clearnet. */
+async function syncTor(): Promise<void> {
+  if (!isNativeShell() || !persisted.torRelay) { orbotDetected = false; return }
+  try {
+    const orbot = await import('../../native/orbot')
+    orbotDetected = await orbot.detectOrbot()
+  } catch { orbotDetected = false }
+}
+
+/** The relay set for this call, honouring the Tor toggle (relays.ts
+ *  effectiveRelays) — byte-for-byte `persisted.relayUrls` when Tor is off (the
+ *  default, and every existing flow, untouched). THROWS when Tor is on but the
+ *  route isn't ready (fail loud): callers already inside a try/catch let that
+ *  surface as their existing failure toast. See the two variants below for
+ *  call sites without one. */
+function activeRelays(): string[] {
+  return effectiveRelays({
+    clearnetRelays: persisted.relayUrls,
+    onionRelays: ONION_RELAYS,
+    torEnabled: !!persisted.torRelay,
+    orbotDetected,
+  })
+}
+
+/** activeRelays(), toasting once and returning null instead of throwing — for
+ *  fire-and-forget publishes with no surrounding try/catch. */
+function activeRelaysOrToast(): string[] | null {
+  try { return activeRelays() } catch (err) {
+    toast(err instanceof Error ? err.message : 'Tor routing is on but not ready')
+    return null
+  }
+}
+
+/** activeRelays(), swallowing the error with no toast — for bookkeeping that
+ *  runs on every render (subscription set-up); the toggle flip and the
+ *  foreground refresh already own telling the user once, so this must not spam. */
+function activeRelaysQuiet(): string[] | null {
+  try { return activeRelays() } catch { return null }
+}
+
+/** Flip "route through Tor when available". Off by default; the Settings note
+ *  labels it clearly unreliable on mobile (DarkFi's lesson) — a deliberate
+ *  choice, never automatic, and the PWA copy explains it needs the app + Orbot. */
+async function toggleTorRelay(): Promise<void> {
+  persisted.torRelay = !persisted.torRelay
+  store.save(persisted)
+  render()
+  await syncTor()
+  toast(!persisted.torRelay
+    ? 'Tor routing off'
+    : ONION_RELAYS.length === 0
+      ? 'Tor routing is on, but no .onion relay is set up yet'
+      : orbotDetected
+        ? 'Routing through Tor'
+        : "Tor routing is on, but Orbot wasn't found — open Orbot and make sure it's running")
+  render()
 }
 
 /** A wrap arrived over BLE: feed it into the SAME pipeline as a relay wrap. The
@@ -524,6 +625,10 @@ function onBleFrame(data: string): void {
   try { ev = JSON.parse(data) } catch { return }
   if (typeof ev?.id !== 'string' || typeof ev.pubkey !== 'string' || typeof ev.content !== 'string') return
   if (bleActive && !markWrapSeen(ev.id)) return
+  // Mesh v2 store-and-forward: retain it (mesh mode only — discreet stays
+  // single-hop) so a peer who walks into range after this instant still gets
+  // it on the next mesh (re)start (see syncBle's re-flood, above).
+  if (bleMode === 'mesh') meshBuffer = rememberMeshWrap(meshBuffer, { id: ev.id, data }, nowSec())
   const wrap = { pubkey: ev.pubkey, content: ev.content, id: ev.id }
   for (const c of persisted.circles) void dispatchWrap(c.id, wrap, deriveInbox(c.seedHex).sk)
   // BRIDGE: a wrap that reached me over Bluetooth may have come from a phone
@@ -536,7 +641,8 @@ function onBleFrame(data: string): void {
   // whoever has bars carries the crowd). Discreet mode only ever carries the
   // active circle's wraps, which my IP already subscribes to.
   if (bleActive && typeof ev.sig === 'string' && navigator.onLine) {
-    void svc.publishSigned(persisted.relayUrls, ev as never).catch(() => { /* best-effort */ })
+    const relays = activeRelaysQuiet()
+    if (relays) void svc.publishSigned(relays, ev as never).catch(() => { /* best-effort */ })
   }
 }
 
@@ -642,6 +748,10 @@ function bootUnlocked(): void {
     // Bring BLE-nearby up to match its toggle (off-relay, additive). No-op unless
     // opted in; failures leave it off and the relay carries everything.
     void syncBle()
+    // Re-check Orbot reachability to match the Tor toggle. No-op unless opted
+    // in; ensureSubscriptions()/ensureInviteSub() re-run on the next render
+    // regardless, so a status change here takes effect promptly.
+    void syncTor().then(() => render())
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
     // The interval above is unreliable while backgrounded, so also re-check the
@@ -1267,7 +1377,7 @@ function inviteSections(): string {
         <div class="wordcode">${spokenCode.map((w) => `<span class="wc-word">${esc(w)}</span>`).join('')}</div>
         <button class="btn small" data-action="copy-word-code">Copy the words</button>
         <button class="btn small ghost" data-action="new-word-code"${spokenCodeBusy ? ' disabled' : ''}>New code</button>
-        <div class="note">Read these four words to them, or send them over Signal — they tap “Join with a code” and type them in. Works when a QR can’t be scanned. Good for 15 minutes, then make a new one.</div>
+        <div class="note">Read these six words to them, or send them over Signal — they tap “Join with a code” and type them in. Works when a QR can’t be scanned. Good for 15 minutes, then make a new one.</div>
       ` : `
         <button class="btn primary" data-action="share-word-code"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Setting up…' : 'Make a spoken code'}</button>
         <div class="note">Four plain words you can read out or send over Signal — no scanning, no long link. The words aren’t the secret; they unlock a one-time invite parked on your private relay, and expire in 15 minutes.</div>
@@ -1428,7 +1538,7 @@ function settingsSections(me: store.Identity, c: store.Circle): string {
         <span>Show public profiles</span>
         <button class="switch${persisted.showProfiles ? ' on' : ''}" data-action="toggle-profiles" role="switch" aria-checked="${!!persisted.showProfiles}"><span class="knob"></span></button>
       </div>
-      <div class="note">Off by default. When on, flock fetches public names &amp; photos from public relays — which tells them who you're looking up. Your private nicknames always work and never leave this device.</div>
+      <div class="note">Off by default. When on, flock asks public relays for each person's name/photo one at a time — never your whole circle in one request — but a relay can still notice several of your requests arriving close together and infer they're linked. Your private nicknames always work and never leave this device.</div>
     </div>
     <div class="section-title" style="margin-top:18px">Backup</div>
     <div class="card stack">
@@ -1453,6 +1563,14 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
       <div class="field"><label for="relay">Server addresses (one per line)</label><textarea class="input" id="relay" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false">${esc(persisted.relayUrls.join('\n'))}</textarea></div>
       <div class="note">Alerts go to every server here, so one being down can't swallow an SOS. Add a backup you trust — even encrypted, a public server still sees the timing of your traffic.</div>
       <button class="btn small" data-action="save-relay">Save servers</button>
+      <div class="row" style="justify-content:space-between;margin-top:14px">
+        <span>Route through Tor when available</span>
+        <button class="switch${persisted.torRelay ? ' on' : ''}" data-action="toggle-tor" role="switch" aria-checked="${!!persisted.torRelay}"><span class="knob"></span></button>
+      </div>
+      <div class="note">Off by default. Hides your IP from the relay by routing through Tor (Orbot) instead — but Tor is known to be unreliable on mobile networks, so treat this as experimental and turn it off if alerts start failing.
+        ${isNativeShell()
+          ? ' Needs Orbot installed and running; flock never falls back to a plain connection silently — if the Tor route isn\'t ready, sending fails loudly instead.'
+          : ' Needs the flock app (not this browser) plus Orbot — the web version has no way to reach it.'}</div>
     </div>
     <div class="section-title" style="margin-top:18px">Circle security</div>
     <div class="card stack">
@@ -1582,8 +1700,8 @@ function onboardingView(): string {
   } else if (onboardStep === 'join') {
     inner = `
       <h1>Join a circle</h1>
-      <p class="tagline">Type the four words someone read you, paste an invite code, or join remotely by sharing your key.</p>
-      <div class="field" style="text-align:left;margin-bottom:12px"><label for="jwords">Spoken words</label><input class="input" id="jwords" placeholder="four words, in order" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      <p class="tagline">Type the six words someone read you, paste an invite code, or join remotely by sharing your key.</p>
+      <div class="field" style="text-align:left;margin-bottom:12px"><label for="jwords">Spoken words</label><input class="input" id="jwords" placeholder="six words, in order" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
       <div class="actions" style="margin-bottom:18px">
         <button class="btn primary" data-action="join-words"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Finding invite…' : 'Join with words'}</button>
       </div>
@@ -2092,7 +2210,9 @@ async function publishSignal(unsigned: { kind: number; content: string; tags: st
   if (bleActive && (bleMode === 'mesh' || circle.id === activeCircle()?.id)) {
     try { const ble = await import('../../native/ble'); await ble.broadcastBle(JSON.stringify(wrap)) } catch { /* best-effort */ }
   }
-  await svc.publishSigned(persisted.relayUrls, wrap as never)
+  const relays = activeRelaysOrToast()
+  if (!relays) return // Tor is on but not ready — already toasted; never fall back to clearnet
+  await svc.publishSigned(relays, wrap as never)
 }
 
 // ── Members, invites & reseed ────────────────────────────────────────────────
@@ -2116,12 +2236,16 @@ function ensureMember(circle: store.Circle, pk: string, expected = false): void 
 function ensureInviteSub(): void {
   const id = persisted.identity
   if (!id) { stopInviteSub?.(); stopInviteSub = null; inviteSubKey = ''; return }
-  const key = `${id.pk}@${persisted.relayUrls.join(',')}`
+  // Runs on every render — quiet on a Tor-not-ready failure (the toggle flip
+  // and the foreground refresh already own telling the user once).
+  const relays = activeRelaysQuiet()
+  if (!relays) { stopInviteSub?.(); stopInviteSub = null; inviteSubKey = ''; return }
+  const key = `${id.pk}@${relays.join(',')}`
   if (key === inviteSubKey && stopInviteSub) return
   stopInviteSub?.()
   inviteSubKey = key
   // Listen on our derived personal-inbox tag, not our npub — the relay never sees a real key.
-  stopInviteSub = svc.subscribeGiftWraps(persisted.relayUrls, personalInboxTag(id.pk), (e) => { void onInviteWrap(e) })
+  stopInviteSub = svc.subscribeGiftWraps(relays, personalInboxTag(id.pk), (e) => { void onInviteWrap(e) })
 }
 
 async function onInviteWrap(e: { pubkey: string; content: string; tags: string[][] }): Promise<void> {
@@ -2160,6 +2284,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     cstate(existing.id).beacons.clear()
     cstate(existing.id).lost.clear()
     beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
+    coverCadence.delete(existing.id)
     dropPresence(existing.id) // old-key pins are meaningless under the new seed
     toast("This circle's security was reset")
     refresh()
@@ -2178,7 +2303,7 @@ async function sendInvite(): Promise<void> {
   if (pk === signer.pubkey) { toast("That's your own key"); return }
   try {
     const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
-    await svc.publishSigned(persisted.relayUrls, wrap as never)
+    await svc.publishSigned(activeRelays(), wrap as never)
     ensureMember(c, pk, true) // I sent this invite — their arrival is not news to me
     pendingInviteNpub = null
     toast('Secure invite sent')
@@ -2197,12 +2322,13 @@ async function reseedCircle(removePk?: string, circle: store.Circle | null = act
   try {
     if (recipients.length) {
       const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
-      for (const w of wraps) await svc.publishSigned(persisted.relayUrls, w as never)
+      for (const w of wraps) await svc.publishSigned(activeRelays(), w as never)
     }
     patchCircleById(c.id, { seedHex: seed, epoch, reseededAt: nowSec(), seedRefreshedAt: nowSec(), members: (c.members ?? []).filter((pk) => pk !== removePk) })
     cstate(c.id).beacons.clear()
     cstate(c.id).lost.clear()
     beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
+    coverCadence.delete(c.id)
     dropPresence(c.id) // old-key pins are meaningless under the new seed
     if (!silent) toast(removePk ? 'Member removed — circle security reset' : 'Circle security reset')
     render()
@@ -2228,7 +2354,7 @@ async function maybeRotateSeeds(): Promise<void> {
         const recipients = (c.members ?? []).filter((pk) => pk !== me)
         if (recipients.length) {
           const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: c.seedHex, n: c.name, m: c.mode })
-          for (const w of wraps) await svc.publishSigned(persisted.relayUrls, w as never)
+          for (const w of wraps) await svc.publishSigned(activeRelays(), w as never)
         }
         patchCircleById(c.id, { seedRefreshedAt: now })
       } catch { /* transient — the next hourly check retries */ }
@@ -2534,7 +2660,7 @@ async function sendDm(pk: string, text: string): Promise<void> {
   if (pk === id.pk) { toast("That's you"); return }
   try {
     const wrap = await buildDmWrap(signer, pk, { circleId: c.id, text: t })
-    await svc.publishSigned(persisted.relayUrls, wrap as never)
+    await svc.publishSigned(activeRelays(), wrap as never)
     appendDm(pk, { from: id.pk, text: t, at: nowSec() }) // my side of the thread
   } catch { toast('Message failed — check your connection') }
 }
@@ -2806,6 +2932,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'save-petname': savePetname(node.dataset.pk as string); break
     case 'cancel-petname': editingPetname = null; render(); break
     case 'toggle-profiles': toggleProfiles(); break
+    case 'toggle-tor': void toggleTorRelay(); break
     case 'set-units': {
       const u = node.dataset.units === 'imperial' ? 'imperial' : 'metric'
       if (persisted.units !== u) { persisted.units = u; store.save(persisted) }
@@ -2888,18 +3015,33 @@ function doJoin(): void {
   }
 }
 
-/** Generate a 4-word invite code, park the encrypted invite on the private relays
- *  under its code-derived tag, and show the words to read aloud / send over Signal.
- *  For when a QR can't be scanned (e.g. an iPhone PWA opens the link in Safari). */
+/** Generate a 6-word invite code and show the words to read aloud / send over
+ *  Signal. For when a QR can't be scanned (e.g. an iPhone PWA opens the link
+ *  in Safari).
+ *
+ *  Audit F4 hardening: the code itself never protects the real circle seed.
+ *  It parks a fresh, one-time REFERENCE keypair on the private relays (low
+ *  security — only the code's own entropy guards it); the real invite travels
+ *  separately, gift-wrapped (NIP-59, full 256-bit ECDH) to that reference's
+ *  pubkey via the same channel a QR/link invite already uses. Even a
+ *  successful offline brute-force of the six words yields only a disposable
+ *  handle, never the seed directly. */
 async function shareWordCode(): Promise<void> {
   const c = activeCircle()
-  if (!c || spokenCodeBusy) return
+  const signer = getSigner()
+  if (!c || !signer || spokenCodeBusy) return
   spokenCodeBusy = true; render()
   try {
     const words = newWordCode()
-    const seed = await deriveWordCodeSeed(words)
-    const payload = { v: 1 as const, id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) }
-    await svc.publishWordInvite(persisted.relayUrls, await buildWordInvite(seed, payload, nowSec()))
+    const codeSeed = await deriveWordCodeSeed(words)
+    const refSk = generateSecretKey()
+    const refPk = getPublicKey(refSk)
+    const parkSk = wordInviteParkKey(codeSeed) // deterministic — the joiner reconstructs it for delete-on-fetch
+    const refSigned = finalizeEvent(await buildWordInviteRef(codeSeed, bytesToHex(refSk), nowSec()), parkSk)
+    const payload = { t: 'invite' as const, id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) }
+    const inviteWrap = await buildInviteWrap(signer, refPk, payload)
+    await svc.publishSigned(activeRelays(), refSigned as never)
+    await svc.publishSigned(activeRelays(), inviteWrap as never)
     spokenCode = words
   } catch {
     toast("Couldn't reach a relay to set up the code — check your connection and try again.")
@@ -2908,8 +3050,10 @@ async function shareWordCode(): Promise<void> {
   }
 }
 
-/** Join by typing a 4-word code: derive its seed, fetch the parked invite from the
- *  private relays, decrypt it, and join — the same landing as a scanned link. */
+/** Join by typing a 6-word code: derive its seed, fetch the parked reference,
+ *  then fetch + decrypt the real invite it points to — the same landing as a
+ *  scanned link. Deletes the parked reference once the real invite is safely
+ *  in hand (delete-on-fetch, audit F4) — best-effort, never blocks the join. */
 async function joinWithWords(): Promise<void> {
   const raw = (document.getElementById('jwords') as HTMLInputElement | null)?.value ?? ''
   let words: string[]
@@ -2917,12 +3061,27 @@ async function joinWithWords(): Promise<void> {
   if (words.length !== WORD_INVITE.words) { toast(`Enter all ${WORD_INVITE.words} words, in order.`); return }
   spokenCodeBusy = true; render()
   try {
-    const seed = await deriveWordCodeSeed(words)
-    const ev = await svc.fetchWordInvite(persisted.relayUrls, WORD_INVITE.kind, wordInviteTag(seed))
-    if (!ev) { toast('No invite found for those words — they expire after 15 minutes, so ask for a fresh code.'); return }
-    const p = await readWordInvite(seed, ev)
+    const codeSeed = await deriveWordCodeSeed(words)
+    const refEvent = await svc.fetchWordInvite(activeRelays(), WORD_INVITE.kind, wordInviteTag(codeSeed))
+    if (!refEvent) { toast('No invite found for those words — they expire after 15 minutes, so ask for a fresh code.'); return }
+    const ref = await readWordInviteRef(codeSeed, refEvent)
+    const refSk = store.fromHex(ref.ref)
+    const refPk = getPublicKey(refSk)
+    const inviteWrap = await svc.fetchGiftWrap(activeRelays(), personalInboxTag(refPk))
+    if (!inviteWrap) { toast("The invite is still on its way — wait a moment and try the same words again."); return }
+    const p = await readInviteViaRef(refSk, inviteWrap)
+    if (!p) throw new Error('invalid invite')
     const circle: store.Circle = { id: p.id, seedHex: p.s, name: p.n || 'Circle', mode: p.m === 'nightout' ? 'nightout' : 'family', ...(typeof p.x === 'number' ? { expiresAt: p.x } : {}) }
     persisted.identity ??= store.createIdentity()
+    // Delete-on-fetch: remove the low-entropy-protected reference now it has
+    // served its one purpose, closing the window an eventual brute-force of
+    // the code could otherwise exploit. Best-effort — a relay that ignores
+    // NIP-09 just leaves it to its own 15-minute expiry regardless.
+    try {
+      const parkSk = wordInviteParkKey(codeSeed)
+      const del = finalizeEvent(buildWordInviteDeletion(refEvent.id, nowSec()), parkSk)
+      await svc.publishSigned(activeRelays(), del as never)
+    } catch { /* hygiene only — never blocks the join */ }
     if (persisted.circles.some((x) => x.id === circle.id)) { switchCircle(circle.id); adding = false; onboardStep = 'intro'; tab = 'home'; render(); return }
     if (!persisted.myHandle) { pendingJoin = circle; render(); return }
     completeJoin(circle)
@@ -3146,6 +3305,8 @@ function onForeground(): void {
   void checkForUpdate()
   void refreshBatteryExempt()
   void refreshDndAccess()
+  // Orbot may have been started/stopped while flock was backgrounded.
+  void syncTor().then(() => render())
   // The app being open IS the read — clear delivered message notifications,
   // exactly as Signal does. Foreground-service notifications are immune.
   void import('../../native/notify').then((n) => n.clearDelivered()).catch(() => { /* shell only */ })
@@ -3215,17 +3376,35 @@ async function autoEmit(): Promise<void> {
   if (!type || type === 'help' || plan.action === 'withhold') { refresh(); return }
   const geohash = encode(f.lat, f.lon, plan.precision)
   const prev = beaconCadence.get(c.id) ?? { lastGeohash: null, lastSentAt: 0 }
-  if (!shouldEmitBeacon(geohash, prev, nowSec(), {
-    minIntervalSeconds: COARSE_MIN_INTERVAL,
-    heartbeatSeconds: COARSE_HEARTBEAT,
-  })) { refresh(); return }
+  const now = nowSec()
+  // Timing hygiene (audit F1): re-roll the cadence each tick so the interval
+  // itself isn't perfectly periodic on the wire.
+  if (!shouldEmitBeacon(geohash, prev, now, {
+    minIntervalSeconds: jitteredSeconds(COARSE_MIN_INTERVAL, CADENCE_JITTER_FRACTION, Math.random()),
+    heartbeatSeconds: jitteredSeconds(COARSE_HEARTBEAT, CADENCE_JITTER_FRACTION, Math.random()),
+  })) {
+    // The real gate just said no (standing still, inside the heartbeat window) —
+    // consider a low-rate decoy instead, narrowing the moving-vs-still cadence
+    // gap without disclosing anything (best-effort; never blocks the UI).
+    if (shouldEmitCover(coverCadence.get(c.id) ?? 0, now, { intervalSeconds: COVER_INTERVAL_SECONDS, jitterFraction: CADENCE_JITTER_FRACTION }, Math.random())) {
+      coverCadence.set(c.id, now)
+      const filler = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, '0')).join('')
+      try {
+        const cover = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: 'cover', geohash: filler, precision: plan.precision })
+        await publishSignal(cover, c)
+      } catch { /* best-effort — a missed decoy is not a missed alert */ }
+    }
+    refresh()
+    return
+  }
   try {
     const template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision })
     await publishSignal(template, c)
     // Only record the send (local pin + cadence) once a relay has accepted it, so a
     // transient failure is retried on the next fix rather than silently swallowed.
-    saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
-    beaconCadence.set(c.id, { lastGeohash: geohash, lastSentAt: nowSec() })
+    saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: now })
+    beaconCadence.set(c.id, { lastGeohash: geohash, lastSentAt: now })
+    coverCadence.set(c.id, now) // a real send counts as this cycle's cover too — no doubling up
   } catch { /* no relay accepted — leave cadence untouched so the next fix retries */ }
   refresh()
 }
@@ -3302,7 +3481,12 @@ function saveRelay(): void {
   store.save(persisted)
   ensureInviteSub()
   ensureSubscriptions()
-  toast(relays.length > 1 ? `Saved ${relays.length} relays` : 'Relay saved')
+  // F5: a relay outside our vetted no-log set used to save silently — an
+  // unvetted server still sees opaque wraps' timing + your IP, so say so.
+  const unknown = unknownRelays(relays)
+  toast(unknown.length
+    ? `Saved. ${unknown.length} of ${relays.length} ${unknown.length === 1 ? "isn't" : "aren't"} on our vetted no-log list — only add a server you trust not to log.`
+    : (relays.length > 1 ? `Saved ${relays.length} relays` : 'Relay saved'))
 }
 
 /** Leave a circle (local removal). Defaults to the active one; the chip menu
@@ -3603,6 +3787,8 @@ function resetDevice(): void {
   fix = null
   circleStates.clear()
   beaconCadence.clear()
+  coverCadence.clear()
+  meshBuffer = createMeshBuffer()
   persisted = store.load()
   onboardStep = 'intro'
   tab = 'home'
@@ -3611,7 +3797,10 @@ function resetDevice(): void {
 
 // ── Inbound ──────────────────────────────────────────────────────────────────
 function ensureSubscriptions(): void {
-  const relays = persisted.relayUrls
+  // Runs on every render — quiet on a Tor-not-ready failure (the toggle flip
+  // and the foreground refresh already own telling the user once).
+  const relays = activeRelaysQuiet()
+  if (!relays) { stopAllSubs(); return }
   const relayKey = relays.join(',')
   // Desired subs: one per circle, keyed by inbox (a reseed → new inbox → re-subscribe).
   const wanted = new Map<string, store.Circle>()
@@ -3639,6 +3828,18 @@ async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: s
   // (onBleFrame) dedups once up front then calls dispatchWrap per circle directly,
   // so it never consumes this guard on a circle that simply fails to decrypt.
   if (bleActive && wrap.id && !markWrapSeen(wrap.id)) return
+  // Mesh v2 downlink bridging: a phone with relay connectivity floods what it
+  // JUST received DOWN into the mesh too — the mirror of onBleFrame's uplink
+  // bridge, so members out of relay range but still BLE-meshed hear it. Gated
+  // on crowd-mesh actually being active (festival) and the wrap being newly
+  // seen (the markWrapSeen check above already ran); same buffer as every
+  // other mesh frame, so it's also re-offered to later-arriving peers.
+  if (bleActive && bleMode === 'mesh' && wrap.id && persisted.circles.some((x) => festivalActive(x))) {
+    const id = wrap.id
+    const frame = JSON.stringify({ id, pubkey: wrap.pubkey, content: wrap.content })
+    meshBuffer = rememberMeshWrap(meshBuffer, { id, data: frame }, nowSec())
+    try { const ble = await import('../../native/ble'); await ble.broadcastBle(frame) } catch { /* best-effort */ }
+  }
   await dispatchWrap(circleId, wrap, inboxSk)
 }
 

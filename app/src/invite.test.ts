@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { generateSecretKey } from 'nostr-tools/pure'
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { makeLocalSigner } from './signer'
-import { buildInviteWrap, buildReseedWraps, readInvite, buildMeetingExactWrap, readMeetingExactWrap, buildDmWrap, readDmWrap, type InvitePayload } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildMeetingExactWrap, readMeetingExactWrap, buildDmWrap, readDmWrap, type InvitePayload } from './invite'
 import { personalInboxTag } from './keys'
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
@@ -44,6 +44,24 @@ describe('signer-based NIP-59 gift-wrapped invites', () => {
     expect(await readInvite(bob, wraps[0])).toEqual({ ...reseed, from: alice.pubkey })
     expect(await readInvite(carol, wraps[1])).toEqual({ ...reseed, from: alice.pubkey })
     expect(await readInvite(carol, wraps[0])).toBeNull()
+  })
+})
+
+describe('readInviteViaRef — the word-invite second hop (audit F4)', () => {
+  it('a one-time reference keypair decrypts the invite exactly like a real signer would', async () => {
+    const alice = signer()
+    const refSk = generateSecretKey()
+    const refPk = getPublicKey(refSk)
+    const wrap = await buildInviteWrap(alice, refPk, payload)
+    expect(await readInviteViaRef(refSk, wrap)).toEqual({ ...payload, from: alice.pubkey })
+  })
+
+  it('the wrong reference key cannot decrypt it', async () => {
+    const alice = signer()
+    const refSk = generateSecretKey()
+    const wrongRefSk = generateSecretKey()
+    const wrap = await buildInviteWrap(alice, getPublicKey(refSk), payload)
+    expect(await readInviteViaRef(wrongRefSk, wrap)).toBeNull()
   })
 })
 

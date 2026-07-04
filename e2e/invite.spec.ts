@@ -1,6 +1,34 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, joinRemoteAwait, sendRemoteInvite, gotoTab } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, joinRemoteAwait, sendRemoteInvite, gotoTab, settle } from './fixtures'
 
 test.describe('invites — both ways', () => {
+  test('spoken word code (audit F4 hardening): the two-hop reference+gift-wrap flow lands B on the same circle', async ({ browser }) => {
+    const A = await newPerson(browser)
+    const B = await newPerson(browser)
+    await createCircle(A, { name: 'Say it out loud' })
+
+    await gotoTab(A, 'circle')
+    await A.click('[data-action="share-word-code"]')
+    // shareWordCode is async (parks the reference + gift-wraps the real invite
+    // over the relay before the words render) — wait for them to land.
+    await expect(A.locator('.wc-word').first()).toBeVisible()
+    const words = await A.locator('.wc-word').allTextContents()
+    expect(words, 'a spoken code should be six words').toHaveLength(6)
+    await settle(A) // let both the parked reference and the gift-wrapped invite reach the relay
+
+    await B.click('[data-action="join"]')
+    await B.fill('#jwords', words.join(' '))
+    await B.click('[data-action="join-words"]')
+
+    // A fresh guest with no handle yet lands on the "what should this circle
+    // call you?" screen first (same as the link/QR path) — skip it.
+    await expect(B.locator('[data-action="join-skip"]')).toBeVisible()
+    await B.click('[data-action="join-skip"]')
+
+    await expect(B.locator('[data-action="tab"][data-tab="circle"]')).toBeVisible()
+    await gotoTab(B, 'circle')
+    await expect(B.locator('.circle-chip.on')).toContainText('Say it out loud')
+  })
+
   test('join by code (in person): the secret travels in the code, no relay needed', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)

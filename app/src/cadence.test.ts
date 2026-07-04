@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
+import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
 
 const OPTS = { minIntervalSeconds: 45, heartbeatSeconds: 300 }
 const fresh: BeaconCadence = { lastGeohash: null, lastSentAt: 0 }
@@ -95,5 +95,56 @@ describe('nextPollDelaySeconds', () => {
   it('conserve still respects the stale-window ceiling', () => {
     expect(nextPollDelaySeconds(2, BOUNDS, { conserve: true })).toBe(180) // 240 capped
     expect(nextPollDelaySeconds(50, BOUNDS, { conserve: true })).toBe(180)
+  })
+})
+
+// Timing hygiene (audit F1 / PRIVACY.md "cover traffic so silence vs activity
+// isn't itself a signal"): a fixed 45 s/300 s cadence is a fingerprint a logging
+// relay can read straight off arrival timing. Jitter blurs the exact period;
+// cover traffic narrows the ~6x moving-vs-still swing.
+describe('jitteredSeconds', () => {
+  it('returns the base unchanged at the mid-point random value (no jitter applied)', () => {
+    expect(jitteredSeconds(300, 0.2, 0.5)).toBe(300)
+  })
+
+  it('spreads symmetrically around the base within ±jitterFraction', () => {
+    expect(jitteredSeconds(300, 0.2, 0)).toBe(240) // 300 * (1 - 0.2)
+    expect(jitteredSeconds(300, 0.2, 1)).toBe(360) // 300 * (1 + 0.2)
+  })
+
+  it('zero jitter fraction always returns the exact base', () => {
+    expect(jitteredSeconds(45, 0, 0)).toBe(45)
+    expect(jitteredSeconds(45, 0, 1)).toBe(45)
+  })
+
+  it('clamps an out-of-range rand into [0,1] rather than inverting the spread', () => {
+    expect(jitteredSeconds(300, 0.2, -5)).toBe(240)
+    expect(jitteredSeconds(300, 0.2, 5)).toBe(360)
+  })
+
+  it('never returns below 1 second even with an extreme fraction', () => {
+    expect(jitteredSeconds(1, 5, 0)).toBe(1)
+  })
+})
+
+describe('shouldEmitCover (low-rate stationary cover traffic)', () => {
+  const OPTS = { intervalSeconds: 120, jitterFraction: 0.2 }
+
+  it('fires immediately when nothing has been sent yet (lastCoverAt = 0)', () => {
+    expect(shouldEmitCover(0, 1000, OPTS, 0.5)).toBe(true)
+  })
+
+  it('stays silent before the (jittered) interval has elapsed', () => {
+    expect(shouldEmitCover(1000, 1000 + 100, OPTS, 0.5)).toBe(false)
+  })
+
+  it('fires once the jittered interval has elapsed', () => {
+    expect(shouldEmitCover(1000, 1000 + 120, OPTS, 0.5)).toBe(true)
+  })
+
+  it('a low rand widens the wait (jitter applies to the cover cadence too)', () => {
+    // rand=1 → interval jitters up to 144s, so 130s in must still be silent
+    expect(shouldEmitCover(1000, 1000 + 130, OPTS, 1)).toBe(false)
+    expect(shouldEmitCover(1000, 1000 + 144, OPTS, 1)).toBe(true)
   })
 })

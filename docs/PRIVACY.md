@@ -18,7 +18,12 @@ it is now **shipped** (below) — not a setting.
 ## Privacy-by-architecture
 
 The relay is treated as a dumb, untrusted pipe. Items 1–5 are **implemented and
-live**; 6 (multi-relay) ships as delivery redundancy; 7–8 remain planned.
+live**; 6 (multi-relay) ships as delivery redundancy; 8 (timing hygiene)
+partially shipped 2026-07-04 (cadence jitter + low-rate stationary cover
+traffic — narrows the moving-vs-still swing; a broader silence-vs-activity
+cover mode remains a further increment); 7 (off-relay transport) is a separate,
+now-active effort (BLE-nearby, `docs/plans/2026-07-04-ble-nearby-transport.md`),
+not this list's original `mesh-kit` framing.
 
 1. **Gift-wrap *everything* (NIP-59).** Every beacon/alert/check-in is wrapped, not
    just invites. The relay sees only `kind:1059` from **random ephemeral keys** —
@@ -40,8 +45,16 @@ live**; 6 (multi-relay) ships as delivery redundancy; 7–8 remain planned.
 6. **Multi-relay fan-out.** Publish to several **no-log** relays and read across them for
    **delivery redundancy** — fail-loud if none accept — never the public profile set.
    (Resilience, not metadata-spreading: each relay sees what it is sent.)
-7. **Off-relay transport (`mesh-kit`).** For local/proximity, use no relay at all.
-8. **Timing hygiene.** Jittered beacon schedules; optional cover traffic so silence vs activity isn't itself a signal.
+7. **Off-relay transport.** For local/proximity, use no relay at all — now
+   BLE-nearby (`docs/plans/2026-07-04-ble-nearby-transport.md`), superseding
+   this item's original `mesh-kit` framing.
+8. **Timing hygiene.** Jittered beacon schedules (±20%, both the movement floor
+   and the still heartbeat); a low-rate cover-traffic publish fills the quiet
+   stretch while stationary — wire-identical to a real beacon, carrying only
+   random filler, silently discarded by every receiver (`app/src/cadence.ts`,
+   `src/signals.ts`'s `cover` type). Shipped 2026-07-04 for the moving-vs-still
+   swing (audit F1); cover traffic through a fully withheld/off period ("silence
+   vs activity") is not yet built.
 
 That is the "uber privacy" stance in practice. What it leaves on the table:
 
@@ -65,7 +78,7 @@ What it **can** still see is connection metadata, which no relay can avoid handl
 |---|---|
 | Your **IP** → geolocation, pattern-of-life | A `.onion` endpoint removes it (Tor). This — not a "provable no-log" relay — is the high-leverage fix |
 | **IP ↔ a pseudonymous inbox** (you subscribe to your own) → group size/shape, active hours | Rotates on reseed; further blunted over Tor |
-| Real **arrival timing + volume** (bursts) | Timing hygiene / cover traffic (planned) |
+| Real **arrival timing + volume** (bursts) | Cadence jitter + low-rate stationary cover traffic (shipped 2026-07-04, narrows the moving-vs-still swing); a `.onion` endpoint remains the fix for IP-level correlation |
 | **Stored ciphertext history** — every retained wrap is decryptable by a *future* key compromise | Every wrap carries a NIP-40 `expiration`: one **uniform 16-day** window for all types (a per-type window would be a type-tell), derived from the backdated `created_at` (so the tag adds zero information). Epoch rotation bounds exposure forwards; this bounds it **backwards** to ~2 weeks |
 
 **The honest framing:** this is **defence in depth on top of "the relay is untrusted"**,
@@ -167,7 +180,13 @@ list of circles with a switcher/overview, not a single circle.
 
 **Built and live.** The privacy-by-architecture foundation — gift-wrap-everything,
 nsec-tree personas/epochs, the rotating group inbox, multi-group, the personal-inbox
-tag for invites/reseeds, and multi-relay fan-out — is implemented and deployed. What
-remains is the **residual connection metadata** (IP, timing, pseudonymous graph),
-addressed by a `.onion` relay endpoint and off-relay transport (planned, not yet
-shipped), plus timing hygiene / cover traffic.
+tag for invites/reseeds, and multi-relay fan-out — is implemented and deployed.
+Cadence jitter + low-rate stationary cover traffic shipped 2026-07-04 (the audit's
+F1), alongside a word-invite hardening pass (6 words, costlier scrypt,
+reference-not-seed, delete-on-fetch — F4) and the dead bare-20078
+`subscribeSignals`/`publishEvent` paths' removal (F5). What remains is the
+**residual connection metadata** (IP, pseudonymous graph), addressed by a
+`.onion` relay endpoint (see `docs/plans/2026-07-04-mesh-bridge-goal.md` Task B)
+and off-relay transport (BLE-nearby, active — see
+`docs/plans/2026-07-04-ble-nearby-transport.md`), plus a broader
+silence-vs-activity cover-traffic mode.

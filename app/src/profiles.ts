@@ -49,7 +49,14 @@ function parseProfile(content: string): Profile | null {
 /**
  * Fetch public profiles for `pubkeys` we don't already have, caching results.
  * Calls `onUpdate` whenever a new profile lands. No-op for keys already cached.
- * Auto-closes the relay subscription after a short collection window.
+ * Auto-closes the relay subscriptions after a short collection window.
+ *
+ * Audit F3: one `subscribeProfiles` REQ **per pubkey**, never a single `authors`
+ * filter carrying the whole roster — a batched request handed a public relay
+ * everyone you're looking up in one shot, collapsing circle unlinkability
+ * behind this one opt-in toggle. Per-pubkey REQs cost nothing extra (the
+ * relays are only ever hit while this feature is on) and mean no single query
+ * names more than one person.
  */
 export function fetchProfiles(pubkeys: string[], onUpdate: () => void): void {
   loadCache()
@@ -58,13 +65,13 @@ export function fetchProfiles(pubkeys: string[], onUpdate: () => void): void {
   // Mark as attempted so we don't refetch in a tight render loop; a real hit overwrites.
   for (const pk of missing) cache.set(pk, {})
   let changed = false
-  const stop = subscribeProfiles(PROFILE_RELAYS, missing, (e) => {
+  const stops = missing.map((pk) => subscribeProfiles(PROFILE_RELAYS, [pk], (e) => {
     const p = parseProfile(e.content)
     if (!p) return
     cache.set(e.pubkey, p)
     changed = true
     saveCache()
     onUpdate()
-  })
-  window.setTimeout(() => { stop(); if (changed) onUpdate() }, 6000)
+  }))
+  window.setTimeout(() => { for (const stop of stops) stop(); if (changed) onUpdate() }, 6000)
 }

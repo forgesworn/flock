@@ -120,6 +120,12 @@ export interface Persisted {
    *  over Bluetooth LE with co-located circle members (off-relay). Strictly
    *  additive — the relay path never depends on it. Device-local, not synced. */
   bleNearby?: boolean
+  /** Opt-in, off by default: route relay traffic through Tor (Orbot) when a
+   *  `.onion` relay is configured and Orbot is reachable. Native-shell-only in
+   *  practice (a PWA can't reach Orbot's SOCKS proxy); fails loud rather than
+   *  silently using clearnet when the route isn't ready (see relays.ts).
+   *  Device-local, not synced — mirrors bleNearby/stayReachable. */
+  torRelay?: boolean
   /** How the identity authenticates: a local key, or a Signet/bunker signer. */
   authMethod?: AuthMethod
   /** Local secret from which circle seeds are deterministically derived (nsec-tree). */
