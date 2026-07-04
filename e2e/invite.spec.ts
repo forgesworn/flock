@@ -50,6 +50,10 @@ test.describe('invites — both ways', () => {
 
     const B = await newPerson(browser)
     await B.goto(link)
+    // A fresh guest with no handle yet lands on the "what should this circle
+    // call you?" screen first (same as the word-code path) — skip it.
+    await expect(B.locator('[data-action="join-skip"]')).toBeVisible()
+    await B.click('[data-action="join-skip"]')
     // B lands joined, and the seed is scrubbed from the address bar immediately.
     await expect(B.locator('[data-action="tab"][data-tab="circle"]')).toBeVisible()
     expect(B.url()).not.toContain('join=')
@@ -68,6 +72,9 @@ test.describe('invites — both ways', () => {
     // B receives the wrap and drops into the app on the new circle.
     await expect(B.locator('.circle-chip.on')).toContainText('Lads trip')
     await gotoTab(B, 'circle')
+    // With A already a fellow member, the invite panel is tucked behind the
+    // header's "＋ Invite" toggle (it only auto-opens when you're alone).
+    await B.click('[data-action="toggle-invite"]')
     await expect(B.locator('[data-action="copy-invite"]')).toBeVisible()
   })
 })

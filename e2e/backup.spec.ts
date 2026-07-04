@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz, gotoTab, openAdvanced } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz, gotoTab, openAdvanced, openSettings } from './fixtures'
 
 test.describe('backup & restore — survive losing the device', () => {
   // The worst user story the audit found: reset (or lose) your phone and every
@@ -11,8 +11,9 @@ test.describe('backup & restore — survive losing the device', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // A exports an encrypted backup code (copied to the clipboard).
-    await gotoTab(A, 'you')
+    // A exports an encrypted backup code (copied to the clipboard) — Backup
+    // lives inside the Settings fold, not bare on the You tab.
+    await openSettings(A)
     await A.fill('#backup-pass', 'correct horse battery staple')
     await A.click('[data-action="backup-copy"]')
     // The export is async (PBKDF2) — wait for the confirmation before reading.
