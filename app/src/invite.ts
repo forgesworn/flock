@@ -3,7 +3,7 @@
 // real, public Nostr identity never lands on the wire. The seal is signed by the
 // member's signer (LocalSigner or Signet), so a key in a bunker works too.
 
-import { giftWrap, giftUnwrap } from './giftwrap'
+import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { personalInboxTag } from './keys'
 import { parseMeetingShare, type MeetingShare } from '@forgesworn/flock'
 import type { FlockSigner, SignedEvent } from './signer'
@@ -101,12 +101,9 @@ export async function readDmWrap(signer: FlockSigner, wrap: { pubkey: string; co
   }
 }
 
-/** Unwrap a gift wrap addressed to us (via the signer); returns the invite payload
- *  plus `from` (the inviter/reseeder — the seal's real pubkey) or null. Surfacing the
- *  sender lets a fresh joiner seed their roster with the inviter immediately, so a
- *  message from them the moment they join isn't dropped as an unknown sender. */
-export async function readInvite(signer: FlockSigner, wrap: { pubkey: string; content: string }): Promise<(InvitePayload & { from: string }) | null> {
-  const rumor = await giftUnwrap((pk, ct) => signer.nip44Decrypt(pk, ct), wrap)
+/** Shared parser for both unwrap paths below — the payload shape is identical
+ *  either way; only the decryption key differs. */
+function parseInvitePayload(rumor: { pubkey: string; content: string } | null): (InvitePayload & { from: string }) | null {
   if (!rumor) return null
   try {
     const o = JSON.parse(rumor.content) as Record<string, unknown>
@@ -123,4 +120,22 @@ export async function readInvite(signer: FlockSigner, wrap: { pubkey: string; co
     }
   } catch { /* malformed */ }
   return null
+}
+
+/** Unwrap a gift wrap addressed to us (via the signer); returns the invite payload
+ *  plus `from` (the inviter/reseeder — the seal's real pubkey) or null. Surfacing the
+ *  sender lets a fresh joiner seed their roster with the inviter immediately, so a
+ *  message from them the moment they join isn't dropped as an unknown sender. */
+export async function readInvite(signer: FlockSigner, wrap: { pubkey: string; content: string }): Promise<(InvitePayload & { from: string }) | null> {
+  return parseInvitePayload(await giftUnwrap((pk, ct) => signer.nip44Decrypt(pk, ct), wrap))
+}
+
+/** Unwrap an invite gift-wrap using a raw secret key instead of a member's real
+ *  signer — the word-invite second hop (docs/plans/2026-07-04-mesh-bridge-goal.md
+ *  Task C4): the invite is addressed to a one-time REFERENCE keypair handed over
+ *  by the low-entropy spoken code, not to a real identity, so there is no
+ *  FlockSigner to ask. Same payload shape, same privacy guarantee — only the
+ *  decryption key's origin differs. */
+export async function readInviteViaRef(refSk: Uint8Array, wrap: { pubkey: string; content: string }): Promise<(InvitePayload & { from: string }) | null> {
+  return parseInvitePayload(await giftUnwrap(rawNip44Decrypt(refSk), wrap))
 }

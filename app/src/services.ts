@@ -1,7 +1,6 @@
 // Transport + sensors: Nostr relay publish/subscribe and foreground geolocation.
 
 import { SimplePool } from 'nostr-tools/pool'
-import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import type { EventTemplate } from './signer'
 
 export type { EventTemplate }
@@ -61,30 +60,19 @@ export async function publishSigned(relays: readonly string[], signed: { id: str
   return signed
 }
 
-/** Publish a code-addressed "spoken invite" signed by a THROWAWAY key: the event
- *  is found by its `t` tag, its author is irrelevant, and a fresh key each time
- *  leaks no link back to the inviter. Private (no-log) relays only — the caller
- *  passes them. Content is already encrypted to the code-derived key. */
-export async function publishWordInvite(
+/** One-shot "give me the newest matching event" fetch: resolves early once EOSE
+ *  passes with a match in hand, otherwise waits the full timeout for slow
+ *  relays. Shared by {@link fetchWordInvite} (by `#t` tag) and
+ *  {@link fetchGiftWrap} (by `#p` tag) — the two one-shot lookups the word-invite
+ *  flow needs (docs/plans/2026-07-04-mesh-bridge-goal.md Task C4). */
+function fetchNewest<T extends { created_at: number }>(
   relays: readonly string[],
-  template: { kind: number; created_at: number; content: string; tags: string[][] },
-) {
-  const signed = finalizeEvent(template, generateSecretKey())
-  await fanOut(relays, signed)
-  return signed
-}
-
-/** One-shot fetch of a parked spoken invite by its tag. Resolves the NEWEST match,
- *  or null if none arrives before the deadline. Resolves early on EOSE once a match
- *  is in hand, but waits the full timeout for slow relays if nothing has arrived. */
-export function fetchWordInvite(
-  relays: readonly string[],
-  kind: number,
-  tag: string,
-  timeoutMs = 6000,
-): Promise<{ content: string; created_at: number } | null> {
+  filter: Record<string, unknown>,
+  toResult: (e: { id: string; pubkey: string; content: string; created_at: number }) => T,
+  timeoutMs: number,
+): Promise<T | null> {
   return new Promise((resolve) => {
-    let best: { content: string; created_at: number } | null = null
+    let best: T | null = null
     let settled = false
     const done = (): void => {
       if (settled) return
@@ -94,13 +82,47 @@ export function fetchWordInvite(
       resolve(best)
     }
     const timer = setTimeout(done, timeoutMs)
-    const sub = getPool().subscribeMany([...relays], { kinds: [kind], '#t': [tag] }, {
-      onevent: (e: { content: string; created_at: number }) => {
-        if (!best || e.created_at > best.created_at) best = { content: e.content, created_at: e.created_at }
+    const sub = getPool().subscribeMany([...relays], filter as never, {
+      onevent: (e: { id: string; pubkey: string; content: string; created_at: number }) => {
+        const r = toResult(e)
+        if (!best || r.created_at > best.created_at) best = r
       },
       oneose: () => { if (best) done() },
     })
   })
+}
+
+/** One-shot fetch of a parked spoken-invite reference by its `#t` tag. Resolves
+ *  the NEWEST match, or null if none arrives before the deadline. */
+export function fetchWordInvite(
+  relays: readonly string[],
+  kind: number,
+  tag: string,
+  timeoutMs = 6000,
+): Promise<{ id: string; content: string; created_at: number } | null> {
+  return fetchNewest(
+    relays,
+    { kinds: [kind], '#t': [tag] },
+    (e) => ({ id: e.id, content: e.content, created_at: e.created_at }),
+    timeoutMs,
+  )
+}
+
+/** One-shot fetch of a NIP-59 gift wrap (kind 1059) filed under a `#p` tag —
+ *  the word-invite's second hop (the real invite, gift-wrapped to the one-time
+ *  reference pubkey; see app/src/invite.ts's `readInviteViaRef`). Resolves the
+ *  NEWEST match, or null if none arrives before the deadline. */
+export function fetchGiftWrap(
+  relays: readonly string[],
+  pTag: string,
+  timeoutMs = 6000,
+): Promise<{ id: string; pubkey: string; content: string; created_at: number } | null> {
+  return fetchNewest(
+    relays,
+    { kinds: [1059], '#p': [pTag] },
+    (e) => ({ id: e.id, pubkey: e.pubkey, content: e.content, created_at: e.created_at }),
+    timeoutMs,
+  )
 }
 
 /** Subscribe to NIP-59 gift wraps (kind 1059) filed under a `#p` tag I own, across

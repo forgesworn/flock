@@ -15,14 +15,16 @@ import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shou
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
-import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, buildWordInvite, readWordInvite } from './wordcode'
+import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, wordInviteParkKey, buildWordInviteRef, readWordInviteRef, buildWordInviteDeletion } from './wordcode'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
+import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure'
+import { bytesToHex } from '@noble/hashes/utils.js'
 import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { isNativeShell, shareOrigin, isApkUpdateAvailable } from './native'
 import { rotationDue, refreshDue } from './rotation'
-import { buildInviteWrap, buildReseedWraps, readInvite, buildDmWrap, readDmWrap, type DirectMessage } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildDmWrap, readDmWrap, type DirectMessage } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
 import { generateStorageSecret, setupPin, unlockWithPin, unlockWithGrace, burnLock } from './lock'
@@ -102,7 +104,7 @@ let awaitingInvite = false
 let pendingInviteNpub: string | null = null // a scanned invite-key link, prefilled into the send form
 let showInviteLinkText = false // clipboard copy failed — render the link as selectable text instead
 let showInvite = false // Circle page: the top "Invite" button reveals the QR + link panel
-let spokenCode: string[] | null = null // the live 4-word invite code, once generated + parked
+let spokenCode: string[] | null = null // the live 6-word invite code, once generated + parked
 let spokenCodeBusy = false // deriving/publishing a spoken code (scrypt + relay round-trip)
 let updateAvailable = false // native shell only: the hosted deploy is newer than this build
 let pendingJoin: store.Circle | null = null // a link/QR join awaiting the guest's name (join-name screen)
@@ -1279,7 +1281,7 @@ function inviteSections(): string {
         <div class="wordcode">${spokenCode.map((w) => `<span class="wc-word">${esc(w)}</span>`).join('')}</div>
         <button class="btn small" data-action="copy-word-code">Copy the words</button>
         <button class="btn small ghost" data-action="new-word-code"${spokenCodeBusy ? ' disabled' : ''}>New code</button>
-        <div class="note">Read these four words to them, or send them over Signal — they tap “Join with a code” and type them in. Works when a QR can’t be scanned. Good for 15 minutes, then make a new one.</div>
+        <div class="note">Read these six words to them, or send them over Signal — they tap “Join with a code” and type them in. Works when a QR can’t be scanned. Good for 15 minutes, then make a new one.</div>
       ` : `
         <button class="btn primary" data-action="share-word-code"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Setting up…' : 'Make a spoken code'}</button>
         <div class="note">Four plain words you can read out or send over Signal — no scanning, no long link. The words aren’t the secret; they unlock a one-time invite parked on your private relay, and expire in 15 minutes.</div>
@@ -1594,8 +1596,8 @@ function onboardingView(): string {
   } else if (onboardStep === 'join') {
     inner = `
       <h1>Join a circle</h1>
-      <p class="tagline">Type the four words someone read you, paste an invite code, or join remotely by sharing your key.</p>
-      <div class="field" style="text-align:left;margin-bottom:12px"><label for="jwords">Spoken words</label><input class="input" id="jwords" placeholder="four words, in order" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      <p class="tagline">Type the six words someone read you, paste an invite code, or join remotely by sharing your key.</p>
+      <div class="field" style="text-align:left;margin-bottom:12px"><label for="jwords">Spoken words</label><input class="input" id="jwords" placeholder="six words, in order" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
       <div class="actions" style="margin-bottom:18px">
         <button class="btn primary" data-action="join-words"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Finding invite…' : 'Join with words'}</button>
       </div>
@@ -2902,18 +2904,33 @@ function doJoin(): void {
   }
 }
 
-/** Generate a 4-word invite code, park the encrypted invite on the private relays
- *  under its code-derived tag, and show the words to read aloud / send over Signal.
- *  For when a QR can't be scanned (e.g. an iPhone PWA opens the link in Safari). */
+/** Generate a 6-word invite code and show the words to read aloud / send over
+ *  Signal. For when a QR can't be scanned (e.g. an iPhone PWA opens the link
+ *  in Safari).
+ *
+ *  Audit F4 hardening: the code itself never protects the real circle seed.
+ *  It parks a fresh, one-time REFERENCE keypair on the private relays (low
+ *  security — only the code's own entropy guards it); the real invite travels
+ *  separately, gift-wrapped (NIP-59, full 256-bit ECDH) to that reference's
+ *  pubkey via the same channel a QR/link invite already uses. Even a
+ *  successful offline brute-force of the six words yields only a disposable
+ *  handle, never the seed directly. */
 async function shareWordCode(): Promise<void> {
   const c = activeCircle()
-  if (!c || spokenCodeBusy) return
+  const signer = getSigner()
+  if (!c || !signer || spokenCodeBusy) return
   spokenCodeBusy = true; render()
   try {
     const words = newWordCode()
-    const seed = await deriveWordCodeSeed(words)
-    const payload = { v: 1 as const, id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) }
-    await svc.publishWordInvite(persisted.relayUrls, await buildWordInvite(seed, payload, nowSec()))
+    const codeSeed = await deriveWordCodeSeed(words)
+    const refSk = generateSecretKey()
+    const refPk = getPublicKey(refSk)
+    const parkSk = wordInviteParkKey(codeSeed) // deterministic — the joiner reconstructs it for delete-on-fetch
+    const refSigned = finalizeEvent(await buildWordInviteRef(codeSeed, bytesToHex(refSk), nowSec()), parkSk)
+    const payload = { t: 'invite' as const, id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) }
+    const inviteWrap = await buildInviteWrap(signer, refPk, payload)
+    await svc.publishSigned(persisted.relayUrls, refSigned as never)
+    await svc.publishSigned(persisted.relayUrls, inviteWrap as never)
     spokenCode = words
   } catch {
     toast("Couldn't reach a relay to set up the code — check your connection and try again.")
@@ -2922,8 +2939,10 @@ async function shareWordCode(): Promise<void> {
   }
 }
 
-/** Join by typing a 4-word code: derive its seed, fetch the parked invite from the
- *  private relays, decrypt it, and join — the same landing as a scanned link. */
+/** Join by typing a 6-word code: derive its seed, fetch the parked reference,
+ *  then fetch + decrypt the real invite it points to — the same landing as a
+ *  scanned link. Deletes the parked reference once the real invite is safely
+ *  in hand (delete-on-fetch, audit F4) — best-effort, never blocks the join. */
 async function joinWithWords(): Promise<void> {
   const raw = (document.getElementById('jwords') as HTMLInputElement | null)?.value ?? ''
   let words: string[]
@@ -2931,12 +2950,27 @@ async function joinWithWords(): Promise<void> {
   if (words.length !== WORD_INVITE.words) { toast(`Enter all ${WORD_INVITE.words} words, in order.`); return }
   spokenCodeBusy = true; render()
   try {
-    const seed = await deriveWordCodeSeed(words)
-    const ev = await svc.fetchWordInvite(persisted.relayUrls, WORD_INVITE.kind, wordInviteTag(seed))
-    if (!ev) { toast('No invite found for those words — they expire after 15 minutes, so ask for a fresh code.'); return }
-    const p = await readWordInvite(seed, ev)
+    const codeSeed = await deriveWordCodeSeed(words)
+    const refEvent = await svc.fetchWordInvite(persisted.relayUrls, WORD_INVITE.kind, wordInviteTag(codeSeed))
+    if (!refEvent) { toast('No invite found for those words — they expire after 15 minutes, so ask for a fresh code.'); return }
+    const ref = await readWordInviteRef(codeSeed, refEvent)
+    const refSk = store.fromHex(ref.ref)
+    const refPk = getPublicKey(refSk)
+    const inviteWrap = await svc.fetchGiftWrap(persisted.relayUrls, personalInboxTag(refPk))
+    if (!inviteWrap) { toast("The invite is still on its way — wait a moment and try the same words again."); return }
+    const p = await readInviteViaRef(refSk, inviteWrap)
+    if (!p) throw new Error('invalid invite')
     const circle: store.Circle = { id: p.id, seedHex: p.s, name: p.n || 'Circle', mode: p.m === 'nightout' ? 'nightout' : 'family', ...(typeof p.x === 'number' ? { expiresAt: p.x } : {}) }
     persisted.identity ??= store.createIdentity()
+    // Delete-on-fetch: remove the low-entropy-protected reference now it has
+    // served its one purpose, closing the window an eventual brute-force of
+    // the code could otherwise exploit. Best-effort — a relay that ignores
+    // NIP-09 just leaves it to its own 15-minute expiry regardless.
+    try {
+      const parkSk = wordInviteParkKey(codeSeed)
+      const del = finalizeEvent(buildWordInviteDeletion(refEvent.id, nowSec()), parkSk)
+      await svc.publishSigned(persisted.relayUrls, del as never)
+    } catch { /* hygiene only — never blocks the join */ }
     if (persisted.circles.some((x) => x.id === circle.id)) { switchCircle(circle.id); adding = false; onboardStep = 'intro'; tab = 'home'; render(); return }
     if (!persisted.myHandle) { pendingJoin = circle; render(); return }
     completeJoin(circle)
