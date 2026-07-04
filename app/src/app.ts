@@ -2460,6 +2460,7 @@ function doJoinRemote(): void {
 
 function doJoin(): void {
   const code = (document.getElementById('jcode') as HTMLTextAreaElement | null)?.value ?? ''
+  if (!code.trim()) { toast('Paste the invite code first — the one they shared or under their QR.'); return }
   try {
     const circle = store.decodeInvite(store.inviteCodeFrom(code))
     persisted.identity ??= store.createIdentity()

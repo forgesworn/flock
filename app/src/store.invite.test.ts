@@ -22,4 +22,13 @@ describe('invite links — the secret rides in the URL fragment, never sent to a
     expect(inviteCodeFrom(`  ${code}\n`)).toBe(code)
     expect(inviteCodeFrom(`https://flock.example/#join=${code}`)).toBe(code)
   })
+
+  // A blank field or a mangled paste must never leak a raw JSON parser error
+  // ("Unexpected end of JSON input") to the user — always the friendly message.
+  it('decodeInvite throws a friendly error for empty / whitespace / garbage input', () => {
+    for (const bad of ['', '   ', '\n', 'not base64 !!!', btoa('hello'), btoa('{"v":1'), '#join=']) {
+      expect(() => decodeInvite(inviteCodeFrom(bad))).toThrow(/invite code/i)
+      expect(() => decodeInvite(inviteCodeFrom(bad))).not.toThrow(/JSON/i)
+    }
+  })
 })

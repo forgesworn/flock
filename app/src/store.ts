@@ -391,14 +391,24 @@ export function inviteCodeFrom(text: string): string {
 }
 
 export function decodeInvite(code: string): Circle {
-  const o = JSON.parse(b64decode(code.trim()))
+  // A blank field or a mangled paste must surface the friendly message below, not
+  // a raw "Unexpected end of JSON input" from the parser — so guard the empty
+  // case and treat any base64/JSON failure as an invalid code.
+  const trimmed = code.trim()
+  let o: { v?: unknown; s?: unknown; id?: unknown; n?: unknown; m?: unknown; x?: unknown }
+  try {
+    if (!trimmed) throw new Error('empty')
+    o = JSON.parse(b64decode(trimmed))
+  } catch {
+    throw new Error('That invite code is not valid.')
+  }
   if (o.v !== 1 || typeof o.s !== 'string' || o.s.length !== 64 || typeof o.id !== 'string') {
     throw new Error('That invite code is not valid.')
   }
   return {
     id: o.id,
     seedHex: o.s,
-    name: o.n || 'Circle',
+    name: typeof o.n === 'string' && o.n ? o.n : 'Circle',
     mode: o.m === 'nightout' ? 'nightout' : 'family',
     ...(typeof o.x === 'number' ? { expiresAt: o.x } : {}),
   }
