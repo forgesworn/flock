@@ -194,8 +194,10 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   over. The night-out coarse beacon (geohash-6, ±~600 m) is deliberately too
   coarse for that — it says "still on site", not "by the left of the main stage".
   **Shipped as "Find each other":** a device-local, time-boxed precision step-up to
-  **geohash-8 (±~19 m)** on a **1 h / 3 h / 6 h** window (capped by the circle's own
-  expiry), opt-in per person on Home. It only ever *raises* detail (a finer slider
+  the finest detail flock offers — **Exact spot (geohash-9, ±~5 m)** on a
+  **1 h / 3 h / 6 h** window (capped by the circle's own expiry), opt-in per person
+  on Home. *(Boost precision raised from geohash-8 to the slider max 2026-07-04 —
+  "walk right to each other" needs the exact spot, not the building.)* It only ever *raises* detail (a finer slider
   wins), the **slider base is never rewritten** (shown separately, restored on
   expiry), and a **no-report place still caps it** — the boost raises the *coarse*
   input to `decideEmission`, it doesn't bypass the policy. Turning it on **starts
@@ -372,17 +374,39 @@ Two halves that compose into one feature:
     walking breach detection, Doze survival, battery %/h — a strong *proxy* for
     GrapheneOS. The de-Googled question itself (Tier 2) still needs a
     **GrapheneOS Pixel**.
-- [ ] **Inbound alerts (app closed)** — receive SOS/breach with flock closed.
-  Persistent foreground-service relay socket (Option A, recommended) →
-  UnifiedPush + bridge (Option B). De-Googled; gated on the Phase 0 result. See
-  `docs/plans/2026-06-30-background-inbound.md`.
-  *Partial (2026-07-03):* the shell now mirrors toasts to system notifications
-  while the app is HIDDEN (`native/notify.ts`) — covers screen-off **while the
-  watcher's foreground service holds the process** (sharing/safety watch on).
-  Confirmed on the A32 that without it, Android stops the activity the moment
-  the screen goes off (`notifyAppStopped`) — nothing is received until reopen,
-  so signals replay silently into a visible app. Sharing-off delivery still
-  needs Option A/B above.
+- [x] **Inbound alerts (app closed) — SHIPPED via Option A, validated on the A32
+  (2026-07-04).** Signal-parity notifications: a message/buzz/alert lands on a
+  **locked screen while flock is fully closed**. Implemented as a **location-free
+  foreground service** (`native/android/StayReachableService.java` +
+  `StayReachablePlugin.java`, injected by `patch-android.mjs`; `specialUse` type —
+  no GPS, no location indicator) that keeps the process — and thus the
+  **already-always-on relay subscription** — alive, so the normal decrypt →
+  `LocalNotifications` pipeline runs closed exactly as in the foreground. Opt-in
+  toggle **You → Notifications → "Stay reachable when closed"**
+  (`persisted.stayReachable`, `native/stayReachable.ts`), off by default; requests
+  a Doze **battery-optimisation exemption** on enable (Samsung/OEM would freeze it
+  otherwise); torn down on decoy-hide + reset so its ongoing notification is never
+  a "fresh install" tell.
+  *Device proof (A32, Android 13):* with flock backgrounded + **screen off
+  (Dozing)**, a group buzz from a second member posted `title="LockTest",
+  text="Member r52d: …"` on channel `flock-group-v1` (importance 4, per-circle
+  group key) — content visible on the locked shade. `dumpsys` confirmed the FGS
+  foreground + the app in the Doze whitelist.
+  *Superseded earlier partial (2026-07-03):* toast→notification mirror only while
+  the location watcher held the process (sharing on). Now decoupled from sharing.
+  *Still open for Tier 2:* re-validate on a **GrapheneOS Pixel** (Android 15/16 —
+  `specialUse` chosen precisely because dataSync is 6h/day-capped there); measure
+  battery cost of the always-on socket over a night.
+  *Notifications differentiated (2026-07-04, validated):* `native/notify.ts` posts
+  on distinct Android channels — **Direct messages** (1:1), **Group messages**
+  (buzz/notes), **Safety alerts** (lost-phone), **General** — separately tunable,
+  high-importance (heads-up), Signal-style stacked per conversation, headed by the
+  sender (DM) or circle (group). Channel visibility requests PUBLIC, but Android
+  normalises an app's channel to NO_OVERRIDE (an app can't force content *more*
+  public than the user's global lock-screen setting) — so content shows per that
+  global setting, as Signal's does. Channels created at boot in
+  `ensureNotifyPermission`; immutable once made → a later change needs a new
+  channel id (`-vN` suffix).
 - [ ] **Go-live hardening (foreground PWA — needs no devices):**
   - [x] **Proxy map tiles + geocoding (Stage 0) — DEPLOYED & LIVE** on
     flock.forgesworn.dev. Tiles (`/tiles/*`) and Nominatim (`/nominatim/*`) are

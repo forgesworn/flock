@@ -102,6 +102,14 @@ export interface Persisted {
   presence: Record<string, MemberBeacon[]>
   /** Opt-in: fetch public kind:0 profiles (names/avatars) from public relays. Default off. */
   showProfiles?: boolean
+  /** How distances read across the app (location-detail sizes etc.). Undefined = metric.
+   *  Device-local display preference, like showProfiles — not synced, not backed up. */
+  units?: 'metric' | 'imperial'
+  /** Native shell only: keep a foreground service alive so messages/alerts arrive
+   *  while flock is closed (Signal-parity notifications). Off by default — a
+   *  persistent notification + always-on battery is opt-in, and it must never run
+   *  on a fresh or decoy install. Device-local, not synced, not backed up. */
+  stayReachable?: boolean
   /** How the identity authenticates: a local key, or a Signet/bunker signer. */
   authMethod?: AuthMethod
   /** Local secret from which circle seeds are deterministically derived (nsec-tree). */

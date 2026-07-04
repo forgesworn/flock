@@ -80,6 +80,7 @@ let inviteSubKey = ''
 let awaitingInvite = false
 let pendingInviteNpub: string | null = null // a scanned invite-key link, prefilled into the send form
 let showInviteLinkText = false // clipboard copy failed — render the link as selectable text instead
+let showInvite = false // Circle page: the top "Invite" button reveals the QR + link panel
 let updateAvailable = false // native shell only: the hosted deploy is newer than this build
 let pendingJoin: store.Circle | null = null // a link/QR join awaiting the guest's name (join-name screen)
 
@@ -107,6 +108,12 @@ let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string; 
 // The compose sheet, when open: a free-text message aimed at the whole group or one
 // member (their pubkey). Mounted as an overlay so opening it never tears the map.
 let compose: { target: 'group' | string } | null = null
+// Long-press-a-chip action sheet, when open: the id of the circle it acts on. Like
+// compose, mounted as an overlay so it survives the re-renders around it.
+let circleMenu: string | null = null
+// Set the instant a long-press fires so the click that trails the press-and-hold
+// doesn't ALSO switch to that circle. Cleared on a timer in case the click never lands.
+let chipHeldGuard = false
 
 let onboardStep: 'intro' | 'create' | 'join' | 'await' | 'restore' = 'intro'
 let adding = false // adding another circle from within the app (not first-run onboarding)
@@ -271,10 +278,11 @@ const PRECISION_NAMES: Record<number, string> = {
   3: 'Region', 4: 'City', 5: 'Town', 6: 'Neighbourhood', 7: 'Street', 8: 'Building', 9: 'Exact spot',
 }
 
-// "Find each other" (festival mode): a temporary step-up to building-level detail
-// (±~19 m) so a group in a crowd can actually walk to each other. It never exceeds
-// what "Exact spot" would, and always reverts to the slider on its own.
-const FESTIVAL_PRECISION = 8
+// "Find each other" (festival mode): a temporary step-up to the finest detail
+// flock offers — Exact spot (±~5 m) — so a group in a crowd can walk right to
+// each other. This is the sharpest the slider goes, and it always reverts to
+// the slider's own value on its own. A no-report place still caps it.
+const FESTIVAL_PRECISION = PRECISION_MAX
 const FESTIVAL_HOURS = [1, 3, 6] as const // offered windows; capped by circle expiry
 
 /** Is "find each other" running for this circle right now? */
@@ -290,18 +298,32 @@ function baseSharePrecision(c: store.Circle | null): number {
 }
 
 /** The precision my beacons ACTUALLY carry now: the slider base, raised to
- *  building-level while "find each other" is on (never lowered). */
+ *  Exact spot while "find each other" is on (never lowered). */
 function sharePrecisionOf(c: store.Circle | null): number {
   const base = baseSharePrecision(c)
   return festivalActive(c) ? Math.max(base, FESTIVAL_PRECISION) : base
 }
 
-/** "~600 m" — how closely a given precision places you. */
+/** The user's chosen distance units; undefined (fresh install) reads as metric. */
+const distanceUnits = (): 'metric' | 'imperial' => persisted.units ?? 'metric'
+
+/** "~600 m" / "~0.4 mi" — how closely a given precision places you, in the
+ *  user's chosen units. Every user-facing distance goes through here. */
 function precisionSize(p: number): string {
-  const r = precisionToRadius(p)
-  if (r >= 10_000) return `~${Math.round(r / 1000)} km`
-  if (r >= 1000) return `~${(r / 1000).toFixed(1)} km`
-  return `~${Math.round(r)} m`
+  return fmtDistance(precisionToRadius(p))
+}
+
+/** Format a distance in metres for display, honouring the units preference.
+ *  Imperial switches to miles at 0.1 mi; below that it's feet (rounded to 10). */
+function fmtDistance(metres: number): string {
+  if (distanceUnits() === 'imperial') {
+    const feet = metres * 3.28084
+    if (feet >= 528) return `~${(metres / 1609.34).toFixed(1)} mi` // ≥ 0.1 mi
+    return `~${Math.max(10, Math.round(feet / 10) * 10)} ft`
+  }
+  if (metres >= 10_000) return `~${Math.round(metres / 1000)} km`
+  if (metres >= 1000) return `~${(metres / 1000).toFixed(1)} km`
+  return `~${Math.round(metres)} m`
 }
 
 const precisionLabel = (p: number): string => `${PRECISION_NAMES[p] ?? 'Area'} · ${precisionSize(p)}`
@@ -347,10 +369,13 @@ function avatarHtml(pk: string, isMe: boolean, small = false): string {
 
 /** Mirror a message to a real system notification while the app is hidden —
  *  an invisible in-app cue is exactly when the message matters (a signal
- *  arriving with the screen off). Shell only; a silent no-op in the PWA. */
-function notifyIfHidden(msg: string): void {
+ *  arriving with the screen off). `opts` route it to the right channel (private
+ *  1:1 / group / alert) with its own heading and stack. Shell only; a silent
+ *  no-op in the PWA. */
+type NotifyOpts = { kind?: 'dm' | 'group' | 'alert' | 'general'; title?: string; group?: string }
+function notifyIfHidden(msg: string, opts?: NotifyOpts): void {
   if (document.hidden && isNativeShell()) {
-    void import('../../native/notify').then((n) => n.notify(msg)).catch(() => { /* shell only */ })
+    void import('../../native/notify').then((n) => n.notify(msg, opts)).catch(() => { /* shell only */ })
   }
 }
 
@@ -447,6 +472,9 @@ function bootUnlocked(): void {
     // Ask for notification permission NOW — asking later, from the background,
     // mid-emergency, is too late to show a prompt (native/notify.ts).
     void import('../../native/notify').then((n) => n.ensureNotifyPermission())
+    // Bring the "stay reachable" service up to match the saved toggle (Signal
+    // parity — receive while closed). No-op unless opted in.
+    void syncStayReachable()
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
   }
@@ -581,7 +609,11 @@ function restoreFocusedInput(keep: ReturnType<typeof captureFocusedInput>): void
   try { if (keep.start !== null) el.setSelectionRange(keep.start, keep.end ?? keep.start) } catch { /* number inputs */ }
 }
 
-function render(): void {
+/** `animate` plays the fade-in on the screen — right for a deliberate navigation
+ *  (tab switch, first mount), wrong for a background data refresh, where replaying
+ *  it on every presence tick reads as a flash on the non-map tabs (see refresh). */
+function render(opts?: { animate?: boolean }): void {
+  const animate = opts?.animate ?? true
   // The map now lives on BOTH Home (compact) and the Map tab — keep it alive for
   // either, tear it down elsewhere. wireApp re-mounts it into the active tab's #map.
   if (tab !== 'map' && tab !== 'home' && mapView) { mapView.destroy(); mapView = null }
@@ -604,9 +636,10 @@ function render(): void {
   ensureProfiles()
   startMonitor()
   const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
-  root.innerHTML = `${buzzBanner()}<main class="screen fade-in ${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
+  root.innerHTML = `${buzzBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   wireApp()
   if (compose) mountCompose() // a full render drops the overlay — put it back
+  if (circleMenu) mountCircleMenu() // same for the long-press action sheet
   restoreFocusedInput(keep)
 }
 
@@ -683,10 +716,11 @@ function precisionCard(c: store.Circle): string {
   </div>`
 }
 
-/** "Find each other" — a deliberate, temporary step-up to building-level detail so
- *  a group in a crowd can walk to each other. Opt-in per person, capped by the
- *  circle's own lifetime, auto-reverting; a no-report place still caps it (the boost
- *  raises the "coarse" input to decideEmission, it doesn't bypass the policy). */
+/** "Find each other" — a deliberate, temporary step-up to Exact spot (the finest
+ *  detail flock offers) so a group in a crowd can walk right to each other. Opt-in
+ *  per person, capped by the circle's own lifetime, auto-reverting; a no-report
+ *  place still caps it (the boost raises the "coarse" input to decideEmission, it
+ *  doesn't bypass the policy). */
 function festivalCard(c: store.Circle): string {
   if (festivalActive(c)) {
     const until = c.festivalUntil as number
@@ -696,16 +730,16 @@ function festivalCard(c: store.Circle): string {
         <strong>📍 Finding each other</strong>
         <span class="muted">${esc(fmtTtl(until))} left</span>
       </div>
-      <div class="note">Everyone in ${esc(c.name)} sees you to within <strong>~20 m</strong> until <strong>${esc(fmtClock(until))}</strong> — then you drop back to your usual detail on your own.</div>
+      <div class="note">Everyone in ${esc(c.name)} sees you to within <strong>${esc(precisionSize(FESTIVAL_PRECISION))}</strong> until <strong>${esc(fmtClock(until))}</strong> — then you drop back to your usual detail on your own.</div>
       <button class="btn small ghost" data-action="festival-stop">Stop now</button>
     </div>`
   }
   const chip = (h: number): string => `<button class="btn small" data-action="festival-start" data-hours="${h}">${h}h</button>`
   return `<div class="section-title" style="margin-top:22px">Find each other</div>
   <div class="card stack">
-    <div class="note">In a crowd — a festival, a market — your usual detail is too coarse to meet up. Turn this on and everyone in the circle sees you to within <strong>~20 m</strong> for a set time, then it reverts on its own. Each of you turns it on for yourself.</div>
+    <div class="note">In a crowd — a festival, a market — your usual detail is too coarse to meet up. Turn this on and everyone in the circle sees you to within <strong>${esc(precisionSize(FESTIVAL_PRECISION))}</strong> for a set time, then it reverts on its own. Each of you turns it on for yourself.</div>
     <div class="chip-row">${FESTIVAL_HOURS.map(chip).join('')}</div>
-    ${hint('festival', 'A deliberate, temporary boost for meeting up in a crowd — building-level, not your exact door. It ends by itself (or when the circle does), and a place you\'ve marked private still stays private.')}
+    ${hint('festival', 'A deliberate, temporary boost for meeting up in a crowd — your exact spot, the sharpest flock shares. It ends by itself (or when the circle does), and a place you\'ve marked private still stays private.')}
   </div>`
 }
 
@@ -911,8 +945,14 @@ function circleView(): string {
   const rows = mem.length
     ? mem.map((pk) => circleMemberRow(pk, me.pk)).join('')
     : '<div class="card muted">Just you so far.</div>'
-  const lead = alone
-    ? `<div class="card invite-lead"><div class="cta-emoji">👋</div><div class="cta-text"><strong>Add your people</strong><span>Share a code in person, or send an invite to someone's key.</span></div></div>${inviteSections()}`
+  // Inviting is the whole point when you're on your own, so the panel opens
+  // itself then; otherwise it's tucked behind the header's "Invite" button.
+  const inviteOpen = alone || showInvite
+  const inviteHeader = alone
+    ? '' // an alone circle gets the louder invite-lead below instead of a toggle
+    : `<button class="btn small primary" data-action="toggle-invite" aria-expanded="${showInvite}">${showInvite ? '✕ Close' : '＋ Invite'}</button>`
+  const invitePanel = inviteOpen
+    ? `${alone ? `<div class="card invite-lead"><div class="cta-emoji">👋</div><div class="cta-text"><strong>Add your people</strong><span>Share a code in person, or send an invite to someone's key.</span></div></div>` : ''}${inviteSections()}`
     : ''
   const unseen = c.unseenMembers ?? []
   const joinNotice = unseen.length
@@ -924,10 +964,13 @@ function circleView(): string {
     : ''
   return `
     ${topbar()}
-    <h2 style="margin-bottom:14px">${esc(c.name)}</h2>
+    <div class="row circle-head" style="justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px">
+      <h2 style="margin:0">${esc(c.name)}</h2>
+      ${inviteHeader}
+    </div>
     ${joinNotice}
-    ${lead}
-    <div class="section-title"${alone ? ' style="margin-top:22px"' : ''}>Members</div>
+    ${invitePanel}
+    <div class="section-title"${inviteOpen ? ' style="margin-top:22px"' : ''}>Members</div>
     <div class="list">${rows}</div>
 
     <div class="section-title" style="margin-top:22px">Buzz the circle</div>
@@ -940,9 +983,7 @@ function circleView(): string {
         <button class="btn small primary" data-action="buzz">Buzz</button>
       </div>
       <div class="note">A gentle alert to everyone — their phone buzzes with your reason.</div>
-    </div>
-
-    ${alone ? '' : inviteSections()}`
+    </div>`
 }
 
 function youView(): string {
@@ -965,6 +1006,14 @@ function youView(): string {
           ? 'Quick-start key, encrypted at rest by your App lock. Sign in with a signer to keep the key out of flock entirely.'
           : 'Quick-start key, stored in this browser only. Turn on the App lock (Advanced) to encrypt it at rest, or sign in with a signer.'}</div>
     </div>
+    ${isNativeShell() ? `<div class="section-title" style="margin-top:18px">Notifications</div>
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between">
+        <span>Stay reachable when closed</span>
+        <button class="switch${persisted.stayReachable ? ' on' : ''}" data-action="toggle-stay-reachable" role="switch" aria-checked="${!!persisted.stayReachable}"><span class="knob"></span></button>
+      </div>
+      <div class="note">Keeps flock listening even when it's shut, so a message, buzz or safety alert reaches you on the lock screen — like Signal. It shows a quiet "staying reachable" notification while on and uses a little battery, and it's off whenever flock is hidden. If alerts stop arriving overnight, allow flock to ignore battery optimisation when asked.</div>
+    </div>` : ''}
     <div class="section-title" style="margin-top:18px">Tips &amp; help</div>
     <div class="card stack">
       <div class="row" style="justify-content:space-between">
@@ -973,6 +1022,14 @@ function youView(): string {
       </div>
       <div class="note">Small explanations appear around the app while you're learning. Turn them off once you're comfortable.</div>
       ${persisted.hints?.dismissed.length ? '<button class="btn small ghost" data-action="reset-hints">Bring all tips back</button>' : ''}
+    </div>
+    <div class="section-title" style="margin-top:18px">Distances</div>
+    <div class="card stack">
+      <div class="row" style="gap:10px">
+        <button class="btn small ${distanceUnits() === 'metric' ? 'primary' : 'ghost'}" data-action="set-units" data-units="metric">Kilometres</button>
+        <button class="btn small ${distanceUnits() === 'imperial' ? 'primary' : 'ghost'}" data-action="set-units" data-units="imperial">Miles</button>
+      </div>
+      <div class="note">How flock shows distances — like how closely you're sharing your location. Miles switches short distances to feet.</div>
     </div>
     <div class="section-title" style="margin-top:18px">Names &amp; photos</div>
     <div class="card stack">
@@ -1269,6 +1326,10 @@ function wireApp(): void {
   wirePrecisionSlider()
   const brand = root.querySelector<HTMLElement>('.topbar .brand')
   if (brand) wireHideHold(brand)
+  root.querySelectorAll<HTMLElement>('.circle-chip:not(.add)').forEach((chip) => {
+    const id = chip.getAttribute('data-id')
+    if (id) wireChipHold(chip, id)
+  })
   if (tab === 'map' || tab === 'home') void initMap()
 }
 
@@ -1304,7 +1365,7 @@ function commitSharePrecision(value: number): void {
 }
 
 // ── Find each other (festival mode) ──────────────────────────────────────────
-/** Raise MY detail to building-level for this circle for a set window, capped by
+/** Raise MY detail to Exact spot for this circle for a set window, capped by
  *  the circle's own lifetime. Starts sharing if it wasn't (the whole point is to be
  *  found), and re-emits at once so the circle sees the step-up promptly. */
 function startFestival(hours: number): void {
@@ -1317,7 +1378,7 @@ function startFestival(hours: number): void {
   festivalWasActive = true
   beaconCadence.delete(c.id) // the step-up should show up now, not on the next cadence tick
   if (!sharing) { startSharing(); return } // startSharing emits at the new (festival) precision
-  syncWatch() // building-level → GPS sampling tier
+  syncWatch() // exact-spot → high-accuracy GPS sampling tier
   void autoEmit()
   toast(`Find each other on — the circle sees you closely until ${fmtClock(until)}`)
   refresh()
@@ -1464,7 +1525,7 @@ function refresh(): void {
   // map canvas (and any open compose overlay) under the user on every presence tick.
   if (tab === 'map' && mapView) { updateMapData(); renderMapPanel(); patchBuzzBanner() }
   else if (tab === 'home' && mapView) { updateMapData(); renderHomePanel(); patchBuzzBanner() }
-  else render()
+  else render({ animate: false }) // a background refresh must not replay the fade-in (it reads as a flash)
 }
 
 /** Re-render Home's controls in place (share toggle, precision, messaging, invite)
@@ -1715,7 +1776,7 @@ let festivalWasActive = false
 function reconcileFestival(): void {
   const now = festivalActive(activeCircle())
   if (festivalWasActive && !now) {
-    syncWatch() // building-level → drop back to the slider's low-power tier
+    syncWatch() // exact-spot → drop back to the slider's low-power tier
     if (sharing) void autoEmit() // re-emit coarse so the circle stops seeing me finely
   }
   festivalWasActive = now
@@ -1807,6 +1868,58 @@ function closeCompose(): void {
   compose = null
   document.getElementById('compose-sheet')?.remove()
 }
+
+/** Long-press a circle chip → an action sheet for that circle. What it offers
+ *  depends on whether this device created the circle (`joinedAt` unset → the
+ *  owner, who can close it for everyone) or joined it (a member, who can only
+ *  leave their own copy). Mounted as an overlay so a re-render doesn't tear it. */
+function openCircleMenu(id: string): void {
+  if (!persisted.circles.some((c) => c.id === id)) return
+  circleMenu = id
+  chipHeldGuard = true
+  window.setTimeout(() => { chipHeldGuard = false }, 700)
+  mountCircleMenu()
+}
+function closeCircleMenu(): void {
+  circleMenu = null
+  document.getElementById('circle-menu')?.remove()
+}
+function circleMenuSheet(): string {
+  if (!circleMenu) return ''
+  const c = persisted.circles.find((x) => x.id === circleMenu)
+  if (!c) return ''
+  const owner = c.joinedAt === undefined // we created it — no join stamp
+  const action = owner
+    ? `<button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="menu-close">Close group for everyone</button>
+       <div class="note">Ends “${esc(c.name)}” for everyone and wipes its key — this can't be undone.</div>`
+    : `<button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="menu-leave">Leave group</button>
+       <div class="note">Removes “${esc(c.name)}” from this phone only. Your other groups and your key stay put; you can rejoin with a new invite.</div>`
+  return `<div class="compose-sheet" id="circle-menu" role="dialog" aria-modal="true">
+    <div class="compose-card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <strong>${esc(c.name)}</strong>
+        <button class="bz-x" data-action="menu-cancel" aria-label="Close">✕</button>
+      </div>
+      <div class="note">${owner ? 'You created this group.' : 'You’re a member of this group.'}</div>
+      ${action}
+      <button class="btn small ghost" data-action="menu-cancel">Cancel</button>
+    </div>
+  </div>`
+}
+function mountCircleMenu(): void {
+  document.getElementById('circle-menu')?.remove()
+  if (!circleMenu) return
+  const tmp = document.createElement('div')
+  tmp.innerHTML = circleMenuSheet()
+  const el = tmp.firstElementChild as HTMLElement | null
+  if (!el) return
+  root.appendChild(el)
+  el.querySelectorAll('[data-action]').forEach((node) => {
+    const a = node.getAttribute('data-action') as string
+    node.addEventListener('click', () => handleAction(a, node as HTMLElement))
+  })
+  el.addEventListener('click', (e) => { if (e.target === el) closeCircleMenu() }) // tap the dim backdrop to dismiss
+}
 function composeTitle(): string {
   if (!compose) return ''
   if (compose.target === 'group') return `Message everyone in ${esc(activeCircle()?.name ?? 'your circle')}`
@@ -1872,7 +1985,9 @@ function onIncomingDm(dm: DirectMessage): void {
   const c = persisted.circles.find((x) => x.id === dm.circleId)
   if (!c || !(c.members ?? []).includes(dm.from)) return // not a fellow circle member — drop
   activeBuzz = { from: dm.from, reason: dm.text, mine: true, circle: c.name, private: true }
-  notifyIfHidden([`${nameFor(dm.from)} messaged you`, dm.text, c.name].filter(Boolean).join(' · '))
+  // Private 1:1 → its own channel, headed by the sender and stacked per person
+  // (Signal-style: "Alex · on my way"), distinct from a whole-circle buzz.
+  notifyIfHidden(dm.text, { kind: 'dm', title: nameFor(dm.from), group: `dm:${dm.from}` })
   try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ }
   refresh()
 }
@@ -1922,9 +2037,10 @@ async function doComeToMe(): Promise<void> {
 function handleAction(action: string, node: HTMLElement): void {
   switch (action) {
     case 'tab': tab = (node.dataset.tab as typeof tab); render(); break
-    case 'switch-circle': switchCircle(node.dataset.id as string); break
+    case 'switch-circle': if (chipHeldGuard) { chipHeldGuard = false; break } switchCircle(node.dataset.id as string); break
     case 'add-circle': adding = true; onboardStep = 'intro'; render(); break
-    case 'go-invite': tab = 'circle'; render(); break
+    case 'go-invite': tab = 'circle'; showInvite = true; render(); break
+    case 'toggle-invite': showInvite = !showInvite; render(); break
     case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'geo-retry': geoIssue = null; sharing = false; startSharing(); break
     case 'quick-buzz': void sendBuzz(node.dataset.reason ?? ''); break
@@ -1960,6 +2076,7 @@ function handleAction(action: string, node: HTMLElement): void {
       store.save(persisted); render(); break
     }
     case 'toggle-advanced': showAdvanced = !showAdvanced; render(); break
+    case 'toggle-stay-reachable': void toggleStayReachable(); break
     case 'reset-hints':
       persisted.hints = { on: true, dismissed: [] }
       store.save(persisted); toast('Tips are back on'); render(); break
@@ -1970,11 +2087,19 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'save-petname': savePetname(node.dataset.pk as string); break
     case 'cancel-petname': editingPetname = null; render(); break
     case 'toggle-profiles': toggleProfiles(); break
+    case 'set-units': {
+      const u = node.dataset.units === 'imperial' ? 'imperial' : 'metric'
+      if (persisted.units !== u) { persisted.units = u; store.save(persisted) }
+      render(); break
+    }
     case 'save-relay': saveRelay(); break
     case 'leave': leave(); break
     case 'ask-disband': disbandConfirm = true; render(); break
     case 'cancel-disband': disbandConfirm = false; render(); break
     case 'disband': void disbandCircle(); break
+    case 'menu-cancel': closeCircleMenu(); break
+    case 'menu-leave': { const id = circleMenu ?? undefined; closeCircleMenu(); leave(id); break }
+    case 'menu-close': { const id = circleMenu ?? undefined; closeCircleMenu(); void disbandCircle(id); break }
     case 'ask-reset': resetConfirm = true; render(); break
     case 'cancel-reset': resetConfirm = false; render(); break
     case 'reset-device': resetDevice(); break
@@ -2194,6 +2319,48 @@ async function stopBgWatch(): Promise<void> {
   } catch { /* watcher already gone */ }
 }
 
+// ── Native shell: "stay reachable" (native/stayReachable.ts) ────────────────
+// A location-free foreground service that keeps flock's process — and thus its
+// already-always-on relay subscription — alive while the app is closed, so an
+// incoming DM/buzz/alert lands as a notification on a locked screen (Signal
+// parity). Opt-in (`persisted.stayReachable`); NEVER runs without a real
+// identity (a decoy/hidden or reset install has none), so its ongoing
+// notification can't become a "fresh install" tell.
+async function syncStayReachable(): Promise<void> {
+  if (!isNativeShell()) return
+  const want = !!persisted.stayReachable && !!persisted.identity
+  try {
+    const m = await import('../../native/stayReachable')
+    if (want) await m.startStayReachable()
+    else await m.stopStayReachable()
+  } catch { /* plugin unavailable — foreground-only receipt still works */ }
+}
+
+async function stopStayReachable(): Promise<void> {
+  if (!isNativeShell()) return
+  try { await (await import('../../native/stayReachable')).stopStayReachable() }
+  catch { /* already gone */ }
+}
+
+/** Flip the "stay reachable when closed" toggle: persist, start/stop the
+ *  service, and — on enable — ask for the Doze battery exemption without which
+ *  an aggressive OEM freezes the service overnight (parity would silently lapse). */
+async function toggleStayReachable(): Promise<void> {
+  persisted.stayReachable = !persisted.stayReachable
+  store.save(persisted)
+  render()
+  await syncStayReachable()
+  if (persisted.stayReachable) {
+    try {
+      const m = await import('../../native/stayReachable')
+      if (!(await m.isBatteryExempt())) await m.requestBatteryExemption()
+    } catch { /* plugin unavailable */ }
+    toast('Staying reachable — messages arrive even when flock is closed')
+  } else {
+    toast('Stay-reachable off — messages arrive when flock is open')
+  }
+}
+
 function onFix(f: svc.Fix): void {
   fix = f
   geoIssue = null // any successful fix clears the location-trouble card
@@ -2306,33 +2473,38 @@ function saveRelay(): void {
   toast(relays.length > 1 ? `Saved ${relays.length} relays` : 'Relay saved')
 }
 
-/** Leave just the active circle (local removal). Identity and other circles stay. */
-function leave(): void {
-  const c = activeCircle()
+/** Leave a circle (local removal). Defaults to the active one; the chip menu
+ *  passes an id so you can leave a circle that isn't in focus. Identity and
+ *  other circles stay. */
+function leave(id?: string): void {
+  const c = id ? persisted.circles.find((x) => x.id === id) : activeCircle()
   if (!c) return
+  const wasActive = c.id === persisted.activeCircleId
   removeCircle(c.id)
   disbandConfirm = false
   resetConfirm = false
   removeConfirmPk = null
-  tab = 'home'
+  if (wasActive) tab = 'home'
   toast(`Left ${c.name}`)
   render()
 }
 
-/** Disband the active circle for *everyone* — broadcast a tombstone, then wipe locally. */
-async function disbandCircle(): Promise<void> {
-  const c = activeCircle()
-  const id = persisted.identity
-  if (!c || !id) return
+/** Disband a circle for *everyone* — broadcast a tombstone, then wipe locally.
+ *  Defaults to the active circle; the chip menu passes an id for a background one. */
+async function disbandCircle(id?: string): Promise<void> {
+  const c = id ? persisted.circles.find((x) => x.id === id) : activeCircle()
+  const me = persisted.identity
+  if (!c || !me) return
+  const wasActive = c.id === persisted.activeCircleId
   try {
-    await publishSignal(await buildDisbandSignal({ groupId: c.id, seedHex: c.seedHex, by: id.pk }), c)
+    await publishSignal(await buildDisbandSignal({ groupId: c.id, seedHex: c.seedHex, by: me.pk }), c)
   } catch { /* still drop locally even if the broadcast fails */ }
   const name = c.name
   removeCircle(c.id)
   disbandConfirm = false
   resetConfirm = false
   removeConfirmPk = null
-  tab = 'home'
+  if (wasActive) tab = 'home'
   toast(`Disbanded ${name}`)
   render()
 }
@@ -2407,9 +2579,11 @@ async function hideNow(): Promise<void> {
   const cfg = persisted.decoy
   if (!cfg) return
   if (localStorage.getItem(DECOY_CACHE_KEY)) { toast("Couldn't hide — free up some storage and try again"); return }
-  // Native shell: the background watcher's persistent notification would be a
-  // tell on a "fresh install" — await its teardown BEFORE sealing and reloading.
+  // Native shell: any persistent foreground-service notification (the location
+  // watcher, the stay-reachable service) would be a tell on a "fresh install" —
+  // await their teardown BEFORE sealing and reloading.
   await stopBgWatch()
+  await stopStayReachable()
   const sealed = await sealState(JSON.stringify(persisted), cfg.salt, cfg.key)
   store.lockSaves()
   localStorage.setItem(DECOY_CACHE_KEY, sealed)
@@ -2542,6 +2716,30 @@ function wireHideHold(node: HTMLElement): void {
   node.addEventListener('pointercancel', cancel)
 }
 
+/** Press-and-hold a circle chip (or right-click on desktop) to open its action
+ *  sheet. No preventDefault on pointerdown — the chip row scrolls horizontally,
+ *  so we cancel on movement instead, and let native scroll through. */
+const CHIP_HOLD_MS = 500
+function wireChipHold(node: HTMLElement, id: string): void {
+  let timer = 0
+  let sx = 0
+  let sy = 0
+  const begin = (e: PointerEvent): void => {
+    sx = e.clientX; sy = e.clientY
+    timer = window.setTimeout(() => { openCircleMenu(id) }, CHIP_HOLD_MS)
+  }
+  const move = (e: PointerEvent): void => {
+    if (timer && (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8)) cancel()
+  }
+  const cancel = (): void => { if (timer) { clearTimeout(timer); timer = 0 } }
+  node.addEventListener('pointerdown', begin)
+  node.addEventListener('pointermove', move)
+  node.addEventListener('pointerup', cancel)
+  node.addEventListener('pointerleave', cancel)
+  node.addEventListener('pointercancel', cancel)
+  node.addEventListener('contextmenu', (e) => { e.preventDefault(); openCircleMenu(id) })
+}
+
 /** Full reset: sign out, wipe local state and every circle on this device. */
 function resetDevice(): void {
   if (persisted.authMethod === 'signet') { try { void signetLogout() } catch { /* ignore */ } }
@@ -2551,6 +2749,7 @@ function resetDevice(): void {
   void burnLock()
   stopWatch?.(); stopWatch = null
   void stopBgWatch() // native shell: the foreground service (and its notification) must not outlive the reset
+  void stopStayReachable() // and the stay-reachable service likewise
   stopAllSubs()
   stopInviteSub?.(); stopInviteSub = null
   inviteSubKey = ''
@@ -2563,6 +2762,7 @@ function resetDevice(): void {
   removeConfirmPk = null
   lostConfirmPk = null
   comeToMeArmed = false
+  closeCircleMenu()
   mapView?.destroy()
   mapView = null
   fix = null
@@ -2621,7 +2821,13 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
         activeBuzz = { from: bz.from, reason: bz.reason, mine, circle: c.name }
         // The buzz banner is in-app only — with the screen off it must still
         // land as a system notification, like every other incoming signal.
-        notifyIfHidden([`${nameFor(bz.from)} buzzed${mine ? ' you' : ''}`, bz.reason, c.name].filter(Boolean).join(' · '))
+        // Group channel, headed by the circle and stacked per circle (Signal
+        // group style: title = "Night out", body = "Alex: Come to me") — a
+        // whole-circle buzz, visibly distinct from a private 1:1 DM.
+        const buzzBody = bz.reason
+          ? `${nameFor(bz.from)}: ${bz.reason}`
+          : `${nameFor(bz.from)} buzzed${mine ? ' you' : ' the circle'}`
+        notifyIfHidden(buzzBody, { kind: 'group', title: c.name, group: `group:${c.id}` })
         try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
       }
     } else if (t === LOST_SIGNAL_TYPE) {
@@ -2639,12 +2845,12 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
         if (mine) {
           // THIS is the lost phone: be loud for whoever is holding it, and show
           // the finder card on Home (see lostCard).
-          notifyIfHidden(`This phone was reported lost by ${nameFor(rep.by)} — open flock`)
+          notifyIfHidden(`This phone was reported lost by ${nameFor(rep.by)} — open flock`, { kind: 'alert', title: c.name, group: `alert:${c.id}` })
           try { navigator.vibrate?.([400, 150, 400, 150, 400]) } catch { /* no haptics */ }
           toast(`${nameFor(rep.by)} reported this phone lost`)
         } else if (!byMe) {
           toast(`📵 ${nameFor(rep.by)} reported ${nameFor(rep.member)}'s phone lost`)
-          notifyIfHidden(`${nameFor(rep.member)}'s phone was reported lost · ${c.name}`)
+          notifyIfHidden(`${nameFor(rep.member)}'s phone was reported lost`, { kind: 'alert', title: c.name, group: `alert:${c.id}` })
         }
       } else if (!byMe) {
         toast(`✓ ${nameFor(rep.member)}'s phone is marked found`)

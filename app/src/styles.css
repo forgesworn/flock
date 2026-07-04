@@ -159,6 +159,10 @@ h1, h2 { font-family: var(--font-display); font-weight: 560; letter-spacing: -0.
   border-radius: 999px;
   white-space: nowrap;
   transition: color 0.2s, background 0.2s, border-color 0.2s;
+  /* Press-and-hold opens the chip's action sheet — suppress the native
+     text-selection callout so the gesture reads cleanly on mobile. */
+  -webkit-touch-callout: none;
+  user-select: none;
 }
 .circle-chip.on { background: var(--surface-2); color: var(--text); border-color: var(--line-strong, var(--line)); }
 .circle-chip .ttl {

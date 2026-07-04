@@ -18,14 +18,24 @@
 //    in the browser. autoVerify checks the site's /.well-known/assetlinks.json
 //    (shipped in app/public, so every deploy serves it) against the APK's
 //    signing cert; native/deeplink.ts feeds the arriving URL to the app.
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const manifestPath = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '../android/app/src/main/AndroidManifest.xml',
-)
+const here = dirname(fileURLToPath(import.meta.url))
+const manifestPath = resolve(here, '../android/app/src/main/AndroidManifest.xml')
+
+// The location-free "stay reachable" foreground service + its Capacitor plugin
+// live as committed Java templates (native/android-src/*.java — NOT native/android/,
+// which the `android/` gitignore rule would swallow) copied into the generated
+// package so a fresh clone reproduces them. MainActivity is replaced to register
+// the app-local plugin (npm plugins auto-register; this one can't).
+const JAVA_SRC = resolve(here, 'android-src')
+const JAVA_DEST = resolve(here, '../android/app/src/main/java/cc/trotters/flock')
+for (const f of ['StayReachableService.java', 'StayReachablePlugin.java', 'MainActivity.java']) {
+  copyFileSync(resolve(JAVA_SRC, f), resolve(JAVA_DEST, f))
+}
+console.error('copied stay-reachable native sources into android/')
 
 const PERMISSIONS = [
   'android.permission.ACCESS_COARSE_LOCATION',
@@ -33,6 +43,13 @@ const PERMISSIONS = [
   'android.permission.ACCESS_BACKGROUND_LOCATION',
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.FOREGROUND_SERVICE_LOCATION',
+  // specialUse foreground-service type for the location-free "stay reachable"
+  // service (Android 14+ requires a declared type; specialUse avoids the ~6h/day
+  // cap Android 15+ puts on dataSync — see StayReachableService.java).
+  'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
+  // Lets flock ask to be exempt from Doze battery optimisation — without it an
+  // aggressive OEM (Samsung) freezes the stay-reachable service overnight.
+  'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
   'android.permission.POST_NOTIFICATIONS',
 ]
 
@@ -75,6 +92,24 @@ if (xml.includes(`android:host="${APP_LINK_HOST}"`) && !xml.includes('android:pa
   changed = true
 } else if (!xml.includes(`android:host="${APP_LINK_HOST}"`)) {
   xml = xml.replace('</intent-filter>', `</intent-filter>\n\n            ${APP_LINK_FILTER}`)
+  changed = true
+}
+
+// The location-free "stay reachable" foreground service (StayReachableService).
+// specialUse type — a persistent message connection; it does NOT use location.
+// The subtype <property> is mandatory for specialUse on Android 14+. Declared
+// inside <application>, right before its close.
+if (!xml.includes('.StayReachableService')) {
+  const service = `        <service
+            android:name=".StayReachableService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Receives end-to-end encrypted messages and safety alerts while the app is closed." />
+        </service>
+`
+  xml = xml.replace('</application>', `${service}    </application>`)
   changed = true
 }
 
