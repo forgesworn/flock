@@ -205,15 +205,17 @@ export function pruneDms(dms: Record<string, ChatMessage[]> | undefined, knownPk
   return out
 }
 
-/** Should this hint render? Fresh devices (undefined state) show everything. */
+/** Should this hint render? Fresh devices (undefined state) show NOTHING —
+ *  the screen should read as intuitive on its own; a new user opts in to the
+ *  explanations under You rather than being shown them unasked. */
 export function hintShown(h: Hints | undefined, id: string): boolean {
-  const hints = h ?? { on: true, dismissed: [] }
+  const hints = h ?? { on: false, dismissed: [] }
   return hints.on && !hints.dismissed.includes(id)
 }
 
 /** Dismiss one hint (idempotent); the master switch is untouched. */
 export function withHintDismissed(h: Hints | undefined, id: string): Hints {
-  const hints = h ?? { on: true, dismissed: [] }
+  const hints = h ?? { on: false, dismissed: [] }
   return hints.dismissed.includes(id) ? hints : { ...hints, dismissed: [...hints.dismissed, id] }
 }
 

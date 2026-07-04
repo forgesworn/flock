@@ -1551,9 +1551,9 @@ function settingsSections(me: store.Identity, c: store.Circle): string {
     <div class="card stack">
       <div class="row" style="justify-content:space-between">
         <span>Show helper tips</span>
-        <button class="switch${(persisted.hints?.on ?? true) ? ' on' : ''}" data-action="toggle-hints" role="switch" aria-checked="${persisted.hints?.on ?? true}"><span class="knob"></span></button>
+        <button class="switch${(persisted.hints?.on ?? false) ? ' on' : ''}" data-action="toggle-hints" role="switch" aria-checked="${persisted.hints?.on ?? false}"><span class="knob"></span></button>
       </div>
-      <div class="note">Small explanations appear around the app while you're learning. Turn them off once you're comfortable.</div>
+      <div class="note">Small explanations you can turn on around the app if you want a hand learning it. Off by default — the screen should make sense on its own.</div>
       ${persisted.hints?.dismissed.length ? '<button class="btn small ghost" data-action="reset-hints">Bring all tips back</button>' : ''}
     </div>
     <div class="section-title" style="margin-top:18px">Distances</div>
@@ -3042,7 +3042,7 @@ function handleAction(action: string, node: HTMLElement): void {
       persisted.hints = store.withHintDismissed(persisted.hints, node.dataset.hint ?? '')
       store.save(persisted); render(); break
     case 'toggle-hints': {
-      const h = persisted.hints ?? { on: true, dismissed: [] }
+      const h = persisted.hints ?? { on: false, dismissed: [] }
       persisted.hints = { ...h, on: !h.on }
       store.save(persisted); render(); break
     }

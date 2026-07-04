@@ -15,6 +15,14 @@ const config: CapacitorConfig = {
     // plugin uses the platform LocationManager (raw GPS) + a foreground service,
     // so it needs no Google APIs. Permissions/usage strings live in the native
     // project; see native/README.md.
+    //
+    // WebView debugging: OFF by default (Capacitor's own default already tracks
+    // the manifest's debuggable flag, so a release build never exposes this) —
+    // explicit here only so a real-hardware Playwright test session can opt in
+    // via FLOCK_E2E_HARDWARE=1 without touching the signing key, so installing
+    // over an existing app is a normal update (no data loss). Never set for a
+    // build shipped to the public get-page.
+    webContentsDebuggingEnabled: process.env.FLOCK_E2E_HARDWARE === '1',
   },
 }
 

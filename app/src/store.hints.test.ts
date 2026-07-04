@@ -2,14 +2,19 @@ import { describe, it, expect } from 'vitest'
 import { hintShown, withHintDismissed, type Hints } from './store'
 
 describe('helper hints — learn, then quieten (audit Slice 12)', () => {
-  it('hints default ON for a fresh device (undefined state)', () => {
-    expect(hintShown(undefined, 'home-watch')).toBe(true)
+  it('hints default OFF for a fresh device (undefined state) — the screen should make sense unasked', () => {
+    expect(hintShown(undefined, 'home-watch')).toBe(false)
   })
 
-  it('a dismissed hint stays dismissed; others still show', () => {
-    const h = withHintDismissed(undefined, 'home-watch')
+  it('a dismissed hint stays dismissed once the master switch is on', () => {
+    const h = withHintDismissed({ on: true, dismissed: [] }, 'home-watch')
     expect(hintShown(h, 'home-watch')).toBe(false)
     expect(hintShown(h, 'home-sos')).toBe(true)
+  })
+
+  it('dismissing on a fresh (off) device does not itself turn hints on', () => {
+    const h = withHintDismissed(undefined, 'home-watch')
+    expect(hintShown(h, 'home-sos')).toBe(false)
   })
 
   it('dismissing twice does not duplicate', () => {
