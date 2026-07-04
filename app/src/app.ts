@@ -256,6 +256,13 @@ function memberLost(circleId: string, pk: string): LostReport | null {
   return r?.lost ? r : null
 }
 
+// Session-scoped: has THIS phone already told the user about a member's current
+// precision-jump-to-Exact stretch (see precisionJumpedToExact)? Cleared the
+// moment their precision drops back below Exact, so a genuinely NEW jump later
+// notifies again — but a 5-minute heartbeat at the same Exact-spot precision
+// doesn't re-toast every beacon.
+const exactJumpNotified = new Set<string>()
+
 // Presence cache — mirror member beacons to localStorage so map pins survive a
 // refresh / PWA relaunch (a peer's next beacon can be up to a heartbeat — 5 min —
 // away, which would otherwise leave the map blank on reload). The live Map stays the
@@ -402,6 +409,18 @@ const FESTIVAL_HOURS = [1, 3, 6] as const // offered windows; capped by circle e
 /** Is "find each other" running for this circle right now? */
 function festivalActive(c: store.Circle | null, now = nowSec()): boolean {
   return !!c?.festivalUntil && c.festivalUntil > now
+}
+
+/** Did a member's disclosed precision just jump to Exact spot from something
+ *  meaningfully coarser? On the wire an Exact-spot beacon is indistinguishable
+ *  from any other (FLOCK §6 invariant 1) — deliberately, so we can never say
+ *  WHY (festival boost? "Come to me"? they moved their own slider?) — but a
+ *  sudden jump with no explanation is exactly what read as unexplained/alarming
+ *  in the field (a friend saw "now on exact spot" with nothing to say why).
+ *  `undefined` previous precision (their very first beacon) never counts —
+ *  everyone's baseline is unknown until we've actually seen it. */
+function precisionJumpedToExact(prevPrecision: number | undefined, nextPrecision: number): boolean {
+  return prevPrecision !== undefined && prevPrecision < PRECISION_MAX - 2 && nextPrecision >= PRECISION_MAX
 }
 
 /** The slider's own value (3–9), ignoring any festival step-up — this is what the
@@ -3879,6 +3898,20 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       // Legacy 'breach'/'pickup' types decrypt with the same beacon key — accept
       // them as plain location beacons so an older app version still shows up.
       const p = await decryptBeacon(deriveBeaconKey(c.seedHex), e.content)
+      const jumpKey = `${c.id}:${e.pubkey}`
+      if (me && e.pubkey !== me.pk) {
+        const prevPrecision = cstate(c.id).beacons.get(e.pubkey)?.precision
+        if (precisionJumpedToExact(prevPrecision, p.precision) && !exactJumpNotified.has(jumpKey)) {
+          exactJumpNotified.add(jumpKey)
+          // Deliberately no reason given — the wire never says WHY (§6 invariant
+          // 1), so guessing "find each other" vs "come to me" vs a manual slider
+          // change would be a claim we can't back up. Just the fact, so a sudden
+          // "exact spot" reading isn't unexplained.
+          toast(`${nameFor(e.pubkey)}'s sharing jumped to Exact spot — probably a one-off boost, not their usual detail`)
+        } else if (p.precision < PRECISION_MAX) {
+          exactJumpNotified.delete(jumpKey) // back to their normal detail — a later jump should notify again
+        }
+      }
       saveBeacon(c.id, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
     } else if (t === 'buzz') {
       const bz = await decryptBuzz(c.seedHex, e.content)

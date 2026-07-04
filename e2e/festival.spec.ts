@@ -40,4 +40,27 @@ test.describe('find each other (festival mode)', () => {
     await A.click('[data-action="festival-stop"]')
     await expect.poll(() => areaCount(B), { timeout: 20_000 }).toBeGreaterThan(0)
   })
+
+  // FLOCK §6 invariant 1: an Exact-spot beacon is wire-indistinguishable from any
+  // other — we can never say WHY someone jumped that fine (festival? "Come to
+  // me"? their own slider?). But a sudden, unexplained jump is exactly what read
+  // as alarming/confusing in the field ("now on exact spot", no context). B should
+  // get a plain heads-up that A's detail jumped, without guessing a reason.
+  test('B gets a heads-up when A\'s detail suddenly jumps to Exact spot', async ({ browser }) => {
+    const A = await newPerson(browser)
+    const B = await newPerson(browser)
+    await createCircle(A, { name: 'Glastonbury' })
+    const code = await inviteCode(A)
+    await joinByCode(B, code)
+
+    await setSharePrecision(A, 4) // City — well below the jump threshold
+    await startSharing(A)
+    await gotoTab(B, 'map')
+    await expect(B.locator('.map-pin')).toBeVisible({ timeout: 30_000 })
+    await expect.poll(() => areaCount(B), { timeout: 15_000 }).toBeGreaterThan(0) // B has seen A's coarse baseline
+
+    await gotoTab(A, 'home')
+    await A.click('[data-action="festival-start"][data-hours="3"]')
+    await expect(B.locator('#toast')).toContainText('jumped to Exact spot', { timeout: 20_000 })
+  })
 })
