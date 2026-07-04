@@ -21,8 +21,9 @@ test.describe('location permission denied — a way out, not a dead end (audit S
     await A.click('[data-action="toggle-share"]')
     // A persistent card says what happened and how to fix it…
     await expect(A.locator('.geo-issue')).toContainText("can't see your location")
-    // …and the button is honest — sharing reverted, visibly.
-    await expect(A.locator('[data-action="toggle-share"]')).toContainText('Start sharing')
+    // …and the button is honest — sharing reverted (an icon button now; the
+    // label lives in its aria-label).
+    await expect(A.locator('[data-action="toggle-share"]')).toHaveAttribute('aria-label', 'Start sharing')
 
     // Retry with permission still blocked: the card comes straight back.
     await A.click('[data-action="geo-retry"]')

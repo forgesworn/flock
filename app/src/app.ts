@@ -699,6 +699,7 @@ const ICON = {
   chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v10H9.5L5 19v-3.5H4z"/></svg>',
   circle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.5a3 3 0 0 1 0 5.8M16.5 20a5.5 5.5 0 0 0-3-4.9"/></svg>',
   you: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6z"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16.5a3.6 3.6 0 0 1 7 0"/></svg>',
+  pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.5 7-12a7 7 0 1 0-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.3"/></svg>',
 }
 
 // ── Mount / render ──────────────────────────────────────────────────────────
@@ -1020,12 +1021,9 @@ function homeMapStatus(): { cls: string; label: string; sub: string } {
 
 function homeMapStatusHtml(): string {
   const s = homeMapStatus()
-  const n = memberPoints().filter((p) => p.member !== persisted.identity?.pk).length
-  const seen = n ? `${n} ${n === 1 ? 'person' : 'people'} on the map` : 'No one sharing right now'
-  return `<div class="map-status ${s.cls}" id="home-map-status">
-    <span class="ms-dot"></span>
-    <span class="ms-text"><strong>${esc(s.label)}</strong><span class="ms-sub">${esc(s.sub)} · ${esc(seen)}</span></span>
-  </div>`
+  return `<span class="map-status ${s.cls}" id="home-map-status" title="${esc(s.sub)}">
+    <span class="ms-dot"></span><span class="ms-text">${esc(s.label)}</span>
+  </span>`
 }
 
 /** The precision slider — how closely this circle sees me. Lives on Home next to
@@ -2182,10 +2180,13 @@ function patchNavBadges(): void {
 }
 
 /** The share toggle + status chip — its own function so both the initial
- *  render and the in-place refresh build identical markup. */
+ *  render and the in-place refresh build identical markup. A compact single
+ *  row (icon button, not a full-width one) — Home's hero is the map, not this. */
 function homeShareBarInner(): string {
-  return `${homeMapStatusHtml()}
-    <button class="btn ${sharing ? 'ghost' : 'primary'}" data-action="toggle-share">${sharing ? 'Stop sharing' : 'Start sharing'}</button>
+  return `<div class="home-share-row">
+      <button class="icon-btn share-toggle${sharing ? ' on' : ''}" data-action="toggle-share" aria-label="${sharing ? 'Stop sharing' : 'Start sharing'}" aria-pressed="${sharing}">${ICON.pin}</button>
+      ${homeMapStatusHtml()}
+    </div>
     ${hint('home-watch', "Sharing live lets your circle see where you are, you choose how closely under Circle. Stop any time; nothing is shared while it's off. Tap anyone below to zoom to them, or their pin to message them privately.")}`
 }
 
