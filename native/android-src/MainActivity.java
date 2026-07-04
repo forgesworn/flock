@@ -1,10 +1,12 @@
 // flock — Capacitor host activity.
 //
 // Registers the app-local plugins: StayReachable (the location-free "stay
-// reachable" foreground service) and FlockNotify (message notifications with
-// PUBLIC lock-screen visibility). The background-geolocation and
-// local-notifications plugins are npm packages and auto-register; a plugin
-// defined in this module must be registered by hand, before super.onCreate.
+// reachable" foreground service), FlockNotify (message notifications with
+// PUBLIC lock-screen visibility), FlockBle (off-relay phone-to-phone
+// transport) and FlockOrbot (the Tor/.onion relay toggle's Orbot reachability
+// probe). The background-geolocation and local-notifications plugins are npm
+// packages and auto-register; a plugin defined in this module must be
+// registered by hand, before super.onCreate.
 //
 // This file REPLACES the stock Capacitor MainActivity via native/patch-android.mjs.
 package cc.trotters.flock;
@@ -18,6 +20,7 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(StayReachablePlugin.class);
     registerPlugin(FlockNotifyPlugin.class);
     registerPlugin(FlockBlePlugin.class);
+    registerPlugin(FlockOrbotPlugin.class);
     super.onCreate(savedInstanceState);
   }
 }

@@ -6,7 +6,7 @@ import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
 import { buildSignInOptions } from './signin'
-import { PRIVATE_RELAYS, parseRelayList, unknownRelays } from './relays'
+import { PRIVATE_RELAYS, ONION_RELAYS, parseRelayList, unknownRelays, effectiveRelays } from './relays'
 import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { getProfile, fetchProfiles } from './profiles'
@@ -528,6 +528,74 @@ async function syncBle(): Promise<void> {
   } catch { bleActive = false; bleMode = 'discreet' /* older shell / BLE unavailable / denied — relay carries on */ }
 }
 
+// ── Tor `.onion` relay endpoint (native, opt-in, fail-loud) ──────────────────
+// docs/plans/2026-07-04-mesh-bridge-goal.md Task B. Off by default; DarkFi
+// reverted Tor-by-default (unreliable on mobile), so this is a deliberate user
+// toggle, never automatic — and it must NEVER silently fall back to clearnet:
+// the user chose the property (no IP exposure to the relay), so a route that
+// isn't ready has to fail loud, not degrade invisibly.
+let orbotDetected = false // refreshed on toggle-on, boot, and app-foreground — native shell only
+
+/** Refresh whether Orbot's SOCKS proxy is reachable. Never throws; leaves
+ *  orbotDetected false on the web PWA, an older shell, or any probe failure —
+ *  activeRelays() below then fails loud rather than silently using clearnet. */
+async function syncTor(): Promise<void> {
+  if (!isNativeShell() || !persisted.torRelay) { orbotDetected = false; return }
+  try {
+    const orbot = await import('../../native/orbot')
+    orbotDetected = await orbot.detectOrbot()
+  } catch { orbotDetected = false }
+}
+
+/** The relay set for this call, honouring the Tor toggle (relays.ts
+ *  effectiveRelays) — byte-for-byte `persisted.relayUrls` when Tor is off (the
+ *  default, and every existing flow, untouched). THROWS when Tor is on but the
+ *  route isn't ready (fail loud): callers already inside a try/catch let that
+ *  surface as their existing failure toast. See the two variants below for
+ *  call sites without one. */
+function activeRelays(): string[] {
+  return effectiveRelays({
+    clearnetRelays: persisted.relayUrls,
+    onionRelays: ONION_RELAYS,
+    torEnabled: !!persisted.torRelay,
+    orbotDetected,
+  })
+}
+
+/** activeRelays(), toasting once and returning null instead of throwing — for
+ *  fire-and-forget publishes with no surrounding try/catch. */
+function activeRelaysOrToast(): string[] | null {
+  try { return activeRelays() } catch (err) {
+    toast(err instanceof Error ? err.message : 'Tor routing is on but not ready')
+    return null
+  }
+}
+
+/** activeRelays(), swallowing the error with no toast — for bookkeeping that
+ *  runs on every render (subscription set-up); the toggle flip and the
+ *  foreground refresh already own telling the user once, so this must not spam. */
+function activeRelaysQuiet(): string[] | null {
+  try { return activeRelays() } catch { return null }
+}
+
+/** Flip "route through Tor when available". Off by default; the Settings note
+ *  labels it clearly unreliable on mobile (DarkFi's lesson) — a deliberate
+ *  choice, never automatic, and the PWA copy explains it needs the app + Orbot. */
+async function toggleTorRelay(): Promise<void> {
+  persisted.torRelay = !persisted.torRelay
+  store.save(persisted)
+  render()
+  await syncTor()
+  toast(!persisted.torRelay
+    ? 'Tor routing off'
+    : ONION_RELAYS.length === 0
+      ? 'Tor routing is on, but no .onion relay is set up yet'
+      : orbotDetected
+        ? 'Routing through Tor'
+        : "Tor routing is on, but Orbot wasn't found — open Orbot and make sure it's running")
+  render()
+}
+
 /** A wrap arrived over BLE: feed it into the SAME pipeline as a relay wrap. The
  *  crowd meshUuid carries EVERY circle's traffic (and even discreet frames may be
  *  for any circle a peer shares), so try every circle's inbox — giftUnwrap fails
@@ -550,7 +618,8 @@ function onBleFrame(data: string): void {
   // whoever has bars carries the crowd). Discreet mode only ever carries the
   // active circle's wraps, which my IP already subscribes to.
   if (bleActive && typeof ev.sig === 'string' && navigator.onLine) {
-    void svc.publishSigned(persisted.relayUrls, ev as never).catch(() => { /* best-effort */ })
+    const relays = activeRelaysQuiet()
+    if (relays) void svc.publishSigned(relays, ev as never).catch(() => { /* best-effort */ })
   }
 }
 
@@ -656,6 +725,10 @@ function bootUnlocked(): void {
     // Bring BLE-nearby up to match its toggle (off-relay, additive). No-op unless
     // opted in; failures leave it off and the relay carries everything.
     void syncBle()
+    // Re-check Orbot reachability to match the Tor toggle. No-op unless opted
+    // in; ensureSubscriptions()/ensureInviteSub() re-run on the next render
+    // regardless, so a status change here takes effect promptly.
+    void syncTor().then(() => render())
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
     // The interval above is unreliable while backgrounded, so also re-check the
@@ -1467,6 +1540,14 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
       <div class="field"><label for="relay">Server addresses (one per line)</label><textarea class="input" id="relay" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false">${esc(persisted.relayUrls.join('\n'))}</textarea></div>
       <div class="note">Alerts go to every server here, so one being down can't swallow an SOS. Add a backup you trust — even encrypted, a public server still sees the timing of your traffic.</div>
       <button class="btn small" data-action="save-relay">Save servers</button>
+      <div class="row" style="justify-content:space-between;margin-top:14px">
+        <span>Route through Tor when available</span>
+        <button class="switch${persisted.torRelay ? ' on' : ''}" data-action="toggle-tor" role="switch" aria-checked="${!!persisted.torRelay}"><span class="knob"></span></button>
+      </div>
+      <div class="note">Off by default. Hides your IP from the relay by routing through Tor (Orbot) instead — but Tor is known to be unreliable on mobile networks, so treat this as experimental and turn it off if alerts start failing.
+        ${isNativeShell()
+          ? ' Needs Orbot installed and running; flock never falls back to a plain connection silently — if the Tor route isn\'t ready, sending fails loudly instead.'
+          : ' Needs the flock app (not this browser) plus Orbot — the web version has no way to reach it.'}</div>
     </div>
     <div class="section-title" style="margin-top:18px">Circle security</div>
     <div class="card stack">
@@ -2106,7 +2187,9 @@ async function publishSignal(unsigned: { kind: number; content: string; tags: st
   if (bleActive && (bleMode === 'mesh' || circle.id === activeCircle()?.id)) {
     try { const ble = await import('../../native/ble'); await ble.broadcastBle(JSON.stringify(wrap)) } catch { /* best-effort */ }
   }
-  await svc.publishSigned(persisted.relayUrls, wrap as never)
+  const relays = activeRelaysOrToast()
+  if (!relays) return // Tor is on but not ready — already toasted; never fall back to clearnet
+  await svc.publishSigned(relays, wrap as never)
 }
 
 // ── Members, invites & reseed ────────────────────────────────────────────────
@@ -2130,12 +2213,16 @@ function ensureMember(circle: store.Circle, pk: string, expected = false): void 
 function ensureInviteSub(): void {
   const id = persisted.identity
   if (!id) { stopInviteSub?.(); stopInviteSub = null; inviteSubKey = ''; return }
-  const key = `${id.pk}@${persisted.relayUrls.join(',')}`
+  // Runs on every render — quiet on a Tor-not-ready failure (the toggle flip
+  // and the foreground refresh already own telling the user once).
+  const relays = activeRelaysQuiet()
+  if (!relays) { stopInviteSub?.(); stopInviteSub = null; inviteSubKey = ''; return }
+  const key = `${id.pk}@${relays.join(',')}`
   if (key === inviteSubKey && stopInviteSub) return
   stopInviteSub?.()
   inviteSubKey = key
   // Listen on our derived personal-inbox tag, not our npub — the relay never sees a real key.
-  stopInviteSub = svc.subscribeGiftWraps(persisted.relayUrls, personalInboxTag(id.pk), (e) => { void onInviteWrap(e) })
+  stopInviteSub = svc.subscribeGiftWraps(relays, personalInboxTag(id.pk), (e) => { void onInviteWrap(e) })
 }
 
 async function onInviteWrap(e: { pubkey: string; content: string; tags: string[][] }): Promise<void> {
@@ -2193,7 +2280,7 @@ async function sendInvite(): Promise<void> {
   if (pk === signer.pubkey) { toast("That's your own key"); return }
   try {
     const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
-    await svc.publishSigned(persisted.relayUrls, wrap as never)
+    await svc.publishSigned(activeRelays(), wrap as never)
     ensureMember(c, pk, true) // I sent this invite — their arrival is not news to me
     pendingInviteNpub = null
     toast('Secure invite sent')
@@ -2212,7 +2299,7 @@ async function reseedCircle(removePk?: string, circle: store.Circle | null = act
   try {
     if (recipients.length) {
       const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
-      for (const w of wraps) await svc.publishSigned(persisted.relayUrls, w as never)
+      for (const w of wraps) await svc.publishSigned(activeRelays(), w as never)
     }
     patchCircleById(c.id, { seedHex: seed, epoch, reseededAt: nowSec(), seedRefreshedAt: nowSec(), members: (c.members ?? []).filter((pk) => pk !== removePk) })
     cstate(c.id).beacons.clear()
@@ -2244,7 +2331,7 @@ async function maybeRotateSeeds(): Promise<void> {
         const recipients = (c.members ?? []).filter((pk) => pk !== me)
         if (recipients.length) {
           const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: c.seedHex, n: c.name, m: c.mode })
-          for (const w of wraps) await svc.publishSigned(persisted.relayUrls, w as never)
+          for (const w of wraps) await svc.publishSigned(activeRelays(), w as never)
         }
         patchCircleById(c.id, { seedRefreshedAt: now })
       } catch { /* transient — the next hourly check retries */ }
@@ -2550,7 +2637,7 @@ async function sendDm(pk: string, text: string): Promise<void> {
   if (pk === id.pk) { toast("That's you"); return }
   try {
     const wrap = await buildDmWrap(signer, pk, { circleId: c.id, text: t })
-    await svc.publishSigned(persisted.relayUrls, wrap as never)
+    await svc.publishSigned(activeRelays(), wrap as never)
     appendDm(pk, { from: id.pk, text: t, at: nowSec() }) // my side of the thread
   } catch { toast('Message failed — check your connection') }
 }
@@ -2822,6 +2909,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'save-petname': savePetname(node.dataset.pk as string); break
     case 'cancel-petname': editingPetname = null; render(); break
     case 'toggle-profiles': toggleProfiles(); break
+    case 'toggle-tor': void toggleTorRelay(); break
     case 'set-units': {
       const u = node.dataset.units === 'imperial' ? 'imperial' : 'metric'
       if (persisted.units !== u) { persisted.units = u; store.save(persisted) }
@@ -2929,8 +3017,8 @@ async function shareWordCode(): Promise<void> {
     const refSigned = finalizeEvent(await buildWordInviteRef(codeSeed, bytesToHex(refSk), nowSec()), parkSk)
     const payload = { t: 'invite' as const, id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) }
     const inviteWrap = await buildInviteWrap(signer, refPk, payload)
-    await svc.publishSigned(persisted.relayUrls, refSigned as never)
-    await svc.publishSigned(persisted.relayUrls, inviteWrap as never)
+    await svc.publishSigned(activeRelays(), refSigned as never)
+    await svc.publishSigned(activeRelays(), inviteWrap as never)
     spokenCode = words
   } catch {
     toast("Couldn't reach a relay to set up the code — check your connection and try again.")
@@ -2951,12 +3039,12 @@ async function joinWithWords(): Promise<void> {
   spokenCodeBusy = true; render()
   try {
     const codeSeed = await deriveWordCodeSeed(words)
-    const refEvent = await svc.fetchWordInvite(persisted.relayUrls, WORD_INVITE.kind, wordInviteTag(codeSeed))
+    const refEvent = await svc.fetchWordInvite(activeRelays(), WORD_INVITE.kind, wordInviteTag(codeSeed))
     if (!refEvent) { toast('No invite found for those words — they expire after 15 minutes, so ask for a fresh code.'); return }
     const ref = await readWordInviteRef(codeSeed, refEvent)
     const refSk = store.fromHex(ref.ref)
     const refPk = getPublicKey(refSk)
-    const inviteWrap = await svc.fetchGiftWrap(persisted.relayUrls, personalInboxTag(refPk))
+    const inviteWrap = await svc.fetchGiftWrap(activeRelays(), personalInboxTag(refPk))
     if (!inviteWrap) { toast("The invite is still on its way — wait a moment and try the same words again."); return }
     const p = await readInviteViaRef(refSk, inviteWrap)
     if (!p) throw new Error('invalid invite')
@@ -2969,7 +3057,7 @@ async function joinWithWords(): Promise<void> {
     try {
       const parkSk = wordInviteParkKey(codeSeed)
       const del = finalizeEvent(buildWordInviteDeletion(refEvent.id, nowSec()), parkSk)
-      await svc.publishSigned(persisted.relayUrls, del as never)
+      await svc.publishSigned(activeRelays(), del as never)
     } catch { /* hygiene only — never blocks the join */ }
     if (persisted.circles.some((x) => x.id === circle.id)) { switchCircle(circle.id); adding = false; onboardStep = 'intro'; tab = 'home'; render(); return }
     if (!persisted.myHandle) { pendingJoin = circle; render(); return }
@@ -3194,6 +3282,8 @@ function onForeground(): void {
   void checkForUpdate()
   void refreshBatteryExempt()
   void refreshDndAccess()
+  // Orbot may have been started/stopped while flock was backgrounded.
+  void syncTor().then(() => render())
   // The app being open IS the read — clear delivered message notifications,
   // exactly as Signal does. Foreground-service notifications are immune.
   void import('../../native/notify').then((n) => n.clearDelivered()).catch(() => { /* shell only */ })
@@ -3683,7 +3773,10 @@ function resetDevice(): void {
 
 // ── Inbound ──────────────────────────────────────────────────────────────────
 function ensureSubscriptions(): void {
-  const relays = persisted.relayUrls
+  // Runs on every render — quiet on a Tor-not-ready failure (the toggle flip
+  // and the foreground refresh already own telling the user once).
+  const relays = activeRelaysQuiet()
+  if (!relays) { stopAllSubs(); return }
   const relayKey = relays.join(',')
   // Desired subs: one per circle, keyed by inbox (a reseed → new inbox → re-subscribe).
   const wanted = new Map<string, store.Circle>()
