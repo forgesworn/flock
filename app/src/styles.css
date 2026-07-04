@@ -564,6 +564,18 @@ a.btn { text-decoration: none; }
 .buzz-banner .bz-icon { font-size: 20px; animation: ring 0.6s ease-in-out 3; transform-origin: 50% 12%; }
 .buzz-banner .bz-text { flex: 1; min-width: 0; }
 .buzz-banner .bz-x { opacity: 0.6; font-size: 13px; }
+/* Remote "find my phone" cancel window — an alert-coloured banner with a veto. */
+.findping-banner {
+  position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+  width: min(480px, 100%); z-index: 201;
+  display: flex; align-items: center; gap: 12px;
+  padding: max(14px, env(safe-area-inset-top)) 18px 14px;
+  background: var(--alert); color: #0c111a; font-weight: 600;
+  box-shadow: var(--shadow);
+  animation: buzzdrop 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.findping-banner .bz-icon { font-size: 20px; }
+.findping-banner .bz-text { flex: 1; min-width: 0; font-weight: 500; }
 @keyframes buzzdrop { from { transform: translateX(-50%) translateY(-100%); } to { transform: translateX(-50%) translateY(0); } }
 @keyframes ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-16deg); } 60% { transform: rotate(16deg); } }
 

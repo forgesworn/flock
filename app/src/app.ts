@@ -13,6 +13,7 @@ import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
+import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
@@ -41,6 +42,9 @@ import {
   buildLostSignal,
   decryptLost,
   LOST_SIGNAL_TYPE,
+  buildFindPingSignal,
+  decryptFindPing,
+  FIND_PING_SIGNAL_TYPE,
   deriveBeaconKey,
   decryptBeacon,
   type MemberBeacon,
@@ -116,6 +120,12 @@ function ringingBy(circleId: string): string | null {
   if (nowSec() - beingRung.at > RING_DISPLAY_WINDOW) return null
   return beingRung.by
 }
+// Remote exact ping ("find my phone"): a qualifying request opens a cancel window
+// on THIS phone (the owner's veto) before it answers with a one-shot exact fix.
+let findPingPending: { circleId: string; from: string; deadline: number } | null = null
+let findPingTimer = 0
+// Per-circle clock of when we last answered a find-ping — rate-limit (in-memory).
+const pingAnsweredAt = new Map<string, number>()
 // The compose sheet, when open: a free-text message aimed at the whole group or one
 // member (their pubkey). Mounted as an overlay so opening it never tears the map.
 let compose: { target: 'group' | string } | null = null
@@ -647,7 +657,7 @@ function render(opts?: { animate?: boolean }): void {
   ensureProfiles()
   startMonitor()
   const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
-  root.innerHTML = `${buzzBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
+  root.innerHTML = `${buzzBanner()}${findPingBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   wireApp()
   if (compose) mountCompose() // a full render drops the overlay — put it back
   if (circleMenu) mountCircleMenu() // same for the long-press action sheet
@@ -928,8 +938,13 @@ function circleMemberRow(pk: string, mePk: string): string {
   const ringBtn = lost && !isMe
     ? `<button class="btn small" data-action="make-it-ring" data-pk="${pk}" title="Ring it — sounds even on silent">🔔 Ring</button>`
     : ''
+  // ...and asked for a ONE-SHOT exact fix, but only if its owner pre-authorised
+  // this circle and it's flagged lost (it decides on-device; this is just the ask).
+  const findBtn = lost && !isMe
+    ? `<button class="btn small" data-action="find-exact" data-pk="${pk}" title="Ask for an exact location (only if its owner allowed it)">📍 Find</button>`
+    : ''
   const lostBtn = lost
-    ? `${ringBtn}<button class="btn small" data-action="found-phone" data-pk="${pk}">Found it</button>`
+    ? `${ringBtn}${findBtn}<button class="btn small" data-action="found-phone" data-pk="${pk}">Found it</button>`
     : isMe ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`
   const edit = isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`
   // Private message — works whether or not they're on the map right now (a pin tap
@@ -998,6 +1013,15 @@ function circleView(): string {
     ${invitePanel}
     <div class="section-title"${inviteOpen ? ' style="margin-top:22px"' : ''}>Members</div>
     <div class="list">${rows}</div>
+
+    <div class="section-title" style="margin-top:22px">If your phone gets lost</div>
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between;gap:12px">
+        <span>Let this circle find my phone</span>
+        <button class="switch${c.pingConsent ? ' on' : ''}" data-action="toggle-ping-consent" role="switch" aria-checked="${!!c.pingConsent}" aria-label="Let this circle find my phone"><span class="knob"></span></button>
+      </div>
+      <div class="note">${hint('ping-consent', "If your phone is ever lost, members can ask it for its exact location to come and fetch it. It only answers when it's been marked lost, warns you first with a chance to say no, and never turns on ongoing sharing. Off by default.")}</div>
+    </div>
 
     <div class="section-title" style="margin-top:22px">Buzz the circle</div>
     <div class="card stack">
@@ -1845,6 +1869,57 @@ async function ringPhone(pk: string): Promise<void> {
   } catch { toast("Couldn't ring it — check your connection") }
 }
 
+/** Ask a lost phone for a ONE-SHOT exact fix ("find my phone"). Only answers if
+ *  the owner pre-authorised this circle AND the phone is flagged lost — see
+ *  app/src/findping.ts and docs/plans/2026-07-04-remote-exact-ping.md. */
+async function askFindPing(pk: string): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id || !pk) return
+  try {
+    await publishSignal(await buildFindPingSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, target: pk }), c)
+    toast(`Asked ${nameFor(pk)}'s phone for an exact location — if it's on and set to allow it, its pin will update`)
+  } catch { toast("Couldn't send the request — check your connection") }
+}
+
+// ── Remote exact ping — receiving end (the cancel window + one-shot answer) ────
+/** Open the cancel window on THIS phone for a qualifying find-ping. The owner can
+ *  veto within FIND_PING_CANCEL_SECONDS; otherwise the gates are re-checked and a
+ *  single exact beacon is sent. */
+function startFindPingCountdown(circleId: string, from: string): void {
+  if (findPingPending && findPingPending.circleId === circleId) return // one already counting down
+  findPingPending = { circleId, from, deadline: nowSec() + FIND_PING_CANCEL_SECONDS }
+  const c = persisted.circles.find((x) => x.id === circleId)
+  notifyIfHidden(`${nameFor(from)} is asking this phone for its exact location to find it`, { kind: 'alert', title: c?.name ?? 'flock', group: `findping:${circleId}` })
+  try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ }
+  if (findPingTimer) clearTimeout(findPingTimer)
+  findPingTimer = window.setTimeout(() => { void resolveFindPing() }, FIND_PING_CANCEL_SECONDS * 1000)
+  render()
+}
+
+async function resolveFindPing(): Promise<void> {
+  const p = findPingPending
+  findPingPending = null
+  findPingTimer = 0
+  if (!p) return
+  const c = persisted.circles.find((x) => x.id === p.circleId)
+  const me = persisted.identity
+  // Re-check the gates at fire time — the owner may have cleared the lost flag or
+  // revoked consent during the window. Silent if any gate now fails.
+  if (c && me && c.pingConsent && memberLost(c.id, me.pk)?.lost) {
+    const r = await sendExactBeacon(c)
+    if (r === 'sent') pingAnsweredAt.set(c.id, nowSec())
+  }
+  render()
+}
+
+function cancelFindPing(): void {
+  findPingPending = null
+  if (findPingTimer) { clearTimeout(findPingTimer); findPingTimer = 0 }
+  toast('Kept your exact location private')
+  render()
+}
+
 /** Mark (or clear) a member's phone as lost, to the whole circle. Anyone may do
  *  either — the owner doesn't have their phone, so gating on them is useless.
  *  Latest report wins on every device (see the lost signal's inner timestamp). */
@@ -1878,6 +1953,32 @@ function buzzBanner(): string {
     <span class="bz-text"><strong>${esc(who)}</strong> · ${esc(activeBuzz.reason)}${where}${tail}</span>
     <span class="bz-x">✕</span>
   </div>`
+}
+
+/** The cancel window for a remote "find my phone" request: the owner's veto
+ *  before this phone answers with an exact fix. Shown globally (any tab) — if
+ *  you're holding your phone and didn't lose it, this is your chance to say no. */
+function findPingBanner(): string {
+  if (!findPingPending) return ''
+  const from = nameFor(findPingPending.from)
+  return `<div class="findping-banner" role="alert">
+    <span class="bz-icon">📍</span>
+    <span class="bz-text"><strong>${esc(from)}</strong> is asking this phone for its exact location to find it. It'll share in a moment — tap Cancel to keep it private.</span>
+    <button class="btn small" data-action="cancel-findping">Cancel</button>
+  </div>`
+}
+
+/** Per-circle standing consent: may this circle ask my phone for an exact fix if
+ *  it's lost? Off by default; device-local (never synced). */
+function togglePingConsent(): void {
+  const c = activeCircle()
+  if (!c) return
+  const on = !c.pingConsent
+  patchActive({ pingConsent: on })
+  toast(on
+    ? 'On — if your phone is lost, this circle can ask it for an exact location'
+    : 'Off — this circle can no longer ask your phone for an exact location')
+  render()
 }
 
 // ── Messaging (free text: group buzz, or private 1:1 DM) ─────────────────────
@@ -2037,20 +2138,22 @@ function onIncomingDm(dm: DirectMessage): void {
 // e.g. "I've found a table, come to me". Confirmed first (see quickActionsCard):
 // it deliberately discloses more than the slider allows, once. On the wire it is
 // an ordinary beacon — indistinguishable from any other (FLOCK §6 invariant 1).
-async function doComeToMe(): Promise<void> {
-  const c = activeCircle()
+type ExactResult = 'sent' | 'withheld' | 'nofix' | 'error'
+/** Send ONE exact-precision beacon (geohash-9), one-shot: cadence and the slider
+ *  are untouched, so the ambient share carries on and its next beacon reverts
+ *  this pin. Runs the disclosure decision with an explicit pickup trigger, so a
+ *  private (no-report) place still caps or withholds the pin — an exact fix must
+ *  never leak a refuge. Shared by "Come to me" and the remote find-my-phone answer. */
+async function sendExactBeacon(c: store.Circle): Promise<ExactResult> {
   const id = persisted.identity
-  if (!c || !id) return
-  await sendBuzz('Come to me')
+  if (!id) return 'error'
   // Freshest possible spot: a one-shot GPS fix on a short deadline, falling back
-  // to the last watched fix — a coarse ambient share may be running on low-power
-  // location, and "come to me" is exactly when accuracy matters.
+  // to the last watched fix — a coarse ambient share may run on low-power
+  // location, and an exact ask is exactly when accuracy matters.
   const fresh = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 5000, timeoutMs: 2500 })
   if (fresh) fix = fresh
   const use = fresh ?? fix
-  if (!use) { toast("Buzzed — couldn't attach your spot"); refresh(); return }
-  // Run the disclosure decision with an explicit trigger: a private (no-report)
-  // place still caps or withholds the pin — "come to me" must never leak a refuge.
+  if (!use) return 'nofix'
   const plan = decideEmission({
     mode: 'nightout',
     position: { lat: use.lat, lon: use.lon },
@@ -2059,17 +2162,26 @@ async function doComeToMe(): Promise<void> {
     noReportZones: persisted.noReportZones,
     accuracyMetres: use.accuracy,
   }, { coarse: sharePrecisionOf(c), full: COME_TO_ME_PRECISION })
-  if (plan.action === 'withhold') { toast('Buzzed — your spot stays private here'); refresh(); return }
+  if (plan.action === 'withhold') return 'withheld'
   try {
     const geohash = encode(use.lat, use.lon, plan.precision)
     const template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: 'beacon', geohash, precision: plan.precision })
     await publishSignal(template, c)
-    // One-shot by design: beaconCadence is NOT touched, so the ambient share
-    // carries on at the slider's precision and its next beacon reverts this
-    // exact pin on everyone's map. The slider value itself never changes.
     saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
-    toast('Buzzed — your exact spot is on their map')
-  } catch { toast("Buzzed — couldn't send your spot") }
+    return 'sent'
+  } catch { return 'error' }
+}
+
+async function doComeToMe(): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id) return
+  await sendBuzz('Come to me')
+  const r = await sendExactBeacon(c)
+  toast(r === 'sent' ? 'Buzzed — your exact spot is on their map'
+    : r === 'withheld' ? 'Buzzed — your spot stays private here'
+    : r === 'nofix' ? "Buzzed — couldn't attach your spot"
+    : "Buzzed — couldn't send your spot")
   refresh()
 }
 
@@ -2097,6 +2209,9 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'report-lost': void sendLostReport(node.dataset.pk ?? '', true); break
     case 'found-phone': void sendLostReport(node.dataset.pk ?? '', false); break
     case 'make-it-ring': void ringPhone(node.dataset.pk ?? ''); break
+    case 'find-exact': void askFindPing(node.dataset.pk ?? ''); break
+    case 'cancel-findping': cancelFindPing(); break
+    case 'toggle-ping-consent': togglePingConsent(); break
     case 'come-to-me': comeToMeArmed = !comeToMeArmed; render(); break
     case 'come-to-me-cancel': comeToMeArmed = false; render(); break
     case 'come-to-me-confirm': comeToMeArmed = false; render(); void doComeToMe(); break
@@ -2909,6 +3024,22 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
         if (mine && beingRung?.circleId === c.id) beingRung = null
         if (!byMe) toast(`✓ ${nameFor(rep.member)}'s phone is marked found`)
       }
+    } else if (t === FIND_PING_SIGNAL_TYPE) {
+      // "Find my phone": a member asks THIS device for a one-shot exact fix. We
+      // answer only if the owner pre-authorised this circle AND the phone is
+      // flagged lost AND the ask is aimed at us — then a cancel window before it
+      // discloses. Any failing gate is silent (no tell). See app/src/findping.ts.
+      const req = await decryptFindPing(c.seedHex, e.content)
+      if (!me) return
+      const gate = shouldAnswerFindPing({
+        preAuthorised: !!c.pingConsent,
+        iAmFlaggedLost: !!memberLost(c.id, me.pk)?.lost,
+        targetedAtMe: req.target === me.pk,
+      })
+      if (!gate) return
+      if (!withinPingRateLimit(pingAnsweredAt.get(c.id), nowSec(), FIND_PING_MIN_GAP_SECONDS)) return
+      startFindPingCountdown(c.id, req.from)
+      return
     } else if (t === DISBAND_SIGNAL_TYPE) {
       const d = await decryptDisband(c.seedHex, e.content)
       const name = c.name

@@ -77,13 +77,27 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   ringing card → A clears it) green over the live relay. *(Follow-up: the DND
   bypass needs the user to grant notification-policy access — an in-app affordance
   to request it is unbuilt; the alarm stream already sounds through silent.)*
-- [ ] **Remote exact ping ("find my phone")**: a member asks; the lost device
-  answers with a one-shot exact beacon (the existing come-to-me one-shot,
-  triggered remotely — targeted buzz as the ask, plain `beacon` as the answer).
-  **Consent design is the work, not the code**: owner pre-authorises per circle
-  ("if I lose my phone, this circle may ping it"), the device shows a loud
-  banner with a cancel window before answering, rate-limited, and the consent
-  path gets its own e2e. Do not build the mechanism before the gates.
+- [x] **Remote exact ping ("find my phone")** (2026-07-04): a member asks; the
+  lost device answers with a **one-shot exact beacon** (reusing the come-to-me
+  answer, refactored to `sendExactBeacon`). **The consent design was the work**
+  (`docs/plans/2026-07-04-remote-exact-ping.md`): reconciled with the permanent
+  non-goal via **pre-authorisation** — the phone answers only because its owner
+  pre-consented on their own device (`Circle.pingConsent`, off by default,
+  device-local, never synced), so the disclosure still originates from the
+  device's own settings. Full gate stack (the strict model): **pre-auth +
+  flagged-lost + cancel window + one-shot + rate-limit**. The ask is a new
+  `findreq` signal (`src/findping.ts`) — deliberately distinct from a buzz (a
+  targeted buzz already *rings* a lost phone); the answer is a plain `beacon@9`
+  (no-report zones still cap it). Pure gate `shouldAnswerFindPing`
+  (`app/src/findping.ts`, +10 unit) + lib round-trip (+5 unit); a per-circle
+  pre-auth toggle on the Circle screen, a "📍 Find" finder button on a
+  flagged-lost row, and an alert-red **cancel-window banner** (owner's veto) on
+  the target. Any failing gate is silent (no tell); decoy-safe. FLOCK.md
+  `findreq` row + §6.9. e2e `find-my-phone.spec.ts` (pre-auth → flag lost → ask →
+  cancel window → exact fix reaches the asker) green over the live relay;
+  come-to-me + make-it-ring + lost-phone regressions green. **Answering needs a
+  live GPS fix, so it is a native-shell / foreground capability** (like the
+  background watcher); a backgrounded web PWA answers when next foregrounded.
 - **Non-goal — permanent**: remote "start sharing". If sharing was off when the
   phone was lost, nothing can switch it on from outside: a remote-enable switch
   is indistinguishable from a stalking tool and breaks the invariant that

@@ -52,6 +52,12 @@ export interface Circle {
    *  deliberate, temporary, device-local choice — auto-reverts to the slider at this
    *  unix-sec deadline. Never synced; each member opts in for themselves. */
   festivalUntil?: number
+  /** Device-local standing consent: if my phone is lost, THIS circle may ask it
+   *  for a one-shot exact location ("find my phone"). Off by default, never
+   *  synced (the invite/reseed wire builders pick explicit fields), so it is my
+   *  own setting on my own phone — the origin that makes a remotely-triggered
+   *  disclosure legitimate. See docs/plans/2026-07-04-remote-exact-ping.md. */
+  pingConsent?: boolean
 }
 
 /** Right after we join, relay replay delivers the existing members' history —

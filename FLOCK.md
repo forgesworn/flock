@@ -112,6 +112,7 @@ not stored by relays. Core types (`t` → payload / key / trigger):
 | `joined` | `Joined {member, timestamp, handle?}` | group envelope key | newcomer's "I'm here" (+ optional self-chosen handle) so a QR joiner isn't invisible until their first signal |
 | `offgrid` | `OffGrid {from, until, reason?, timestamp}` | group envelope key | pre-announced planned silence; `until ≤ now` = "I'm back" |
 | `disband` | `Disband {by, timestamp}` | group envelope key | owner ends the circle for everyone (tombstone) |
+| `findreq` | `FindPing {from, target, timestamp}` | group envelope key | **remote exact ping ("find my phone")** — a member ASKS a lost device for a one-shot exact fix; the device answers with a plain `beacon` (precision 9) **only** if its owner pre-authorised this circle **and** it is flagged `lost`, after a cancel window. A remotely-triggered disclosure made legitimate by standing on-device consent — never remote "start sharing" (§6) |
 | `lost` | `LostReport {member, by, lost, timestamp}` | group envelope key | **peer-reported lost phone** — anyone flags any member's device lost, anyone clears it (`lost: false`); latest inner timestamp per member wins. A social display flag only: it changes what screens *show* (flagged roster row, alert pin, a message for whoever finds the phone) and must never alter what a device *discloses* — no sharing toggle, no precision change (§6) |
 
 `BeaconPayload` (`encryptBeacon`/`decryptBeacon`):
@@ -318,6 +319,18 @@ Grounded in the feasibility research (`docs/research/2026-06-30-feasibility-rese
    circle member can send a decryptable targeted `buzz`, and only to a phone the
    circle has already flagged `lost`. Decoy-safe by construction — a hidden app
    holds no circle and no subscription, so it can never ring (no tell).
+9. **Remote exact ping is pre-authorised, not remote sharing.** "Find my phone"
+   (`findreq`) lets a member ask a lost device for a **one-shot** exact fix. It is
+   reconciled with §6.4 and the permanent non-goal of remote "start sharing" by
+   **pre-authorisation**: the phone answers only because its owner earlier, on
+   their own device, consented that this circle may ping it (`Circle.pingConsent`,
+   off by default, device-local) — so the disclosure still *originates* from the
+   device's own settings; the remote party only *triggers* it. Gated further by:
+   the phone must be **flagged `lost`** (a visible "reported lost" alarm on the
+   owner's own screen — no silent path), a **cancel window** (owner's veto), a
+   **single beacon** that never enables continuous sharing or touches the slider,
+   **no-report zones still cap it** (a refuge is never pinned), and a **rate limit**.
+   Any failing gate is silent (no tell). Decoy-safe — a hidden app never answers.
 
 ## 7. Open items
 
