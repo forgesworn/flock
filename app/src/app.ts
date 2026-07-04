@@ -15,6 +15,7 @@ import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } 
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
+import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, buildWordInvite, readWordInvite } from './wordcode'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
@@ -91,6 +92,8 @@ let awaitingInvite = false
 let pendingInviteNpub: string | null = null // a scanned invite-key link, prefilled into the send form
 let showInviteLinkText = false // clipboard copy failed — render the link as selectable text instead
 let showInvite = false // Circle page: the top "Invite" button reveals the QR + link panel
+let spokenCode: string[] | null = null // the live 4-word invite code, once generated + parked
+let spokenCodeBusy = false // deriving/publishing a spoken code (scrypt + relay round-trip)
 let updateAvailable = false // native shell only: the hosted deploy is newer than this build
 let pendingJoin: store.Circle | null = null // a link/QR join awaiting the guest's name (join-name screen)
 
@@ -300,6 +303,7 @@ function switchCircle(id: string): void {
   removeConfirmPk = null
   lostConfirmPk = null
   comeToMeArmed = false
+  spokenCode = null // a code parked for the previous circle must not show for this one
   tab = 'home'
   syncWatch() // re-tier accuracy for the newly-focused circle's precision
   void syncBle() // BLE advertId is per-circle — re-point it at the new focus
@@ -1093,6 +1097,19 @@ function inviteSections(): string {
       <div class="note">Let them scan the QR with their camera — it opens flock and joins in one tap. Or copy the link and send it. It carries the secret, so treat it like a password.</div>
     </div>
 
+    <div class="section-title" style="margin-top:22px">Say a code (down the phone)</div>
+    <div class="card stack">
+      ${spokenCode ? `
+        <div class="wordcode">${spokenCode.map((w) => `<span class="wc-word">${esc(w)}</span>`).join('')}</div>
+        <button class="btn small" data-action="copy-word-code">Copy the words</button>
+        <button class="btn small ghost" data-action="new-word-code"${spokenCodeBusy ? ' disabled' : ''}>New code</button>
+        <div class="note">Read these four words to them, or send them over Signal — they tap “Join with a code” and type them in. Works when a QR can’t be scanned. Good for 15 minutes, then make a new one.</div>
+      ` : `
+        <button class="btn primary" data-action="share-word-code"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Setting up…' : 'Make a spoken code'}</button>
+        <div class="note">Four plain words you can read out or send over Signal — no scanning, no long link. The words aren’t the secret; they unlock a one-time invite parked on your private relay, and expire in 15 minutes.</div>
+      `}
+    </div>
+
     <div class="section-title" style="margin-top:22px">Send to their key (remote)</div>
     <div class="card stack">
       ${hint('invite-remote', "In person? Show them the QR above. Far away? Ask them to open flock, tap 'Join remotely', and send you the key it shows.")}
@@ -1380,10 +1397,14 @@ function onboardingView(): string {
   } else if (onboardStep === 'join') {
     inner = `
       <h1>Join a circle</h1>
-      <p class="tagline">Paste an invite code, or join remotely by sharing your key.</p>
-      <div class="field" style="text-align:left;margin-bottom:16px"><label for="jcode">Invite code</label><textarea class="input" id="jcode" rows="3" placeholder="Paste code…"></textarea></div>
+      <p class="tagline">Type the four words someone read you, paste an invite code, or join remotely by sharing your key.</p>
+      <div class="field" style="text-align:left;margin-bottom:12px"><label for="jwords">Spoken words</label><input class="input" id="jwords" placeholder="four words, in order" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      <div class="actions" style="margin-bottom:18px">
+        <button class="btn primary" data-action="join-words"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Finding invite…' : 'Join with words'}</button>
+      </div>
+      <div class="field" style="text-align:left;margin-bottom:16px"><label for="jcode">Or paste an invite code</label><textarea class="input" id="jcode" rows="3" placeholder="Paste code…"></textarea></div>
       <div class="actions">
-        <button class="btn primary" data-action="do-join">Join with code</button>
+        <button class="btn" data-action="do-join">Join with code</button>
         <button class="btn" data-action="join-remote">Join remotely (share my key)</button>
         <button class="btn ghost" data-action="back">Back</button>
       </div>`
@@ -1486,6 +1507,7 @@ function wireOnboard(): void {
       else if (a === 'cancel-add') { adding = false; onboardStep = 'intro'; render() }
       else if (a === 'do-create') doCreate()
       else if (a === 'do-join') doJoin()
+      else if (a === 'join-words') void joinWithWords()
       else if (a === 'join-remote') doJoinRemote()
       else if (a === 'copy-npub') copyNpub()
       else if (a === 'signet') void doSignetLogin()
@@ -2400,7 +2422,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'switch-circle': if (chipHeldGuard) { chipHeldGuard = false; break } switchCircle(node.dataset.id as string); break
     case 'add-circle': adding = true; onboardStep = 'intro'; render(); break
     case 'go-invite': tab = 'circle'; showInvite = true; render(); break
-    case 'toggle-invite': showInvite = !showInvite; render(); break
+    case 'toggle-invite': showInvite = !showInvite; spokenCode = null; render(); break
     case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'geo-retry': geoIssue = null; sharing = false; startSharing(); break
     case 'quick-buzz': void sendBuzz(node.dataset.reason ?? ''); break
@@ -2424,6 +2446,8 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'come-to-me-cancel': comeToMeArmed = false; render(); break
     case 'come-to-me-confirm': comeToMeArmed = false; render(); void doComeToMe(); break
     case 'copy-invite': void copyInvite(); break
+    case 'share-word-code': case 'new-word-code': void shareWordCode(); break
+    case 'copy-word-code': void copyWordCode(); break
     case 'save-handle': saveHandle(); break
     case 'copy-npub': copyNpub(); break
     case 'send-invite': void sendInvite(); break
@@ -2532,6 +2556,51 @@ function doJoin(): void {
     render()
   } catch (err) {
     toast(err instanceof Error ? err.message : 'Invalid invite code.')
+  }
+}
+
+/** Generate a 4-word invite code, park the encrypted invite on the private relays
+ *  under its code-derived tag, and show the words to read aloud / send over Signal.
+ *  For when a QR can't be scanned (e.g. an iPhone PWA opens the link in Safari). */
+async function shareWordCode(): Promise<void> {
+  const c = activeCircle()
+  if (!c || spokenCodeBusy) return
+  spokenCodeBusy = true; render()
+  try {
+    const words = newWordCode()
+    const seed = await deriveWordCodeSeed(words)
+    const payload = { v: 1 as const, id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) }
+    await svc.publishWordInvite(persisted.relayUrls, await buildWordInvite(seed, payload, nowSec()))
+    spokenCode = words
+  } catch {
+    toast("Couldn't reach a relay to set up the code — check your connection and try again.")
+  } finally {
+    spokenCodeBusy = false; render()
+  }
+}
+
+/** Join by typing a 4-word code: derive its seed, fetch the parked invite from the
+ *  private relays, decrypt it, and join — the same landing as a scanned link. */
+async function joinWithWords(): Promise<void> {
+  const raw = (document.getElementById('jwords') as HTMLInputElement | null)?.value ?? ''
+  let words: string[]
+  try { words = normaliseWordCode(raw) } catch (err) { toast(err instanceof Error ? err.message : 'Check the words.'); return }
+  if (words.length !== WORD_INVITE.words) { toast(`Enter all ${WORD_INVITE.words} words, in order.`); return }
+  spokenCodeBusy = true; render()
+  try {
+    const seed = await deriveWordCodeSeed(words)
+    const ev = await svc.fetchWordInvite(persisted.relayUrls, WORD_INVITE.kind, wordInviteTag(seed))
+    if (!ev) { toast('No invite found for those words — they expire after 15 minutes, so ask for a fresh code.'); return }
+    const p = await readWordInvite(seed, ev)
+    const circle: store.Circle = { id: p.id, seedHex: p.s, name: p.n || 'Circle', mode: p.m === 'nightout' ? 'nightout' : 'family', ...(typeof p.x === 'number' ? { expiresAt: p.x } : {}) }
+    persisted.identity ??= store.createIdentity()
+    if (persisted.circles.some((x) => x.id === circle.id)) { switchCircle(circle.id); adding = false; onboardStep = 'intro'; tab = 'home'; render(); return }
+    if (!persisted.myHandle) { pendingJoin = circle; render(); return }
+    completeJoin(circle)
+  } catch {
+    toast("Those words didn't unlock an invite — double-check them, or ask for a fresh code.")
+  } finally {
+    spokenCodeBusy = false
   }
 }
 
@@ -2804,6 +2873,16 @@ async function copyInvite(): Promise<void> {
   navigator.clipboard?.writeText(link).then(
     () => toast('Invite link copied — send it only through a chat you trust'),
     () => { showInviteLinkText = true; render(); toast("Couldn't copy — here's the link to select") },
+  )
+}
+
+/** Copy the four spoken words (space-separated) so they can be pasted into Signal. */
+function copyWordCode(): void {
+  if (!spokenCode) return
+  const text = spokenCode.join(' ')
+  navigator.clipboard?.writeText(text).then(
+    () => toast('Words copied — send them only through a chat you trust'),
+    () => toast(`Couldn't copy — the words are: ${text}`),
   )
 }
 

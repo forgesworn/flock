@@ -566,6 +566,10 @@ a.btn { text-decoration: none; }
 .buzz-banner.private { background: var(--safe); }
 .buzz-banner.private .bz-icon { animation: none; }
 .buzz-banner .bz-icon { font-size: 20px; animation: ring 0.6s ease-in-out 3; transform-origin: 50% 12%; }
+/* Spoken invite code — four words, big and clear enough to read down the phone. */
+.wordcode { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 4px 0 10px; }
+.wc-word { font-size: 20px; font-weight: 700; letter-spacing: 0.01em; padding: 8px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line-strong); color: var(--text); }
+
 .buzz-banner .bz-text { flex: 1; min-width: 0; }
 .buzz-banner .bz-x { opacity: 0.6; font-size: 13px; }
 /* Stacked-buzz count ("+2"): rapid buzzes coalesce into one banner. */

@@ -1,6 +1,7 @@
 // Transport + sensors: Nostr relay publish/subscribe and foreground geolocation.
 
 import { SimplePool } from 'nostr-tools/pool'
+import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import type { FlockSigner, EventTemplate } from './signer'
 
 export type { EventTemplate }
@@ -59,6 +60,48 @@ export async function publishEvent(relays: readonly string[], template: EventTem
 export async function publishSigned(relays: readonly string[], signed: { id: string; sig: string; [k: string]: unknown }) {
   await fanOut(relays, signed)
   return signed
+}
+
+/** Publish a code-addressed "spoken invite" signed by a THROWAWAY key: the event
+ *  is found by its `t` tag, its author is irrelevant, and a fresh key each time
+ *  leaks no link back to the inviter. Private (no-log) relays only — the caller
+ *  passes them. Content is already encrypted to the code-derived key. */
+export async function publishWordInvite(
+  relays: readonly string[],
+  template: { kind: number; created_at: number; content: string; tags: string[][] },
+) {
+  const signed = finalizeEvent(template, generateSecretKey())
+  await fanOut(relays, signed)
+  return signed
+}
+
+/** One-shot fetch of a parked spoken invite by its tag. Resolves the NEWEST match,
+ *  or null if none arrives before the deadline. Resolves early on EOSE once a match
+ *  is in hand, but waits the full timeout for slow relays if nothing has arrived. */
+export function fetchWordInvite(
+  relays: readonly string[],
+  kind: number,
+  tag: string,
+  timeoutMs = 6000,
+): Promise<{ content: string; created_at: number } | null> {
+  return new Promise((resolve) => {
+    let best: { content: string; created_at: number } | null = null
+    let settled = false
+    const done = (): void => {
+      if (settled) return
+      settled = true
+      try { sub.close() } catch { /* already closed */ }
+      clearTimeout(timer)
+      resolve(best)
+    }
+    const timer = setTimeout(done, timeoutMs)
+    const sub = getPool().subscribeMany([...relays], { kinds: [kind], '#t': [tag] }, {
+      onevent: (e: { content: string; created_at: number }) => {
+        if (!best || e.created_at > best.created_at) best = { content: e.content, created_at: e.created_at }
+      },
+      oneose: () => { if (best) done() },
+    })
+  })
 }
 
 /** Subscribe to NIP-59 gift wraps (kind 1059) filed under a `#p` tag I own, across
