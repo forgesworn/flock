@@ -58,6 +58,23 @@ export interface Circle {
    *  own setting on my own phone — the origin that makes a remotely-triggered
    *  disclosure legitimate. See docs/plans/2026-07-04-remote-exact-ping.md. */
   pingConsent?: boolean
+  /** Device-local display order for the Home member strip (pubkeys, my own
+   *  preference — never synced, never affects the wire). Members not listed
+   *  here (new joiners, or a fresh install) fall in after it in their natural
+   *  order — see `orderedMembers`. */
+  memberOrder?: string[]
+}
+
+/** The circle's members in display order: `order` first (dropping anyone who's
+ *  left), then anyone not in it yet (new joiners, or no order set at all) in
+ *  their natural order. Pure — the actual persisted order lives on the circle;
+ *  this just resolves "what to show" from it. */
+export function orderedMembers(members: string[], order?: string[]): string[] {
+  if (!order?.length) return members
+  const known = new Set(members)
+  const ranked = order.filter((pk) => known.has(pk))
+  const rankedSet = new Set(ranked)
+  return [...ranked, ...members.filter((pk) => !rankedSet.has(pk))]
 }
 
 /** Right after we join, relay replay delivers the existing members' history —
