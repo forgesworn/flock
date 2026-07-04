@@ -75,6 +75,10 @@ const SAMPLE_MOVE_FLOOR = 30 // metres of jitter to ignore before calling it mov
 let lastSampleFix: svc.Fix | null = null
 let stationaryStreak = 0
 let root: HTMLElement
+// The incoming-buzz banner lives in its OWN layer, a sibling of `root` that a
+// full render() never touches. That way rapid buzzes update it in place instead
+// of a render tearing it down and replaying its entrance animation every tick.
+let bannerLayer: HTMLElement
 let toastTimer = 0
 
 let mapView: MapView | null = null
@@ -119,6 +123,13 @@ let monitorTimer = 0
 // circle) or a private direct message (just me) — `private` flips the styling and
 // copy so a 1:1 message never reads as a circle-wide buzz.
 let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string; private?: boolean } | null = null
+// Rapid buzzes COALESCE into the one banner (buzzCount = how many are represented,
+// shown as a "+N" pill) rather than thrashing one over another, and the banner
+// auto-dismisses after a quiet spell so it never lingers. buzzTimer is the rolling
+// dismiss; re-armed on each new buzz.
+let buzzCount = 0
+let buzzTimer = 0
+const BUZZ_LINGER_MS = 6000
 // Set on THIS phone when the circle is ringing it to find it (it's flagged lost
 // and a member buzzed it). Drives the loud "being rung" card on Home; recent-only
 // so a ring from an hour ago doesn't read as sounding right now. See app/src/ring.ts.
@@ -534,6 +545,9 @@ const ICON = {
 // ── Mount / render ──────────────────────────────────────────────────────────
 export function mount(el: HTMLElement): void {
   root = el
+  // Persistent banner layer, outside `root` so render() (which rewrites root's
+  // innerHTML) can't wipe or re-animate it. Reused across mounts.
+  bannerLayer = document.getElementById('banner-layer') ?? document.body.appendChild(Object.assign(document.createElement('div'), { id: 'banner-layer' }))
   // App lock: ciphertext at rest means no state may exist in memory until the
   // PIN (or a live grace window) recovers the storage secret.
   if (store.lockedAtRest()) { void bootLocked(); return }
@@ -766,7 +780,8 @@ function render(opts?: { animate?: boolean }): void {
   ensureProfiles()
   startMonitor()
   const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
-  root.innerHTML = `${buzzBanner()}${findPingBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
+  root.innerHTML = `${findPingBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
+  patchBuzzBanner() // the buzz banner lives in its own layer — keep it in sync after a render
   wireApp()
   if (compose) mountCompose() // a full render drops the overlay — put it back
   if (circleMenu) mountCircleMenu() // same for the long-press action sheet
@@ -1736,18 +1751,31 @@ function renderHomePanel(): void {
   }
 }
 
-/** Swap the buzz banner in or out WITHOUT a full render — on the map tab a
- *  rebuild would tear down the live map, and an incoming "Come to me" while
- *  you're looking at the map is exactly when the banner matters. */
+/** Sync the buzz banner to `activeBuzz` in its own layer, idempotently. If the
+ *  banner already matches (same buzzSig) it is left untouched, so a background
+ *  refresh tick never replays the entrance animation or re-rings the bell. A
+ *  changed buzz updates the text + count IN PLACE (a calm bump), reusing the same
+ *  icon element so the ring doesn't restart. A brand-new banner animates once. */
 function patchBuzzBanner(): void {
-  root.querySelector('.buzz-banner')?.remove()
-  if (!activeBuzz) return
+  const existing = bannerLayer.querySelector('.buzz-banner') as HTMLElement | null
+  if (!activeBuzz) { existing?.remove(); return }
+  const sig = buzzSig()
+  if (existing) {
+    if (existing.dataset.sig === sig) return
+    existing.dataset.sig = sig
+    existing.className = buzzClass() // colour may flip (group ↔ private)
+    const txt = existing.querySelector('.bz-text')
+    if (txt) txt.innerHTML = buzzTextHtml()
+    existing.classList.remove('bz-bump'); void existing.offsetWidth; existing.classList.add('bz-bump')
+    return
+  }
   const tmp = document.createElement('div')
   tmp.innerHTML = buzzBanner()
   const el = tmp.firstElementChild as HTMLElement | null
   if (!el) return
-  el.addEventListener('click', () => handleAction('dismiss-buzz', el))
-  root.prepend(el)
+  el.dataset.sig = sig
+  el.addEventListener('click', dismissBuzz)
+  bannerLayer.prepend(el)
 }
 
 // ── Signer (LocalSigner or SignetSigner) ─────────────────────────────────────
@@ -2090,19 +2118,49 @@ async function sendLostReport(pk: string, lost: boolean): Promise<void> {
   refresh()
 }
 
-function buzzBanner(): string {
+function buzzClass(): string {
+  return `buzz-banner${activeBuzz?.mine ? ' for-me' : ''}${activeBuzz?.private ? ' private' : ''}`
+}
+/** The banner's text: sender · reason · circle, plus a "+N" pill when buzzes have
+ *  stacked. A private DM reads as "just you", never a circle-wide bell. */
+function buzzTextHtml(): string {
   if (!activeBuzz) return ''
   const who = activeBuzz.from === persisted.identity?.pk ? 'You' : nameFor(activeBuzz.from)
   const where = activeBuzz.circle ? ` · ${esc(activeBuzz.circle)}` : ''
-  // A private DM reads as a lock + "just you", never as a circle-wide buzz bell.
-  const priv = activeBuzz.private
-  const icon = priv ? '🔒' : '🔔'
-  const tail = priv ? ' · just you' : ''
-  return `<div class="buzz-banner${activeBuzz.mine ? ' for-me' : ''}${priv ? ' private' : ''}" data-action="dismiss-buzz" role="alert">
+  const tail = activeBuzz.private ? ' · just you' : ''
+  const more = buzzCount > 1 ? ` <span class="bz-count">+${buzzCount - 1}</span>` : ''
+  return `<strong>${esc(who)}</strong> · ${esc(activeBuzz.reason)}${where}${tail}${more}`
+}
+/** Identity of the currently-shown banner — patchBuzzBanner leaves the DOM alone
+ *  when this is unchanged, so a background refresh never restarts the animation. */
+function buzzSig(): string {
+  return activeBuzz ? `${activeBuzz.from}|${activeBuzz.reason}|${activeBuzz.circle ?? ''}|${activeBuzz.private ? 1 : 0}|${activeBuzz.mine ? 1 : 0}|${buzzCount}` : ''
+}
+function buzzBanner(): string {
+  if (!activeBuzz) return ''
+  const icon = activeBuzz.private ? '🔒' : '🔔'
+  return `<div class="${buzzClass()}" data-action="dismiss-buzz" role="alert">
     <span class="bz-icon">${icon}</span>
-    <span class="bz-text"><strong>${esc(who)}</strong> · ${esc(activeBuzz.reason)}${where}${tail}</span>
+    <span class="bz-text">${buzzTextHtml()}</span>
     <span class="bz-x">✕</span>
   </div>`
+}
+
+/** Raise an incoming buzz/DM. Coalesces with the banner already on screen (a
+ *  running count) instead of replacing it, and (re)arms the auto-dismiss. Group
+ *  buzzes and private DMs never share a count — different colour and urgency. */
+function raiseBuzz(b: NonNullable<typeof activeBuzz>): void {
+  buzzCount = activeBuzz && !!activeBuzz.private === !!b.private ? buzzCount + 1 : 1
+  activeBuzz = b
+  if (buzzTimer) clearTimeout(buzzTimer)
+  buzzTimer = window.setTimeout(dismissBuzz, BUZZ_LINGER_MS)
+  patchBuzzBanner()
+}
+function dismissBuzz(): void {
+  if (buzzTimer) { clearTimeout(buzzTimer); buzzTimer = 0 }
+  activeBuzz = null
+  buzzCount = 0
+  patchBuzzBanner()
 }
 
 /** The cancel window for a remote "find my phone" request: the owner's veto
@@ -2275,7 +2333,7 @@ function onIncomingDm(dm: DirectMessage): void {
   if (me && dm.from === me.pk) return // my own message echoed back — never notify myself
   const c = persisted.circles.find((x) => x.id === dm.circleId)
   if (!c || !(c.members ?? []).includes(dm.from)) return // not a fellow circle member — drop
-  activeBuzz = { from: dm.from, reason: dm.text, mine: true, circle: c.name, private: true }
+  raiseBuzz({ from: dm.from, reason: dm.text, mine: true, circle: c.name, private: true })
   // Private 1:1 → its own channel, headed by the sender and stacked per person
   // (Signal-style: "Alex · on my way"), distinct from a whole-circle buzz.
   notifyIfHidden(dm.text, { kind: 'dm', title: nameFor(dm.from), group: `dm:${dm.from}` })
@@ -2390,7 +2448,7 @@ function handleAction(action: string, node: HTMLElement): void {
       store.save(persisted); toast('Tips are back on'); render(); break
     case 'remove-member': removeConfirmPk = null; void reseedCircle(node.dataset.pk); break
     case 'buzz': void sendBuzz(node.dataset.reason ?? (document.getElementById('buzz-custom') as HTMLInputElement | null)?.value ?? ''); break
-    case 'dismiss-buzz': activeBuzz = null; if (tab === 'map' && mapView) patchBuzzBanner(); else render(); break
+    case 'dismiss-buzz': dismissBuzz(); break
     case 'edit-petname': editingPetname = node.dataset.pk ?? null; render(); break
     case 'save-petname': savePetname(node.dataset.pk as string); break
     case 'cancel-petname': editingPetname = null; render(); break
@@ -3164,7 +3222,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
           notifyIfHidden(`${nameFor(bz.from)} is ringing this phone to help find it`, { kind: 'ring', title: c.name, group: `ring:${c.id}` })
           try { navigator.vibrate?.(RING_VIBRATION) } catch { /* no haptics */ }
         } else {
-          activeBuzz = { from: bz.from, reason: bz.reason, mine, circle: c.name }
+          raiseBuzz({ from: bz.from, reason: bz.reason, mine, circle: c.name })
           // The buzz banner is in-app only — with the screen off it must still
           // land as a system notification, like every other incoming signal.
           // Group channel, headed by the circle and stacked per circle (Signal

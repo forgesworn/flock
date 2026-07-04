@@ -568,6 +568,16 @@ a.btn { text-decoration: none; }
 .buzz-banner .bz-icon { font-size: 20px; animation: ring 0.6s ease-in-out 3; transform-origin: 50% 12%; }
 .buzz-banner .bz-text { flex: 1; min-width: 0; }
 .buzz-banner .bz-x { opacity: 0.6; font-size: 13px; }
+/* Stacked-buzz count ("+2"): rapid buzzes coalesce into one banner. */
+.buzz-banner .bz-count { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.18); font-size: 12px; font-weight: 700; vertical-align: baseline; }
+/* A new buzz coalescing into a banner already on screen: a small settle, NOT the
+   full entrance drop — so a burst of check-ins reads as calm, not a strobe. */
+.buzz-banner.bz-bump { animation: bz-bump 0.26s ease; }
+@keyframes bz-bump {
+  0% { transform: translateX(-50%) scale(1); }
+  45% { transform: translateX(-50%) scale(1.02); }
+  100% { transform: translateX(-50%) scale(1); }
+}
 /* Remote "find my phone" cancel window — an alert-coloured banner with a veto. */
 .findping-banner {
   position: fixed; top: 0; left: 50%; transform: translateX(-50%);
