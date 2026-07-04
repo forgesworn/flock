@@ -27,6 +27,7 @@ test.describe('find my phone — a pre-authorised lost phone answers with an exa
 
     // B flags A's phone lost — the gate (and the anti-stalk tell on A's phone).
     const aPk = await myPubkey(A)
+    await B.click(`[data-action="toggle-member-actions"][data-pk="${aPk}"]`)
     await B.click(`[data-action="ask-lost"][data-pk="${aPk}"]`)
     await B.click(`[data-action="report-lost"][data-pk="${aPk}"]`)
     await expect(memberPill(B, 'phone lost')).toBeVisible()
@@ -42,8 +43,8 @@ test.describe('find my phone — a pre-authorised lost phone answers with an exa
     await expect(A.locator('.findping-banner')).toBeVisible()
 
     // The window elapses (~10s) → A answers with one exact beacon → it reaches B:
-    // A's row on B's Circle tab now shows a live location ("on the map").
+    // A's row on B's Circle tab now shows a live location ("last seen").
     await gotoTab(B, 'circle')
-    await expect(B.locator('.member .when', { hasText: 'on the map' })).toBeVisible({ timeout: 25_000 })
+    await expect(B.locator('.member .when', { hasText: 'last seen' })).toBeVisible({ timeout: 25_000 })
   })
 })

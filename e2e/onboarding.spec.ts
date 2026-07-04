@@ -25,19 +25,21 @@ test.describe('onboarding & circle setup', () => {
     await expect(ongoing.locator('.circle-chip.on .ttl')).toHaveCount(0)
   })
 
-  test('a lone member is nudged to invite people (Home CTA)', async ({ browser }) => {
+  test('a lone member is nudged to invite people (Circle tab lead card)', async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
-    await gotoTab(A, 'home')
-    await expect(A.locator('.invite-cta')).toBeVisible()
+    // createCircle already lands on Circle — alone, so the invite lead auto-opens.
+    await expect(A.locator('.invite-lead')).toBeVisible()
   })
 
-  test('the Home screen carries the MVP controls: share toggle, slider, quick actions', async ({ browser }) => {
+  test('the MVP controls: share toggle on Home, precision slider on Circle, quick actions on Chat', async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'Mallorca trip' })
     await gotoTab(A, 'home')
     await expect(A.locator('[data-action="toggle-share"]')).toBeVisible()
+    await gotoTab(A, 'circle')
     await expect(A.locator('#share-precision')).toBeVisible()
+    await gotoTab(A, 'chat')
     await expect(A.locator('[data-action="check-in"]')).toBeVisible()
     await expect(A.locator('[data-action="chat-preset"][data-reason="On my way"]')).toBeVisible()
   })

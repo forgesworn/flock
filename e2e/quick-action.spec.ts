@@ -85,7 +85,7 @@ test.describe('quick actions', () => {
     await expect(B.locator('#dm-thread [data-action="see-shared-location"]')).toBeVisible()
 
     await A.click('[data-action="dm-close"]') // close the sheet — its overlay covers the nav bar
-    await gotoTab(A, 'home')
+    await gotoTab(A, 'circle')
     await expect(A.locator('#share-precision')).toHaveValue('4')
   })
 })

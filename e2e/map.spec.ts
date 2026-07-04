@@ -4,7 +4,7 @@ test.describe('map — the circle\'s live locations', () => {
   test('the map renders with real height (regression guard)', async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'Home' })
-    await gotoTab(A, 'map')
+    await gotoTab(A, 'home')
 
     // Wait for maplibre to construct (style loaded).
     await expect(A.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
@@ -32,7 +32,7 @@ test.describe('map — the circle\'s live locations', () => {
     await gotoTab(B, 'circle')
     await expect(memberPill(B, /out/)).toBeVisible()
 
-    await gotoTab(B, 'map')
+    await gotoTab(B, 'home')
     await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
     await expect(B.locator('.map-pin')).toBeVisible()
 
@@ -45,7 +45,7 @@ test.describe('map — the circle\'s live locations', () => {
 
     // Friendlier label: B nicknames A, and the pin shows the petname — not hex initials.
     await setPetname(B, 'Alex')
-    await gotoTab(B, 'map')
+    await gotoTab(B, 'home')
     await expect(B.locator('.map-pin .tag', { hasText: 'Alex' })).toBeVisible()
 
     // Presence + petname must survive a refresh. Beacons and nicknames are cached
@@ -53,7 +53,7 @@ test.describe('map — the circle\'s live locations', () => {
     // waiting up to 5 min for A's next beacon. A is stationary (its heartbeat won't
     // re-fire in this window), so this proves the on-device cache, not a re-broadcast.
     await B.reload()
-    await gotoTab(B, 'map')
+    await gotoTab(B, 'home')
     await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
     await expect(B.locator('.map-pin .tag', { hasText: 'Alex' })).toBeVisible()
     await expect

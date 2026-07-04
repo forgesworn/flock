@@ -16,7 +16,7 @@ test.describe('precision slider — what the circle actually sees', () => {
     await setSharePrecision(A, 5)
     await startSharing(A)
 
-    await gotoTab(B, 'map')
+    await gotoTab(B, 'home')
     await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
     await expect(B.locator('.map-pin')).toBeVisible()
     await expect
@@ -36,7 +36,7 @@ test.describe('precision slider — what the circle actually sees', () => {
   test('the slider labels speak plainly and persist per circle', async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'Mallorca trip' })
-    await gotoTab(A, 'home')
+    await gotoTab(A, 'circle')
 
     // Default is Neighbourhood (6).
     await expect(A.locator('#precision-label')).toContainText('Neighbourhood')
@@ -48,7 +48,7 @@ test.describe('precision slider — what the circle actually sees', () => {
 
     // The committed value survives a reload (persisted on the circle).
     await A.reload()
-    await gotoTab(A, 'home')
+    await gotoTab(A, 'circle')
     await expect(A.locator('#share-precision')).toHaveValue('3')
     await expect(A.locator('#precision-label')).toContainText('Region')
   })

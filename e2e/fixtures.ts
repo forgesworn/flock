@@ -127,7 +127,7 @@ export async function sendRemoteInvite(page: Page, npub: string): Promise<void> 
   await expect(page.locator('.member')).toHaveCount(2)
 }
 
-export async function gotoTab(page: Page, tab: 'home' | 'map' | 'circle' | 'you'): Promise<void> {
+export async function gotoTab(page: Page, tab: 'home' | 'chat' | 'circle' | 'you'): Promise<void> {
   await page.click(sel.tab(tab))
 }
 
@@ -138,12 +138,12 @@ export async function startSharing(page: Page): Promise<void> {
   await settle(page) // let the first geolocation fix land before we act on it
 }
 
-/** Set the Home-screen precision slider (geohash 4–9) and commit it. Driving
+/** Set the Circle-tab precision slider (geohash 4–9) and commit it. Driving
  *  the input via the DOM fires the same `input`+`change` events a thumb-drag
  *  does, so the persisted value, the re-tiered watch and the forced re-emit
  *  all go through the real handler. */
 export async function setSharePrecision(page: Page, precision: number): Promise<void> {
-  await gotoTab(page, 'home')
+  await gotoTab(page, 'circle')
   const slider = page.locator('#share-precision')
   await expect(slider).toBeVisible()
   await slider.evaluate((el, p) => {
@@ -155,10 +155,10 @@ export async function setSharePrecision(page: Page, precision: number): Promise<
   await settle(page) // let the forced re-emit reach the relay
 }
 
-/** Tap a quick-action chip in the Home chat (Check in / Where are you? / Call me / On my way).
+/** Tap a quick-action chip in the circle chat (Check in / Where are you? / Call me / On my way).
  *  "Check in" is its own action — it fans out to every circle as a roll-call. */
 export async function quickAction(page: Page, reason: string): Promise<void> {
-  await gotoTab(page, 'home')
+  await gotoTab(page, 'chat')
   if (reason === 'Check in') await page.click('[data-action="check-in"]')
   else await page.click(`[data-action="chat-preset"][data-reason="${reason}"]`)
 }
@@ -172,9 +172,10 @@ export async function dmComeToMe(page: Page): Promise<void> {
   await settle(page) // the message + one-shot location wrap both go to the relay
 }
 
-/** Open a private 1:1 thread with a member from the Circle tab. */
+/** Open a private 1:1 thread with a member from the Circle tab. Message is a
+ *  routine action tucked behind the row's chevron. */
 export async function openDmWith(page: Page, peerPk: string): Promise<void> {
-  await gotoTab(page, 'circle')
+  await expandMember(page, peerPk)
   await page.click(`.member [data-action="msg-member"][data-pk="${peerPk}"]`)
 }
 
@@ -183,15 +184,24 @@ export function memberPill(page: Page, text: string | RegExp) {
   return page.locator('.member .pill', { hasText: text })
 }
 
-/** Send a message to the whole circle from the Home chat composer. A plain fill
- *  + click, deliberately: renders preserve the focused input (value + caret)
- *  across inbound re-renders, so every call is a live regression test of that
- *  fix. (Before it, an inbound signal between fill and click wiped the field and
- *  the send silently no-opped — the audit's input-wipe bug.) */
+/** Send a message to the whole circle from the Chat tab's composer. A plain
+ *  fill + click, deliberately: renders preserve the focused input (value +
+ *  caret) across inbound re-renders, so every call is a live regression test
+ *  of that fix. (Before it, an inbound signal between fill and click wiped
+ *  the field and the send silently no-opped — the audit's input-wipe bug.) */
 export async function sendBuzz(page: Page, reason: string): Promise<void> {
-  await gotoTab(page, 'home')
+  await gotoTab(page, 'chat')
   await page.fill('#chat-input', reason)
   await page.click('[data-action="chat-send"]')
+}
+
+/** Expand a member's row on the Circle tab to reveal its routine actions
+ *  (message/locate/petname/remove) — tucked behind a chevron so the row stays
+ *  readable; a flagged-lost phone's Ring/Find/Found-it are the exception and
+ *  stay always-visible instead. */
+export async function expandMember(page: Page, peerPk: string): Promise<void> {
+  await gotoTab(page, 'circle')
+  await page.click(`.member [data-action="toggle-member-actions"][data-pk="${peerPk}"]`)
 }
 
 /** Expand the You tab's Settings fold (notifications, backup, units…). */
@@ -215,9 +225,11 @@ export async function disbandCircle(page: Page): Promise<void> {
   await page.click('[data-action="disband"]')
 }
 
-/** Set a private nickname for the first other member shown on the Circle tab. */
+/** Set a private nickname for the first other member shown on the Circle tab.
+ *  Edit-petname is a routine action tucked behind that row's chevron. */
 export async function setPetname(page: Page, name: string): Promise<void> {
   await gotoTab(page, 'circle')
+  await page.locator('.member [data-action="toggle-member-actions"]').first().click()
   await page.locator('.member [data-action="edit-petname"]').first().click()
   await page.locator('.member.editing input').fill(name)
   await page.click('[data-action="save-petname"]')

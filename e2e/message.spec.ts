@@ -1,20 +1,22 @@
 import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, settle, joinRemoteAwait, sendRemoteInvite } from './fixtures'
 
-// Messaging: the circle chat (one Signal-style thread on Home, shared inbox like
-// a buzz) and private 1:1 threads (gift-wrapped to one member's personal inbox —
-// only they can read it; the thread sheet lives behind people, PMs under You).
-// Everything goes over the live relay, so the OTHER person's screen proves the
-// transport.
+// Messaging: the circle chat (one Signal-style thread, its own Chat tab, shared
+// inbox like a buzz) and private 1:1 threads (gift-wrapped to one member's
+// personal inbox — only they can read it; the thread sheet lives behind people,
+// PMs under You). Everything goes over the live relay, so the OTHER person's
+// screen proves the transport.
 test.describe('messaging — circle chat & private 1:1 threads', () => {
-  test('Home leads with the map, then the people, then the circle chat', async ({ browser }) => {
+  test('Home is the full-screen map; Chat is its own tab with the composer', async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     await gotoTab(A, 'home')
-    // The map + its glass status chip lead; the chat composer is on the scroll.
-    await expect(A.locator('.home-map-shell')).toBeVisible()
+    // The map fills Home; the people and share bar float over the bottom of it.
+    await expect(A.locator('.home-shell')).toBeVisible()
     await expect(A.locator('.map-status')).toBeVisible()
-    await expect(A.locator('.orb')).toHaveCount(0)
     await expect(A.locator('.member-strip')).toBeVisible()
+    await expect(A.locator('#chat-input')).toHaveCount(0)
+    // The composer lives on its own tab now.
+    await gotoTab(A, 'chat')
     await expect(A.locator('#chat-input')).toBeVisible()
   })
 
@@ -25,8 +27,8 @@ test.describe('messaging — circle chat & private 1:1 threads', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // Type into the Home chat composer and send to everyone.
-    await gotoTab(A, 'home')
+    // Type into the Chat tab composer and send to everyone.
+    await gotoTab(A, 'chat')
     await A.fill('#chat-input', 'dinner at eight?')
     await A.click('[data-action="chat-send"]')
     // A's own message threads immediately (my side of the conversation).
@@ -36,7 +38,7 @@ test.describe('messaging — circle chat & private 1:1 threads', () => {
     await expect(banner).toBeVisible()
     await expect(banner).toContainText('dinner at eight?')
     // …and it's in B's thread too — a conversation, not a fleeting banner.
-    await gotoTab(B, 'home')
+    await gotoTab(B, 'chat')
     await expect(B.locator('#chat-thread .msg')).toContainText('dinner at eight?')
   })
 
@@ -54,11 +56,15 @@ test.describe('messaging — circle chat & private 1:1 threads', () => {
     await startSharing(B)
     await settle(A)
 
-    // A messages B privately from B's row on the Circle tab (the ✉️ button) —
-    // it opens the whole 1:1 thread, not a one-shot box.
+    // A messages B privately from B's row on the Circle tab (the ✉️ button,
+    // behind the row's chevron) — it opens the whole 1:1 thread, not a one-shot box.
+    // Scoped to B's row specifically: A's own row now also gets a chevron once A
+    // has a beacon (for "see on map"), so a bare .first() would be a coin flip.
     await gotoTab(A, 'circle')
     await expect(A.locator('.member')).toHaveCount(2)
-    await A.locator('.member [data-action="msg-member"]').first().click()
+    const bRow = A.locator('.member').filter({ hasNotText: 'You' })
+    await bRow.locator('[data-action="toggle-member-actions"]').click()
+    await bRow.locator('[data-action="msg-member"]').click()
     await expect(A.locator('#dm-sheet')).toBeVisible()
     await A.fill('#dm-input', 'meet you round the back')
     await A.click('[data-action="dm-send"]')
@@ -87,7 +93,7 @@ test.describe('messaging — circle chat & private 1:1 threads', () => {
     // Only B shares, so A's map holds exactly one pin — B's (A has no "You" pin).
     await startSharing(B)
     await settle(A)
-    await gotoTab(A, 'map')
+    await gotoTab(A, 'home')
 
     const pin = A.locator('.map-pin')
     await expect(pin.first()).toBeVisible()
@@ -111,6 +117,7 @@ test.describe('messaging — circle chat & private 1:1 threads', () => {
 
     // A messages B immediately — B has never emitted a beacon/buzz/join signal.
     await gotoTab(A, 'circle')
+    await A.locator('.member [data-action="toggle-member-actions"]').first().click()
     await A.locator('.member [data-action="msg-member"]').first().click()
     await A.fill('#dm-input', 'welcome aboard')
     await A.click('[data-action="dm-send"]')

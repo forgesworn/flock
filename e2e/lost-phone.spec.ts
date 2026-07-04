@@ -19,6 +19,7 @@ test.describe('lost phone — a peer flags it, anyone clears it', () => {
 
     // B flags A's phone lost — a two-step inline confirm, nothing sent until confirmed.
     const aPk = await myPubkey(A)
+    await B.click(`[data-action="toggle-member-actions"][data-pk="${aPk}"]`)
     await B.click(`[data-action="ask-lost"][data-pk="${aPk}"]`)
     await B.click(`[data-action="report-lost"][data-pk="${aPk}"]`)
     await expect(memberPill(B, 'phone lost')).toBeVisible()
@@ -44,6 +45,7 @@ test.describe('lost phone — a peer flags it, anyone clears it', () => {
     await expect(B.locator('.member')).toHaveCount(2)
 
     const aPk = await myPubkey(A)
+    await B.click(`[data-action="toggle-member-actions"][data-pk="${aPk}"]`)
     await B.click(`[data-action="ask-lost"][data-pk="${aPk}"]`)
     await B.fill(`#lost-note-${aPk}`, 'left in the blue Uber')
     await B.click(`[data-action="report-lost"][data-pk="${aPk}"]`)

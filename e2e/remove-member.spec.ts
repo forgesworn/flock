@@ -66,6 +66,7 @@ test.describe('remove member — cut someone off (3 people)', () => {
     await gotoTab(A, 'circle')
     const bPk = await myPubkey(B)
     const row = A.locator('.member', { hasText: 'Member' }).first()
+    await row.locator('[data-action="toggle-member-actions"]').click() // routine actions tuck behind the chevron
     await expect(row.locator('[data-action="ask-remove"]')).toBeVisible()
     await row.locator('[data-action="ask-remove"]').click()
     await expect(A.locator(`[data-action="remove-member"][data-pk="${bPk}"]`)).toBeVisible()

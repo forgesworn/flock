@@ -1368,14 +1368,19 @@ function circleMemberRow(pk: string, mePk: string): string {
   // Everything else (message/locate/petname/report-lost/remove) is routine
   // chrome, tucked behind a tap-to-expand — the row itself stays readable
   // (avatar, name, one pill) instead of five icon buttons crammed alongside.
-  const expanded = !isMe && expandedMemberPk === pk
-  const chevron = isMe ? '' : `<button class="icon-btn chevron${expanded ? ' open' : ''}" data-action="toggle-member-actions" data-pk="${pk}" aria-label="${expanded ? 'Hide actions' : 'More actions'}" aria-expanded="${expanded}">⌄</button>`
+  // My own row only ever has one possible action (jump to my own pin), so it
+  // only gets a chevron at all when there's a beacon to jump to.
+  const hasActions = isMe ? !!beacon : true
+  const expanded = hasActions && expandedMemberPk === pk
+  const chevron = hasActions
+    ? `<button class="icon-btn chevron${expanded ? ' open' : ''}" data-action="toggle-member-actions" data-pk="${pk}" aria-label="${expanded ? 'Hide actions' : 'More actions'}" aria-expanded="${expanded}">⌄</button>`
+    : ''
   const actions = expanded ? `<div class="member-actions">
-    <button class="icon-btn" data-action="msg-member" data-pk="${pk}" aria-label="Message ${esc(nameFor(pk))} privately">✉️</button>
     ${beacon ? `<button class="icon-btn" data-action="see-on-map" data-pk="${pk}" aria-label="See on the map">📍</button>` : ''}
-    ${lost ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`}
-    <button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>
-    <button class="icon-btn" data-action="ask-remove" data-pk="${pk}" aria-label="Remove ${esc(nameFor(pk))} from this circle">🚪</button>
+    ${isMe ? '' : `<button class="icon-btn" data-action="msg-member" data-pk="${pk}" aria-label="Message ${esc(nameFor(pk))} privately">✉️</button>`}
+    ${isMe || lost ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`}
+    ${isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`}
+    ${isMe ? '' : `<button class="icon-btn" data-action="ask-remove" data-pk="${pk}" aria-label="Remove ${esc(nameFor(pk))} from this circle">🚪</button>`}
   </div>` : ''
 
   return `<div class="member${isNew ? ' unseen' : ''}">

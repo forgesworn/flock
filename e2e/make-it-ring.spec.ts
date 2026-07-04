@@ -22,6 +22,7 @@ test.describe('make it ring — a lost phone sounds when a member rings it', () 
 
     // B flags A's phone lost — the two-step inline confirm.
     const aPk = await myPubkey(A)
+    await B.click(`[data-action="toggle-member-actions"][data-pk="${aPk}"]`)
     await B.click(`[data-action="ask-lost"][data-pk="${aPk}"]`)
     await B.click(`[data-action="report-lost"][data-pk="${aPk}"]`)
     await expect(memberPill(B, 'phone lost')).toBeVisible()

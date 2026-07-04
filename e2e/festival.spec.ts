@@ -19,13 +19,13 @@ test.describe('find each other (festival mode)', () => {
     // A shares coarsely (Town, ~2.4 km) — B sees a rough-area halo.
     await setSharePrecision(A, 5)
     await startSharing(A)
-    await gotoTab(B, 'map')
+    await gotoTab(B, 'home')
     await expect(B.locator('.map-pin')).toBeVisible({ timeout: 30_000 })
     await expect.poll(() => areaCount(B), { timeout: 15_000 }).toBeGreaterThan(0)
 
     // A turns on "Find each other" — the boost re-emits at building level (~19 m),
     // which is below the halo-draw threshold, so B's halo collapses to a bare pin.
-    await gotoTab(A, 'home')
+    await gotoTab(A, 'circle')
     await A.click('[data-action="festival-start"][data-hours="3"]')
     await expect(A.locator('.festival-on')).toBeVisible()
     await expect.poll(() => areaCount(B), { timeout: 20_000 }).toBe(0)
@@ -55,11 +55,11 @@ test.describe('find each other (festival mode)', () => {
 
     await setSharePrecision(A, 4) // City — well below the jump threshold
     await startSharing(A)
-    await gotoTab(B, 'map')
+    await gotoTab(B, 'home')
     await expect(B.locator('.map-pin')).toBeVisible({ timeout: 30_000 })
     await expect.poll(() => areaCount(B), { timeout: 15_000 }).toBeGreaterThan(0) // B has seen A's coarse baseline
 
-    await gotoTab(A, 'home')
+    await gotoTab(A, 'circle')
     await A.click('[data-action="festival-start"][data-hours="3"]')
     await expect(B.locator('#toast')).toContainText('jumped to Exact spot', { timeout: 20_000 })
   })

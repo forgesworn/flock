@@ -13,7 +13,7 @@ test.describe('typing survives inbound re-renders (audit follow-up)', () => {
     await joinByCode(B, code)
 
     // B starts typing a chat message — with real keystrokes, focus in the field.
-    await gotoTab(B, 'home')
+    await gotoTab(B, 'chat')
     await B.locator('#chat-input').pressSequentially('meet at the corner', { delay: 20 })
 
     // A's buzz lands on B mid-thought and re-renders B's whole screen.
