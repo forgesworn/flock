@@ -9,7 +9,13 @@ export interface Fix { lat: number; lon: number; accuracy: number; at: number }
 
 let pool: SimplePool | null = null
 function getPool(): SimplePool {
-  pool ??= new SimplePool()
+  // enableReconnect: without it a single socket close (doze, network handover,
+  // relay restart) permanently kills every open subscription — publishes recover
+  // on the next ensureRelay, but nothing INCOMING ever arrives again until the
+  // app is fully restarted. With it, nostr-tools re-fires open subs on reconnect
+  // (with a since-catch-up so missed events replay). enablePing detects the
+  // half-dead socket a suspended radio leaves behind, which never fires onclose.
+  pool ??= new SimplePool({ enableReconnect: true, enablePing: true })
   return pool
 }
 
