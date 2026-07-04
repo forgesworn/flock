@@ -3,8 +3,9 @@
 // say what's happening: the real size up front, and the moment the button is
 // tapped, where the download went and what to do when it finishes.
 // The saved file is named flock-<build>.apk (the `download` attribute, fed by
-// /version.json) so a phone full of old downloads shows which is which; the
-// URL itself stays stable at downloads/flock.apk.
+// downloads/apk.json — the APK's OWN build, not the website deploy, so the name
+// matches what's actually installed; falls back to /version.json) so a phone full
+// of old downloads shows which is which; the URL stays stable at downloads/flock.apk.
 // (External file, not inline: the site CSP is script-src 'self'.)
 const link = document.querySelector('a[href$="downloads/flock.apk"]')
 if (link) {
@@ -14,10 +15,11 @@ if (link) {
   status.style.cssText = 'display:none;margin-top:10px;padding:12px 14px;border:1px solid #3a4a5a;border-radius:10px'
   link.insertAdjacentElement('afterend', status)
 
-  fetch('./version.json')
-    .then((r) => r.json())
+  fetch('./downloads/apk.json')
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error('no apk.json'))))
+    .catch(() => fetch('./version.json').then((r) => r.json()))
     .then((v) => {
-      if (v.build) {
+      if (v && v.build) {
         name = `flock-${v.build}.apk`
         link.setAttribute('download', name)
       }

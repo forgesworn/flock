@@ -52,10 +52,15 @@ flock.forgesworn.dev {
 		respond "" 204
 	}
 
-	# The APK's update check (app.ts checkForUpdate) fetches this cross-origin
-	# from the shell; it's a public one-liner, so the wildcard widens nothing.
-	@versionJson path /version.json
+	# The APK's update check (app.ts checkForUpdate) fetches apk.json cross-origin
+	# from the shell — the PUBLISHED APK's build stamp, bumped only when a new APK
+	# ships (deploy.sh), so a website-only redeploy no longer nags the shell. It's a
+	# public one-liner, so the wildcard widens nothing; no-cache so a fresh APK's
+	# marker is seen at once. (/version.json kept for the get-page fallback + You tab.)
+	@versionJson path /version.json /downloads/apk.json
 	header @versionJson Access-Control-Allow-Origin "*"
+	@apkJson path /downloads/apk.json
+	header @apkJson Cache-Control "no-cache"
 
 	# Map tiles — reverse-proxied through this origin so the third-party tile CDN
 	# only ever sees this server, never the user's IP + viewport (which is roughly

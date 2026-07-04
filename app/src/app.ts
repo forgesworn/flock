@@ -20,7 +20,7 @@ import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
-import { isNativeShell, shareOrigin } from './native'
+import { isNativeShell, shareOrigin, isApkUpdateAvailable } from './native'
 import { rotationDue, refreshDue } from './rotation'
 import { buildInviteWrap, buildReseedWraps, readInvite, buildDmWrap, readDmWrap, type DirectMessage } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
@@ -97,7 +97,10 @@ let spokenCodeBusy = false // deriving/publishing a spoken code (scrypt + relay 
 let updateAvailable = false // native shell only: the hosted deploy is newer than this build
 let pendingJoin: store.Circle | null = null // a link/QR join awaiting the guest's name (join-name screen)
 
-/** Compare this build's stamp against the hosted deploy's /version.json.
+/** Compare this build's stamp against the latest PUBLISHED APK's build
+ *  (downloads/apk.json), NOT the website deploy — the site redeploys on nearly
+ *  every commit but a new APK ships far less often, so comparing to /version.json
+ *  nagged "update available" after every content deploy (see isApkUpdateAvailable).
  *  Only the download-page nudge on Home hangs off it — never an auto-update. */
 let lastUpdateCheck = 0
 async function checkForUpdate(): Promise<void> {
@@ -109,10 +112,10 @@ async function checkForUpdate(): Promise<void> {
   if (now - lastUpdateCheck < 20_000) return
   lastUpdateCheck = now
   try {
-    const res = await fetch(`${shareOrigin()}/version.json`, { cache: 'no-store' })
-    if (!res.ok) return
+    const res = await fetch(`${shareOrigin()}/downloads/apk.json`, { cache: 'no-store' })
+    if (!res.ok) return // no APK published yet (or offline) → never nag
     const v = (await res.json()) as { build?: string }
-    if (v.build && v.build !== __FLOCK_BUILD__) {
+    if (isApkUpdateAvailable(__FLOCK_BUILD__, v.build)) {
       updateAvailable = true
       render()
     }
