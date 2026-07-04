@@ -1,0 +1,31 @@
+[Unit]
+Description=Flock ephemeral relay rooms
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/flock
+Environment=HOST=127.0.0.1
+Environment=PORT=8792
+Environment=PUBLIC_BASE_URL=https://rooms.forgesworn.dev
+Environment=FLOCK_ROOM_RUNNER=external
+Environment=FLOCK_ROOM_START_CMD=/opt/flock-rooms/start-room
+Environment=FLOCK_ROOM_MAX_ROOMS=128
+Environment=FLOCK_ROOM_DEFAULT_TTL_SECONDS=21600
+Environment=FLOCK_ROOM_MAX_TTL_SECONDS=604800
+ExecStart=/usr/bin/node /opt/flock/server/rooms.mjs
+Restart=on-failure
+RestartSec=3
+
+# Privacy posture: room registry is in memory only. Keep process logs sparse and
+# let the host journald config be volatile; do not enable access logs in Caddy.
+RuntimeDirectory=flock-rooms
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/flock-rooms
+
+[Install]
+WantedBy=multi-user.target

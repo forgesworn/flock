@@ -107,6 +107,8 @@
     "apk:release": "sh native/build-apk.sh release",
     "build:spike": "vite build -c vite.spike.config.ts",
     "preview:app": "vite preview",
+    "rooms": "node server/rooms.mjs",
+    "rooms:mock": "FLOCK_ROOM_RUNNER=mock node server/rooms.mjs",
     "deploy": "sh deploy/deploy.sh"
   },
   "keywords": [

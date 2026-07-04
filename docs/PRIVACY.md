@@ -87,6 +87,22 @@ operator's promise — so a `.onion` endpoint on a plain no-log relay beats a
 "provable-no-log" (TEE) relay for the metadata that actually matters here. See
 `docs/plans/2026-07-01-second-no-log-relay.md`.
 
+## Hosted relay rooms
+
+Ephemeral relay rooms reduce what a relay can retain: RAM-only room state,
+short TTLs, burn-after-use teardown, no accounts, and no persistent relay
+database. They do not make a hosting provider blind. A provider such as Fly,
+Hetzner, or any other infrastructure operator can still observe connection
+metadata: IPs unless the user uses Tor/VPN, timing, bandwidth, region, and the
+destination app or room endpoint. If the provider terminates TLS, it can also
+observe the WebSocket stream before it reaches the room, although Flock payloads
+remain NIP-59 encrypted.
+
+The product claim is therefore: **Flock minimises what the relay can learn and
+remember. It does not hide that you connected.** See
+[`docs/relay-room-privacy.md`](relay-room-privacy.md) for the reusable wording,
+Fly beta stance, and operator requirements.
+
 ## The map & the host — the other hop (audit Slice 10)
 
 The relay never sees plaintext, but the **map does not use the relay**. The PWA is

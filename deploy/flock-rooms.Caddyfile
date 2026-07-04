@@ -1,0 +1,16 @@
+# Ephemeral relay rooms public endpoint.
+# Install as a conf.d drop-in on the dedicated relay-room host, not the shared
+# flock web host:
+#   sudo tee /etc/caddy/conf.d/rooms.forgesworn.dev.Caddyfile < deploy/flock-rooms.Caddyfile
+#   sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && sudo systemctl reload caddy
+
+rooms.forgesworn.dev {
+	reverse_proxy 127.0.0.1:8792
+	# Intentionally no `log` directive: do not write room/IP/timing access logs.
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Cache-Control no-store
+	}
+}
