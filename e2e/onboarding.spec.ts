@@ -39,6 +39,6 @@ test.describe('onboarding & circle setup', () => {
     await expect(A.locator('[data-action="toggle-share"]')).toBeVisible()
     await expect(A.locator('#share-precision')).toBeVisible()
     await expect(A.locator('[data-action="check-in"]')).toBeVisible()
-    await expect(A.locator('[data-action="come-to-me"]')).toBeVisible()
+    await expect(A.locator('[data-action="chat-preset"][data-reason="On my way"]')).toBeVisible()
   })
 })

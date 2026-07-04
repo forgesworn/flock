@@ -163,12 +163,19 @@ export async function quickAction(page: Page, reason: string): Promise<void> {
   else await page.click(`[data-action="chat-preset"][data-reason="${reason}"]`)
 }
 
-/** "Come to me" — the confirmed quick action that also shares a one-shot exact spot. */
-export async function comeToMe(page: Page): Promise<void> {
-  await gotoTab(page, 'home')
-  await page.click('[data-action="come-to-me"]')
-  await page.click('[data-action="come-to-me-confirm"]')
-  await settle(page) // buzz + one-shot beacon both go to the relay
+/** PM "Come to me" — the confirmed quick action, private to one person, that
+ *  also shares a one-shot exact spot with them alone. Assumes their DM thread
+ *  is already open (openDmWith). */
+export async function dmComeToMe(page: Page): Promise<void> {
+  await page.click('[data-action="dm-come-to-me"]')
+  await page.click('[data-action="dm-come-to-me-confirm"]')
+  await settle(page) // the message + one-shot location wrap both go to the relay
+}
+
+/** Open a private 1:1 thread with a member from the Circle tab. */
+export async function openDmWith(page: Page, peerPk: string): Promise<void> {
+  await gotoTab(page, 'circle')
+  await page.click(`.member [data-action="msg-member"][data-pk="${peerPk}"]`)
 }
 
 /** A member row on the Circle tab, addressed by the pill it currently shows. */

@@ -25,7 +25,7 @@ import type { MapView, MapPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { isNativeShell, shareOrigin, isApkUpdateAvailable } from './native'
 import { rotationDue, refreshDue } from './rotation'
-import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildDmWrap, readDmWrap, type DirectMessage } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildDmWrap, readDmWrap, buildPrivateLocationWrap, readPrivateLocationWrap, type DirectMessage, type PrivateLocationShare } from './invite'
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
 import { generateStorageSecret, setupPin, unlockWithPin, unlockWithGrace, burnLock } from './lock'
@@ -98,6 +98,7 @@ let toastTimer = 0
 let mapView: MapView | null = null
 let offlineBBox: BBox | null = null // bounds of the active circle's saved map (null = not offline)
 let focusMemberPk: string | null = null // "see on map" target — frame their cell once the map mounts
+let focusGeohash: string | null = null // a one-off PM location share's cell — not a live circle beacon, framed once then forgotten
 
 let stopInviteSub: (() => void) | null = null
 let inviteSubKey = ''
@@ -234,7 +235,7 @@ let resetConfirm = false // inline confirm for the destructive "sign out & reset
 let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
 let lostConfirmPk: string | null = null // member pk pending an inline "report lost" confirm
 let editingPetname: string | null = null // pubkey whose nickname is being edited inline
-let comeToMeArmed = false // "Come to me" inline confirm is open (it shares an exact spot)
+let dmComeToMeArmed = false // PM "Come to me" inline confirm is open (it shares an exact spot, privately, to just this person)
 
 // Per-circle live state — signals are circle-scoped, so beacons from one circle
 // must never bleed into another. Keyed by circle id.
@@ -350,7 +351,6 @@ function switchCircle(id: string): void {
   resetConfirm = false
   removeConfirmPk = null
   lostConfirmPk = null
-  comeToMeArmed = false
   spokenCode = null // a code parked for the previous circle must not show for this one
   tab = 'home'
   syncWatch() // re-tier accuracy for the newly-focused circle's precision
@@ -630,7 +630,7 @@ async function toggleTorRelay(): Promise<void> {
       ? 'Tor routing is on, but no .onion relay is set up yet'
       : orbotDetected
         ? 'Routing through Tor'
-        : "Tor routing is on, but Orbot wasn't found — open Orbot and make sure it's running")
+        : "Tor routing is on, but Orbot wasn't found. Open Orbot and make sure it's running.")
   render()
 }
 
@@ -1063,11 +1063,15 @@ function festivalCard(c: store.Circle): string {
   </div>`
 }
 
-/** One-tap "buzz the circle" quick actions — now the chat's preset chips.
- *  "Come to me" is special: it also shares a one-shot exact spot, so it asks
- *  first (see doComeToMe). "Check in" is special too: it fans out to EVERY
- *  circle and asks them all to show where they are (see doCheckIn). */
-const QUICK_ACTIONS = ['Check in', 'Come to me', 'Where are you?', 'Call me', 'On my way'] as const
+// One-tap quick actions, split by where they make sense: asking the WHOLE
+// circle to check in or say they're on the way is a group thing; asking one
+// specific person to come to you, say where they are, or call you is a
+// person-to-person thing that reads oddly broadcast to everyone. "Come to me"
+// is special in both: it also shares a one-shot exact spot, so it asks first
+// (see doComeToMe / doDmComeToMe). "Check in" fans out to EVERY circle asking
+// them all to show where they are (see doCheckIn) — group-only, deliberately.
+const GROUP_QUICK_ACTIONS = ['Check in', 'On my way'] as const
+const DM_QUICK_ACTIONS = ['Come to me', 'Where are you?', 'Call me', 'On my way'] as const
 
 /** How much of a thread the UI renders (the store keeps CHAT_MAX_PER_THREAD). */
 const CHAT_SHOWN = 50
@@ -1183,34 +1187,25 @@ function memberStrip(): string {
 }
 
 /** The circle chat — one running, Signal-style thread for everyone in the
- *  circle. Quick actions live here as presets (they ARE messages); "Come to me"
- *  keeps its confirm because it also shares an exact spot. */
+ *  circle. Quick actions live here as presets (they ARE messages) — just the
+ *  ones that make sense said to a whole group; person-to-person asks ("Come to
+ *  me", "Where are you?", "Call me") live in the PM sheet instead. */
 function chatSection(c: store.Circle): string {
   const list = persisted.chats?.[c.id] ?? []
   const thread = list.slice(-CHAT_SHOWN).map((m, i, arr) => chatBubble(m, arr[i - 1])).join('')
-    || `<div class="note chat-empty">No messages yet — say something. Everyone in ${esc(c.name)} sees it; it's encrypted end-to-end and lives only on your phones.</div>`
-  const chip = (r: string): string => r === 'Come to me'
-    ? `<button class="btn small${comeToMeArmed ? ' primary' : ''}" data-action="come-to-me">${esc(r)}</button>`
-    : r === 'Check in'
-      ? `<button class="btn small" data-action="check-in">${esc(r)}</button>`
-      : `<button class="btn small" data-action="chat-preset" data-reason="${esc(r)}">${esc(r)}</button>`
-  const confirm = comeToMeArmed
-    ? `<div class="note">Buzz everyone and share your <strong>exact spot</strong> with ${esc(c.name)} — just this once? Your slider setting stays as it is.</div>
-       <div class="row" style="gap:10px">
-         <button class="btn small primary" data-action="come-to-me-confirm">Yes — come to me</button>
-         <button class="btn small ghost" data-action="come-to-me-cancel">Cancel</button>
-       </div>`
-    : ''
+    || `<div class="note chat-empty">No messages yet. Say something: everyone in ${esc(c.name)} sees it, it's encrypted end-to-end and lives only on your phones.</div>`
+  const chip = (r: string): string => r === 'Check in'
+    ? `<button class="btn small" data-action="check-in">${esc(r)}</button>`
+    : `<button class="btn small" data-action="chat-preset" data-reason="${esc(r)}">${esc(r)}</button>`
   return `<div class="section-title" style="margin-top:22px">Chat · ${esc(c.name)}</div>
   <div class="card chat-card">
     <div class="chat-thread" id="chat-thread">${thread}</div>
-    <div class="chip-row chat-presets">${QUICK_ACTIONS.map(chip).join('')}</div>
-    ${confirm}
+    <div class="chip-row chat-presets">${GROUP_QUICK_ACTIONS.map(chip).join('')}</div>
     <div class="chat-composer">
       <textarea class="input" id="chat-input" rows="1" maxlength="500" placeholder="Message ${esc(c.name)}…" autocapitalize="sentences"></textarea>
       <button class="btn small primary" data-action="chat-send">Send</button>
     </div>
-    ${hint('chat', 'Messages go to everyone in this circle, encrypted end-to-end — the servers never see them. “Check in” also asks all your circles to show where they are. To message one person privately, tap them above or on the map.')}
+    ${hint('chat', 'Messages go to everyone in this circle, encrypted end-to-end: the servers never see them. “Check in” also asks all your circles to show where they are. To message one person privately, and ask them to come to you with your exact spot, tap them above or on the map.')}
   </div>`
 }
 
@@ -1219,7 +1214,13 @@ function chatSection(c: store.Circle): string {
 function chatBubble(m: store.ChatMessage, prev?: store.ChatMessage): string {
   const mine = m.from === persisted.identity?.pk
   const who = !mine && (!prev || prev.from !== m.from) ? `<span class="msg-who">${esc(nameFor(m.from))}</span>` : ''
-  return `<div class="msg${mine ? ' mine' : ''}">${who}<span class="msg-text">${esc(m.text)}</span><span class="msg-when">${esc(fmtChatTime(m.at))}</span></div>`
+  // A private "Come to me" location share — the marker text plus its precision,
+  // and (received side only) a jump to see it on the map.
+  const view = !mine && m.geohash
+    ? `<button class="btn small ghost" data-action="see-shared-location" data-geohash="${esc(m.geohash)}">See on map</button>`
+    : ''
+  const size = m.precision !== undefined ? ` · ${esc(precisionSize(m.precision))}` : ''
+  return `<div class="msg${mine ? ' mine' : ''}">${who}<span class="msg-text">${esc(m.text)}${size}</span>${view}<span class="msg-when">${esc(fmtChatTime(m.at))}</span></div>`
 }
 
 /** "14:02" today, "Wed 14:02" earlier — a running conversation's clock. */
@@ -1235,7 +1236,7 @@ function batteryCard(): string {
   if (!isNativeShell() || !sharing || batteryExempt !== false) return ''
   return `<div class="card stack geo-issue" style="margin-top:14px">
     <strong>Keep sharing with the screen off</strong>
-    <div class="note">Android pauses flock's connection a few minutes after the phone locks, so your circle would stop seeing you mid-walk. Allow flock to ignore battery optimisation — it's the same setting Signal asks for, and the location toggle still rules what's shared.</div>
+    <div class="note">Android pauses flock's connection a few minutes after the phone locks, so your circle would stop seeing you mid-walk. Allow flock to ignore battery optimisation: it's the same setting Signal asks for, and the location toggle still rules what's shared.</div>
     <button class="btn small primary" data-action="battery-allow">Allow</button>
   </div>`
 }
@@ -1248,7 +1249,7 @@ function rollCallCard(): string {
   if (!c) return ''
   return `<div class="card stack geo-issue" style="margin-top:14px" role="alert">
     <strong>${esc(nameFor(locAsk.from))} asked where everyone is</strong>
-    <div class="note">Share your location once with ${esc(c.name)}? They'd see you to within <strong>${esc(precisionSize(sharePrecisionOf(c)))}</strong> — your usual detail, one time. A place you've marked private stays private.</div>
+    <div class="note">Share your location once with ${esc(c.name)}? They'd see you to within <strong>${esc(precisionSize(sharePrecisionOf(c)))}</strong>, your usual detail, one time. A place you've marked private stays private.</div>
     <div class="row" style="gap:10px">
       <button class="btn small primary" data-action="rollcall-share">Share once</button>
       <button class="btn small ghost" data-action="rollcall-dismiss">Not now</button>
@@ -1334,7 +1335,7 @@ function circleMemberRow(pk: string, mePk: string): string {
   if (!isMe && removeConfirmPk === pk) {
     return `<div class="member editing">
       ${avatarHtml(pk, isMe)}
-      <div class="meta"><div class="who">${esc(nameFor(pk))}</div><div class="when">Remove them? This resets the circle's security and cuts them off straight away — everyone else gets a fresh key.</div></div>
+      <div class="meta"><div class="who">${esc(nameFor(pk))}</div><div class="when">Remove them? This resets the circle's security and cuts them off straight away. Everyone else gets a fresh key.</div></div>
       <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="remove-member" data-pk="${pk}">Remove</button>
       <button class="btn small ghost" data-action="cancel-remove" aria-label="Cancel">✕</button>
     </div>`
@@ -1408,7 +1409,7 @@ function inviteSections(): string {
         <div class="wordcode">${spokenCode.map((w) => `<span class="wc-word">${esc(w)}</span>`).join('')}</div>
         <button class="btn small" data-action="copy-word-code">Copy the words</button>
         <button class="btn small ghost" data-action="new-word-code"${spokenCodeBusy ? ' disabled' : ''}>New code</button>
-        <div class="note">Read these six words to them, or send them over Signal — they tap “Join with a code” and type them in. Works when a QR can’t be scanned. Good for 15 minutes, then make a new one.</div>
+        <div class="note">Read these six words to them, or send them over Signal: they tap “Join with a code” and type them in. Works when a QR can’t be scanned. Good for 15 minutes, then make a new one.</div>
       ` : `
         <button class="btn primary" data-action="share-word-code"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Setting up…' : 'Make a spoken code'}</button>
         <div class="note">Four plain words you can read out or send over Signal — no scanning, no long link. The words aren’t the secret; they unlock a one-time invite parked on your private relay, and expire in 15 minutes.</div>
@@ -1507,7 +1508,7 @@ function privateChatsSection(): string {
     .filter((e) => e.last && e.pk !== me)
     .sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0))
   if (!entries.length) {
-    return '<div class="card muted">No private chats yet. Tap someone on the map or on Home to message them — only the two of you can read it.</div>'
+    return '<div class="card muted">No private chats yet. Tap someone on the map or on Home to message them; only the two of you can read it.</div>'
   }
   const rows = entries.map(({ pk, last, unread }) => {
     const preview = (last?.from === me ? 'You: ' : '') + (last?.text ?? '')
@@ -1569,7 +1570,7 @@ function settingsSections(me: store.Identity, c: store.Circle): string {
         <span>Show public profiles</span>
         <button class="switch${persisted.showProfiles ? ' on' : ''}" data-action="toggle-profiles" role="switch" aria-checked="${!!persisted.showProfiles}"><span class="knob"></span></button>
       </div>
-      <div class="note">Off by default. When on, flock asks public relays for each person's name/photo one at a time — never your whole circle in one request — but a relay can still notice several of your requests arriving close together and infer they're linked. Your private nicknames always work and never leave this device.</div>
+      <div class="note">Off by default. When on, flock asks public relays for each person's name/photo one at a time (never your whole circle in one request), but a relay can still notice several of your requests arriving close together and infer they're linked. Your private nicknames always work and never leave this device.</div>
     </div>
     <div class="section-title" style="margin-top:18px">Backup</div>
     <div class="card stack">
@@ -1598,10 +1599,10 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
         <span>Route through Tor when available</span>
         <button class="switch${persisted.torRelay ? ' on' : ''}" data-action="toggle-tor" role="switch" aria-checked="${!!persisted.torRelay}"><span class="knob"></span></button>
       </div>
-      <div class="note">Off by default. Hides your IP from the relay by routing through Tor (Orbot) instead — but Tor is known to be unreliable on mobile networks, so treat this as experimental and turn it off if alerts start failing.
+      <div class="note">Off by default. Hides your IP from the relay by routing through Tor (Orbot) instead, but Tor is known to be unreliable on mobile networks, so treat this as experimental and turn it off if alerts start failing.
         ${isNativeShell()
-          ? ' Needs Orbot installed and running; flock never falls back to a plain connection silently — if the Tor route isn\'t ready, sending fails loudly instead.'
-          : ' Needs the flock app (not this browser) plus Orbot — the web version has no way to reach it.'}</div>
+          ? ' Needs Orbot installed and running; flock never falls back to a plain connection silently: if the Tor route isn\'t ready, sending fails loudly instead.'
+          : ' Needs the flock app (not this browser) plus Orbot; the web version has no way to reach it.'}</div>
     </div>
     <div class="section-title" style="margin-top:18px">Circle security</div>
     <div class="card stack">
@@ -1992,6 +1993,15 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
       mapView.suppressAutoFit()
     }
   }
+  // A PM "Come to me" location share, tapped from the DM thread — frame its
+  // cell the same way, but it's a one-off (not a live circle beacon), so
+  // there's nothing to look up beyond the geohash itself.
+  if (focusGeohash) {
+    const bb = bounds(focusGeohash)
+    focusGeohash = null
+    mapView.autoFit([{ lat: bb.minLat, lon: bb.minLon }, { lat: bb.maxLat, lon: bb.maxLon }])
+    mapView.suppressAutoFit()
+  }
   if (offlineMapEnabled()) void refreshOfflineState()
   if (!fix && !camera) void centreOnCurrentPosition() // no live share yet → actively locate for the map
 }
@@ -2291,9 +2301,12 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
   if (!signer) return
   const payload = await readInvite(signer, e)
   if (!payload) {
-    // Not an invite/reseed — the same personal inbox also carries private DMs.
+    // Not an invite/reseed — the same personal inbox also carries private DMs
+    // and a PM "Come to me" exact-location share.
     const dm = await readDmWrap(signer, e)
-    if (dm) onIncomingDm(dm)
+    if (dm) { onIncomingDm(dm); return }
+    const loc = await readPrivateLocationWrap(signer, e)
+    if (loc) onIncomingLocationShare(loc)
     return
   }
   if (payload.t === 'invite') {
@@ -2455,7 +2468,7 @@ async function sendBuzz(reason: string, target?: string, opts?: { quiet?: boolea
     // thread (recipients append on decrypt; my echo is skipped there).
     if (!target) appendChat(c.id, { from: id.pk, text: r, at })
     if (!opts?.quiet) toast(target ? 'Buzzed' : 'Buzzed everyone')
-  } catch { toast('Message failed — check your connection') }
+  } catch { toast('Message failed. Check your connection.') }
   refresh()
 }
 
@@ -2488,9 +2501,9 @@ async function doCheckIn(): Promise<void> {
   const ac = activeCircle()
   if (sharing && ac) { beaconCadence.delete(ac.id); void autoEmit() }
   toast(sent === 0
-    ? "Couldn't check in — check your connection"
-    : sent === 1 ? 'Checked in — asked everyone to show where they are'
-    : `Checked in with ${sent} circles — asked everyone to show where they are`)
+    ? "Couldn't check in. Check your connection."
+    : sent === 1 ? 'Checked in. Asked everyone to show where they are.'
+    : `Checked in with ${sent} circles. Asked everyone to show where they are.`)
   refresh()
 }
 
@@ -2506,7 +2519,7 @@ async function doRollCallShare(): Promise<void> {
   const fresh = await svc.currentPosition({ enableHighAccuracy: sharePrecisionOf(c) >= 7, maximumAge: 15_000, timeoutMs: 8000 })
   if (fresh) fix = fresh
   const use = fresh ?? fix
-  if (!use) { toast("Couldn't get a fix — try again by a window"); refresh(); return }
+  if (!use) { toast("Couldn't get a fix. Try again by a window."); refresh(); return }
   const plan = decideEmission({
     mode: 'nightout',
     position: { lat: use.lat, lon: use.lon },
@@ -2525,8 +2538,8 @@ async function doRollCallShare(): Promise<void> {
     const geohash = encode(use.lat, use.lon, plan.precision)
     await publishSignal(await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision }), c)
     saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
-    toast(`Shared once with ${c.name} — to within ${precisionSize(plan.precision)}`)
-  } catch { toast("Couldn't send — check your connection") }
+    toast(`Shared once with ${c.name}, to within ${precisionSize(plan.precision)}`)
+  } catch { toast("Couldn't send. Check your connection.") }
   refresh()
 }
 
@@ -2769,12 +2782,24 @@ function mountCircleMenu(): void {
   el.addEventListener('click', (e) => { if (e.target === el) closeCircleMenu() }) // tap the dim backdrop to dismiss
 }
 /** The private-chat sheet: the whole 1:1 thread plus a composer — Signal's chat
- *  screen in miniature. The old one-shot compose sheet grew a memory. */
+ *  screen in miniature. The old one-shot compose sheet grew a memory. Presets
+ *  here are the person-to-person asks — "Come to me" also shares your exact
+ *  spot with just this person, so it asks first. */
 function dmSheet(): string {
   if (!dmPeer) return ''
   const list = persisted.dms?.[dmPeer] ?? []
   const thread = list.slice(-CHAT_SHOWN).map((m, i, arr) => chatBubble(m, arr[i - 1])).join('')
-    || `<div class="note chat-empty">No messages yet — it's just the two of you. Encrypted so only ${esc(nameFor(dmPeer))} can read it.</div>`
+    || `<div class="note chat-empty">No messages yet, it's just the two of you. Encrypted so only ${esc(nameFor(dmPeer))} can read it.</div>`
+  const chip = (r: string): string => r === 'Come to me'
+    ? `<button class="btn small${dmComeToMeArmed ? ' primary' : ''}" data-action="dm-come-to-me">${esc(r)}</button>`
+    : `<button class="btn small" data-action="dm-preset" data-reason="${esc(r)}">${esc(r)}</button>`
+  const confirm = dmComeToMeArmed
+    ? `<div class="note">Send this and share your <strong>exact spot</strong> with ${esc(nameFor(dmPeer))} alone, just this once? Nobody else in the circle sees it.</div>
+       <div class="row" style="gap:10px">
+         <button class="btn small primary" data-action="dm-come-to-me-confirm">Yes, come to me</button>
+         <button class="btn small ghost" data-action="dm-come-to-me-cancel">Cancel</button>
+       </div>`
+    : ''
   return `<div class="compose-sheet" id="dm-sheet" role="dialog" aria-modal="true">
     <div class="compose-card dm-card">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
@@ -2782,11 +2807,13 @@ function dmSheet(): string {
         <button class="bz-x" data-action="dm-close" aria-label="Close">✕</button>
       </div>
       <div class="chat-thread dm-thread" id="dm-thread">${thread}</div>
+      <div class="chip-row chat-presets">${DM_QUICK_ACTIONS.map(chip).join('')}</div>
+      ${confirm}
       <div class="chat-composer">
         <textarea class="input" id="dm-input" rows="1" maxlength="500" placeholder="Message ${esc(nameFor(dmPeer))}…" autocapitalize="sentences"></textarea>
         <button class="btn small primary" data-action="dm-send">Send</button>
       </div>
-      <div class="note">Private — encrypted so only they can read it. It stays out of the circle chat.</div>
+      <div class="note">Private: encrypted so only they can read it. It stays out of the circle chat.</div>
     </div>
   </div>`
 }
@@ -2808,15 +2835,23 @@ function mountDmSheet(opts?: { keepFocus?: boolean }): void {
   if (input) { input.value = keep; input.focus() }
   scrollChatToEnd()
 }
-/** Send the DM composer's text to the open thread, then refresh it in place. */
-function dmSend(): void {
+/** Send text to the open DM thread, then refresh it in place. Shared by the
+ *  composer's Send button and the preset chips (Where are you? / Call me / On
+ *  my way) — "Come to me" is the one exception, since it also shares location
+ *  and asks first (see doDmComeToMe). */
+function dmSendText(text: string): void {
   const pk = dmPeer
-  const input = document.getElementById('dm-input') as HTMLTextAreaElement | null
-  const t = (input?.value ?? '').trim()
+  const t = text.trim()
   if (!pk) return
   if (!t) { toast('Type a message first'); return }
-  if (input) input.value = ''
   void sendDm(pk, t).then(() => { if (dmPeer === pk) mountDmSheet({ keepFocus: true }) })
+}
+/** Send whatever's in the DM composer. */
+function dmSend(): void {
+  const input = document.getElementById('dm-input') as HTMLTextAreaElement | null
+  const t = input?.value ?? ''
+  if (input) input.value = ''
+  dmSendText(t)
 }
 
 /** A private direct message just arrived on my personal inbox. Surface it as the
@@ -2847,17 +2882,42 @@ function onIncomingDm(dm: DirectMessage): void {
   refresh()
 }
 
-// ── "Come to me" (one-shot exact share) ──────────────────────────────────────
-// A quick action that buzzes the circle AND drops a single exact-precision pin —
-// e.g. "I've found a table, come to me". Confirmed first (see quickActionsCard):
-// it deliberately discloses more than the slider allows, once. On the wire it is
-// an ordinary beacon — indistinguishable from any other (FLOCK §6 invariant 1).
+/** A PM "Come to me" exact-location share just arrived on my personal inbox —
+ *  gift-wrapped to me alone, so nobody else in the circle ever saw it. Lands in
+ *  the same 1:1 thread as a DM (a special bubble with a "See on map" jump), same
+ *  members-gate (drop a stranger's), same fresh-only ring as any other message. */
+function onIncomingLocationShare(loc: PrivateLocationShare): void {
+  const me = persisted.identity
+  if (me && loc.from === me.pk) return
+  const c = persisted.circles.find((x) => (x.members ?? []).includes(loc.from))
+  if (!c) return // not a fellow circle member — drop (stranger spam / scraped npub)
+  const text = '📍 Shared their exact location'
+  const isNew = appendDm(loc.from, { from: loc.from, text, at: loc.at, geohash: loc.geohash, precision: loc.precision })
+  if (!isNew || nowSec() - loc.at > MSG_FRESH_SEC) { refresh(); return }
+  if (dmPeer === loc.from && !document.hidden) {
+    markThreadRead(dmKeyOf(loc.from))
+    mountDmSheet({ keepFocus: true })
+    refresh()
+    return
+  }
+  raiseBuzz({ from: loc.from, reason: text, mine: true, circle: c.name, private: true })
+  notifyIfHidden(text, { kind: 'dm', title: nameFor(loc.from), group: `dm:${loc.from}`, sender: nameFor(loc.from) })
+  try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ }
+  refresh()
+}
+
+// ── One-shot exact share to the WHOLE circle (remote find-my-phone answer) ───
+// It deliberately discloses more than the slider allows, once. On the wire it
+// is an ordinary beacon — indistinguishable from any other (FLOCK §6 invariant
+// 1). A PM's "Come to me" is a DIFFERENT, private mechanism (doDmComeToMe,
+// below) that shares to just one person via their personal inbox — this one
+// broadcasts to the circle's shared inbox instead.
 type ExactResult = 'sent' | 'withheld' | 'nofix' | 'error'
 /** Send ONE exact-precision beacon (geohash-9), one-shot: cadence and the slider
  *  are untouched, so the ambient share carries on and its next beacon reverts
  *  this pin. Runs the disclosure decision with an explicit pickup trigger, so a
  *  private (no-report) place still caps or withholds the pin — an exact fix must
- *  never leak a refuge. Shared by "Come to me" and the remote find-my-phone answer. */
+ *  never leak a refuge. Used by the remote find-my-phone answer. */
 async function sendExactBeacon(c: store.Circle): Promise<ExactResult> {
   const id = persisted.identity
   if (!id) return 'error'
@@ -2886,17 +2946,38 @@ async function sendExactBeacon(c: store.Circle): Promise<ExactResult> {
   } catch { return 'error' }
 }
 
-async function doComeToMe(): Promise<void> {
-  const c = activeCircle()
+/** PM "Come to me": message just this one person AND share your exact spot
+ *  with them ALONE — gift-wrapped to their personal inbox (buildPrivateLocationWrap),
+ *  never the circle's shared inbox, so nobody else in the circle ever sees it.
+ *  Still runs the full disclosure policy (a no-report place still caps or
+ *  withholds it) — a private ask doesn't bypass that. */
+async function doDmComeToMe(pk: string): Promise<void> {
+  const signer = getSigner()
   const id = persisted.identity
-  if (!c || !id) return
-  await sendBuzz('Come to me')
-  const r = await sendExactBeacon(c)
-  toast(r === 'sent' ? 'Buzzed — your exact spot is on their map'
-    : r === 'withheld' ? 'Buzzed — your spot stays private here'
-    : r === 'nofix' ? "Buzzed — couldn't attach your spot"
-    : "Buzzed — couldn't send your spot")
-  refresh()
+  const c = activeCircle()
+  if (!signer || !id || !pk || !c) return
+  await sendDm(pk, 'Come to me')
+  const fresh = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 5000, timeoutMs: 2500 })
+  if (fresh) fix = fresh
+  const use = fresh ?? fix
+  const done = (msg: string): void => { toast(msg); mountDmSheet({ keepFocus: true }) }
+  if (!use) { done("Sent. Couldn't attach your spot."); return }
+  const plan = decideEmission({
+    mode: 'nightout',
+    position: { lat: use.lat, lon: use.lon },
+    trigger: 'pickup',
+    offGrid: false,
+    noReportZones: persisted.noReportZones,
+    accuracyMetres: use.accuracy,
+  }, { coarse: sharePrecisionOf(c), full: COME_TO_ME_PRECISION })
+  if (plan.action === 'withhold') { done('Sent. Your spot stays private here.'); return }
+  try {
+    const geohash = encode(use.lat, use.lon, plan.precision)
+    const wrap = await buildPrivateLocationWrap(signer, pk, { geohash, precision: plan.precision })
+    await svc.publishSigned(activeRelays(), wrap as never)
+    appendDm(pk, { from: id.pk, text: '📍 Shared your exact location', at: nowSec(), geohash, precision: plan.precision })
+    done('Sent, your exact spot is on its way')
+  } catch { done("Sent. Couldn't attach your spot.") }
 }
 
 
@@ -2928,6 +3009,13 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'rollcall-dismiss': locAsk = null; refresh(); break
     case 'toggle-settings': showSettings = !showSettings; render(); break
     case 'see-on-map': focusMemberPk = node.dataset.pk ?? null; tab = 'map'; render(); break
+    case 'see-shared-location':
+      focusGeohash = node.dataset.geohash ?? null
+      dmPeer = null
+      document.getElementById('dm-sheet')?.remove()
+      tab = 'map'
+      render()
+      break
     case 'ask-lost': lostConfirmPk = node.dataset.pk ?? null; render(); break
     case 'cancel-lost': lostConfirmPk = null; render(); break
     case 'report-lost': void sendLostReport(node.dataset.pk ?? '', true); break
@@ -2936,9 +3024,10 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'find-exact': void askFindPing(node.dataset.pk ?? ''); break
     case 'cancel-findping': cancelFindPing(); break
     case 'toggle-ping-consent': togglePingConsent(); break
-    case 'come-to-me': comeToMeArmed = !comeToMeArmed; render(); break
-    case 'come-to-me-cancel': comeToMeArmed = false; render(); break
-    case 'come-to-me-confirm': comeToMeArmed = false; render(); void doComeToMe(); break
+    case 'dm-preset': dmSendText(node.dataset.reason ?? ''); break
+    case 'dm-come-to-me': dmComeToMeArmed = !dmComeToMeArmed; mountDmSheet({ keepFocus: true }); break
+    case 'dm-come-to-me-cancel': dmComeToMeArmed = false; mountDmSheet({ keepFocus: true }); break
+    case 'dm-come-to-me-confirm': dmComeToMeArmed = false; void doDmComeToMe(dmPeer ?? ''); break
     case 'copy-invite': void copyInvite(); break
     case 'share-word-code': case 'new-word-code': void shareWordCode(); break
     case 'copy-word-code': void copyWordCode(); break
@@ -3101,12 +3190,12 @@ async function joinWithWords(): Promise<void> {
   try {
     const codeSeed = await deriveWordCodeSeed(words)
     const refEvent = await svc.fetchWordInvite(activeRelays(), WORD_INVITE.kind, wordInviteTag(codeSeed))
-    if (!refEvent) { toast('No invite found for those words — they expire after 15 minutes, so ask for a fresh code.'); return }
+    if (!refEvent) { toast('No invite found for those words. They expire after 15 minutes, so ask for a fresh code.'); return }
     const ref = await readWordInviteRef(codeSeed, refEvent)
     const refSk = store.fromHex(ref.ref)
     const refPk = getPublicKey(refSk)
     const inviteWrap = await svc.fetchGiftWrap(activeRelays(), personalInboxTag(refPk))
-    if (!inviteWrap) { toast("The invite is still on its way — wait a moment and try the same words again."); return }
+    if (!inviteWrap) { toast("The invite is still on its way. Wait a moment and try the same words again."); return }
     const p = await readInviteViaRef(refSk, inviteWrap)
     if (!p) throw new Error('invalid invite')
     const circle: store.Circle = { id: p.id, seedHex: p.s, name: p.n || 'Circle', mode: p.m === 'nightout' ? 'nightout' : 'family', ...(typeof p.x === 'number' ? { expiresAt: p.x } : {}) }
@@ -3523,7 +3612,7 @@ function saveRelay(): void {
   // unvetted server still sees opaque wraps' timing + your IP, so say so.
   const unknown = unknownRelays(relays)
   toast(unknown.length
-    ? `Saved. ${unknown.length} of ${relays.length} ${unknown.length === 1 ? "isn't" : "aren't"} on our vetted no-log list — only add a server you trust not to log.`
+    ? `Saved. ${unknown.length} of ${relays.length} ${unknown.length === 1 ? "isn't" : "aren't"} on our vetted no-log list. Only add a server you trust not to log.`
     : (relays.length > 1 ? `Saved ${relays.length} relays` : 'Relay saved'))
 }
 
@@ -3818,7 +3907,9 @@ function resetDevice(): void {
   resetConfirm = false
   removeConfirmPk = null
   lostConfirmPk = null
-  comeToMeArmed = false
+  dmComeToMeArmed = false
+  dmPeer = null
+  document.getElementById('dm-sheet')?.remove()
   closeCircleMenu()
   mapView?.destroy()
   mapView = null
@@ -3907,7 +3998,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
           // 1), so guessing "find each other" vs "come to me" vs a manual slider
           // change would be a claim we can't back up. Just the fact, so a sudden
           // "exact spot" reading isn't unexplained.
-          toast(`${nameFor(e.pubkey)}'s sharing jumped to Exact spot — probably a one-off boost, not their usual detail`)
+          toast(`${nameFor(e.pubkey)}'s sharing jumped to Exact spot. Probably a one-off boost, not their usual detail.`)
         } else if (p.precision < PRECISION_MAX) {
           exactJumpNotified.delete(jumpKey) // back to their normal detail — a later jump should notify again
         }
