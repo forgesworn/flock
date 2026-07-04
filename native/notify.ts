@@ -17,6 +17,15 @@
 // stack) rather than one undifferentiated "flock" pile.
 
 import { LocalNotifications } from '@capacitor/local-notifications'
+import { registerPlugin } from '@capacitor/core'
+
+// App-local native plugin: posts message notifications with notification-level
+// VISIBILITY_PUBLIC so content shows on a securely-locked screen (the
+// LocalNotifications plugin hardcodes PRIVATE). See FlockNotifyPlugin.java.
+interface FlockNotifyPlugin {
+  notify(opts: { id?: number; channelId: string; title: string; body: string; group?: string }): Promise<void>
+}
+const FlockNotify = registerPlugin<FlockNotifyPlugin>('FlockNotify')
 
 /** Which stream a notification belongs to — picks channel, heading fallback and stacking. */
 export type NotifyKind = 'dm' | 'group' | 'alert' | 'general'
@@ -31,13 +40,14 @@ export interface NotifyOptions {
 
 // Android channels are immutable once created — importance/visibility set here
 // stick for the install, and a later change needs a NEW id (bump the suffix).
-// We request visibility PUBLIC (show sender + message on the lock screen —
-// Signal's default, chosen over redaction; see AskUserQuestion). NOTE: Android
-// normalises an app's channel visibility to NO_OVERRIDE — an app can make a
-// channel MORE private (PRIVATE/SECRET) but can't force it more public than the
-// user's global lock-screen setting, so content shows per that global setting
-// (as Signal's does too). Verified on the A32: content visible on the lock
-// screen while flock was closed + screen-off.
+// We request channel visibility PUBLIC (Signal-style show content on the lock
+// screen; see AskUserQuestion), but Android normalises an app's *channel*
+// visibility to NO_OVERRIDE — an app can make a channel more private, never more
+// public than the user's global setting. So the actual "show content on a
+// securely-locked screen" is forced at the *notification* level (VISIBILITY_PUBLIC
+// IS honoured there) by posting message notifications through the native
+// FlockNotify plugin below, not the LocalNotifications plugin (which hardcodes
+// PRIVATE). Verified on the A32: content visible on the lock screen while closed.
 const V_PUBLIC = 1
 const IMP_HIGH = 4 // heads-up + sound
 const IMP_DEFAULT = 3 // no heads-up
@@ -77,18 +87,22 @@ export async function ensureNotifyPermission(): Promise<void> {
 }
 
 /** Raise a system notification on the channel for its kind. Body is the app's
- *  own toast text; title/group differentiate the stream (DM vs group vs alert). */
+ *  own toast text; title/group differentiate the stream (DM vs group vs alert).
+ *  Posted via the native FlockNotify plugin so content shows on a securely-locked
+ *  screen (notification-level PUBLIC); falls back to LocalNotifications if that
+ *  plugin is missing (an older shell). Channels are shared between the two. */
 export async function notify(body: string, opts: NotifyOptions = {}): Promise<void> {
   const kind = opts.kind ?? 'general'
+  const id = seq++
+  const title = opts.title || 'flock'
+  const channelId = CHANNEL_ID[kind]
+  try {
+    await FlockNotify.notify({ id, channelId, title, body, ...(opts.group ? { group: opts.group } : {}) })
+    return
+  } catch { /* plugin missing — fall through to LocalNotifications */ }
   try {
     await LocalNotifications.schedule({
-      notifications: [{
-        id: seq++,
-        title: opts.title || 'flock',
-        body,
-        channelId: CHANNEL_ID[kind],
-        ...(opts.group ? { group: opts.group } : {}),
-      }],
+      notifications: [{ id, title, body, channelId, ...(opts.group ? { group: opts.group } : {}) }],
     })
   } catch { /* permission denied — nothing else to do */ }
 }

@@ -1,7 +1,8 @@
 // flock — Capacitor host activity.
 //
-// Registers the app-local StayReachable plugin (the location-free "stay
-// reachable" foreground service). The background-geolocation and
+// Registers the app-local plugins: StayReachable (the location-free "stay
+// reachable" foreground service) and FlockNotify (message notifications with
+// PUBLIC lock-screen visibility). The background-geolocation and
 // local-notifications plugins are npm packages and auto-register; a plugin
 // defined in this module must be registered by hand, before super.onCreate.
 //
@@ -15,6 +16,7 @@ public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(StayReachablePlugin.class);
+    registerPlugin(FlockNotifyPlugin.class);
     super.onCreate(savedInstanceState);
   }
 }

@@ -401,12 +401,19 @@ Two halves that compose into one feature:
   on distinct Android channels — **Direct messages** (1:1), **Group messages**
   (buzz/notes), **Safety alerts** (lost-phone), **General** — separately tunable,
   high-importance (heads-up), Signal-style stacked per conversation, headed by the
-  sender (DM) or circle (group). Channel visibility requests PUBLIC, but Android
-  normalises an app's channel to NO_OVERRIDE (an app can't force content *more*
-  public than the user's global lock-screen setting) — so content shows per that
-  global setting, as Signal's does. Channels created at boot in
+  sender (DM) or circle (group). Channels created at boot in
   `ensureNotifyPermission`; immutable once made → a later change needs a new
   channel id (`-vN` suffix).
+  *Lock-screen content shown even under "hide sensitive" (2026-07-04, validated):*
+  channel-level PUBLIC is normalised by Android to NO_OVERRIDE (an app can't force
+  a channel more public than the user's global setting), so message notifications
+  are instead posted through a small native plugin (`FlockNotifyPlugin.java`, via
+  `native/notify.ts`) with **notification-level `VISIBILITY_PUBLIC`** — which *is*
+  honoured — so the sender + message show on the lock screen even when the device's
+  global setting is "hide sensitive content" (the LocalNotifications plugin
+  hardcodes PRIVATE, which is why we post natively). Proven on the A32 with
+  `lock_screen_allow_private_notifications=0`: the buzz posted `vis=PUBLIC` with
+  full title/body while other apps' notifications redacted to a public version.
 - [ ] **Go-live hardening (foreground PWA — needs no devices):**
   - [x] **Proxy map tiles + geocoding (Stage 0) — DEPLOYED & LIVE** on
     flock.forgesworn.dev. Tiles (`/tiles/*`) and Nominatim (`/nominatim/*`) are

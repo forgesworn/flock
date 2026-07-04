@@ -32,7 +32,7 @@ const manifestPath = resolve(here, '../android/app/src/main/AndroidManifest.xml'
 // the app-local plugin (npm plugins auto-register; this one can't).
 const JAVA_SRC = resolve(here, 'android-src')
 const JAVA_DEST = resolve(here, '../android/app/src/main/java/cc/trotters/flock')
-for (const f of ['StayReachableService.java', 'StayReachablePlugin.java', 'MainActivity.java']) {
+for (const f of ['StayReachableService.java', 'StayReachablePlugin.java', 'FlockNotifyPlugin.java', 'MainActivity.java']) {
   copyFileSync(resolve(JAVA_SRC, f), resolve(JAVA_DEST, f))
 }
 console.error('copied stay-reachable native sources into android/')
