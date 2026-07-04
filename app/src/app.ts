@@ -244,11 +244,22 @@ interface CircleState {
   beacons: Map<string, MemberBeacon>
   /** Latest lost-phone report per member (mark or clear — latest wins). */
   lost: Map<string, LostReport>
+  /** Last time we heard ANYTHING from a member — a check-in/buzz counts, not
+   *  just a location beacon. Reported live: "Rover checked in at 23:49 but
+   *  the roster still says last seen 23:03" — a check-in only asks everyone
+   *  ELSE to share, it isn't itself a location update (Rover's own pin only
+   *  refreshes if he's already sharing), so his last-seen genuinely hadn't
+   *  changed. That's correct for "last seen" (a location claim), but left the
+   *  roster reading as if he'd gone quiet when he plainly hadn't. Never
+   *  drives "last seen" (a location-specific, deliberately narrow claim) —
+   *  only the presence pill, so someone active-but-not-sharing doesn't read
+   *  as "no activity". */
+  lastActivity: Map<string, number>
 }
 const circleStates = new Map<string, CircleState>()
 function cstate(id: string): CircleState {
   let s = circleStates.get(id)
-  if (!s) { s = { beacons: new Map(), lost: new Map() }; circleStates.set(id, s) }
+  if (!s) { s = { beacons: new Map(), lost: new Map(), lastActivity: new Map() }; circleStates.set(id, s) }
   return s
 }
 
@@ -1336,13 +1347,24 @@ function circleMemberRow(pk: string, mePk: string): string {
   const lost = !!cid && !!memberLost(cid, pk)
   const beacon = st?.beacons.get(pk)
   const presence = beacon ? classifyPresence([beacon], nowSec(), { staleAfterSeconds: 600 })[0] : null
+  // A check-in (or any message) only asks everyone ELSE to share — it isn't
+  // itself a location update, so it never touches `beacon`. Reported live:
+  // "he checked in at 23:49 but the roster still says last seen 23:03" — the
+  // location claim was correct (nothing new to see), but the roster read as
+  // if he'd gone quiet when he plainly hadn't. If we've heard from them more
+  // recently than their last beacon, that takes priority for the PILL only —
+  // "last seen" below stays location-specific, never overclaiming freshness.
+  const activityAt = st?.lastActivity.get(pk)
+  const activityIsFresher = activityAt !== undefined && activityAt > (beacon?.timestamp ?? 0)
   const pill = lost
     ? '<span class="pill alert">phone lost</span>'
-    : presence
-      ? (presence.status === 'active'
-        ? `<span class="pill active">out · ${fmtAgo(presence.ageSeconds)}</span>`
-        : `<span class="pill stale">home · ${fmtAgo(presence.ageSeconds)}</span>`)
-      : '<span class="pill">no activity</span>'
+    : activityIsFresher
+      ? `<span class="pill${nowSec() - (activityAt as number) < 600 ? ' active' : ''}">active · ${fmtAgo(nowSec() - (activityAt as number))}</span>`
+      : presence
+        ? (presence.status === 'active'
+          ? `<span class="pill active">out · ${fmtAgo(presence.ageSeconds)}</span>`
+          : `<span class="pill stale">home · ${fmtAgo(presence.ageSeconds)}</span>`)
+        : '<span class="pill">no activity</span>'
 
   // "Last seen" — the lost-phone breadcrumb: even after a phone stops beaconing
   // (battery dead, left in a taxi), everyone still holds where and when it last
@@ -4163,6 +4185,10 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
   const c = persisted.circles.find((x) => x.id === circleId)
   const me = persisted.identity
   if (!c) return
+  if (!me || e.pubkey !== me.pk) {
+    const activity = cstate(circleId).lastActivity
+    activity.set(e.pubkey, Math.max(activity.get(e.pubkey) ?? 0, e.created_at))
+  }
   const t = e.tags.find((x) => x[0] === 't')?.[1]
   try {
     if (t === 'beacon' || t === 'breach' || t === 'pickup') {
