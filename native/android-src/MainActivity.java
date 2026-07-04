@@ -17,6 +17,7 @@ public class MainActivity extends BridgeActivity {
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(StayReachablePlugin.class);
     registerPlugin(FlockNotifyPlugin.class);
+    registerPlugin(FlockBlePlugin.class);
     super.onCreate(savedInstanceState);
   }
 }

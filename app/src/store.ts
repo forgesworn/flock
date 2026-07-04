@@ -116,6 +116,10 @@ export interface Persisted {
    *  persistent notification + always-on battery is opt-in, and it must never run
    *  on a fresh or decoy install. Device-local, not synced, not backed up. */
   stayReachable?: boolean
+  /** Native shell only, opt-in, off by default: exchange signals phone-to-phone
+   *  over Bluetooth LE with co-located circle members (off-relay). Strictly
+   *  additive — the relay path never depends on it. Device-local, not synced. */
+  bleNearby?: boolean
   /** How the identity authenticates: a local key, or a Signet/bunker signer. */
   authMethod?: AuthMethod
   /** Local secret from which circle seeds are deterministically derived (nsec-tree). */

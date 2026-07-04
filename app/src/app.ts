@@ -14,6 +14,7 @@ import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
+import { advertIdNow } from './bleId'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
@@ -130,6 +131,22 @@ const pingAnsweredAt = new Map<string, number>()
 // sounds in full DND)? null = not yet checked. Refreshed on the You tab and on
 // return-to-foreground (e.g. back from the settings screen).
 let dndAccess: boolean | null = null
+
+// BLE-nearby: true while the off-relay Bluetooth transport is running for the
+// active circle. STRICTLY ADDITIVE — every BLE path is gated on this, so with it
+// false (the default, and always on web/e2e) the relay path is byte-for-byte
+// unchanged. See docs/plans/2026-07-04-ble-nearby-transport.md.
+let bleActive = false
+// Wraps already handled this session, so a wrap arriving via BOTH relay and BLE
+// is processed once. Only consulted while BLE is active (bleActive), so it can
+// never alter the relay-only path.
+const seenWrapIds = new Set<string>()
+function markWrapSeen(id: string): boolean {
+  if (seenWrapIds.has(id)) return false
+  seenWrapIds.add(id)
+  if (seenWrapIds.size > 1000) seenWrapIds.delete(seenWrapIds.values().next().value as string)
+  return true
+}
 // The compose sheet, when open: a free-text message aimed at the whole group or one
 // member (their pubkey). Mounted as an overlay so opening it never tears the map.
 let compose: { target: 'group' | string } | null = null
@@ -259,6 +276,7 @@ function switchCircle(id: string): void {
   comeToMeArmed = false
   tab = 'home'
   syncWatch() // re-tier accuracy for the newly-focused circle's precision
+  void syncBle() // BLE advertId is per-circle — re-point it at the new focus
   render()
 }
 
@@ -419,6 +437,41 @@ function openDnd(): void {
   void import('../../native/notify').then((n) => n.openDndAccessSettings()).catch(() => { /* shell only */ })
 }
 
+// ── BLE-nearby (off-relay, native, opt-in) ───────────────────────────────────
+/** Bring BLE up/down to match the opt-in flag + the active circle. Advertises a
+ *  ROTATING, members-only UUID (serviceUuid = room = advertId), so nothing static
+ *  is broadcast. Never throws — BLE unavailable/denied just leaves it off and the
+ *  relay carries everything, exactly as today. */
+async function syncBle(): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  const want = isNativeShell() && !!persisted.bleNearby && !!c && !!id
+  try {
+    const ble = await import('../../native/ble')
+    if (want && c && id) {
+      const uuid = advertIdNow(c.seedHex, nowSec())
+      await ble.startBle({ room: uuid, selfId: id.pk, serviceUuid: uuid }, onBleFrame)
+      bleActive = true
+    } else if (bleActive || ble.bleRunning()) {
+      await ble.stopBle()
+      bleActive = false
+    }
+  } catch { bleActive = false /* older shell / BLE unavailable / denied — relay carries on */ }
+}
+
+/** A wrap arrived over BLE: feed it into the SAME pipeline as a relay wrap. It is
+ *  scoped (by the plugin's room = the active circle's advertId) to the active
+ *  circle, so decrypt with that circle's inbox. Dedup happens in onSignalWrap. */
+function onBleFrame(data: string): void {
+  const c = activeCircle()
+  if (!c) return
+  let ev: { id?: unknown; pubkey?: unknown; content?: unknown }
+  try { ev = JSON.parse(data) } catch { return }
+  if (typeof ev?.id !== 'string' || typeof ev.pubkey !== 'string' || typeof ev.content !== 'string') return
+  const inbox = deriveInbox(c.seedHex)
+  void onSignalWrap(c.id, { pubkey: ev.pubkey, content: ev.content, id: ev.id }, inbox.sk)
+}
+
 function toast(msg: string): void {
   // The hidden-gate also filters naturally: while the app is visible, toasts
   // stay in-app; while hidden, the only toasts firing are incoming signals
@@ -515,6 +568,9 @@ function bootUnlocked(): void {
     // Bring the "stay reachable" service up to match the saved toggle (Signal
     // parity — receive while closed). No-op unless opted in.
     void syncStayReachable()
+    // Bring BLE-nearby up to match its toggle (off-relay, additive). No-op unless
+    // opted in; failures leave it off and the relay carries everything.
+    void syncBle()
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
   }
@@ -1088,6 +1144,14 @@ function youView(): string {
         ${dndAccess ? '<span class="pill active">allowed</span>' : '<button class="btn small" data-action="open-dnd">Allow</button>'}
       </div>
       <div class="note">Lets a lost-phone alarm ("Make it ring") sound even in Do Not Disturb. Without it the alarm still plays through silent — just not full DND.</div>
+    </div>
+    <div class="section-title" style="margin-top:18px">Nearby (beta)</div>
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between">
+        <span>Find nearby over Bluetooth</span>
+        <button class="switch${persisted.bleNearby ? ' on' : ''}" data-action="toggle-ble" role="switch" aria-checked="${!!persisted.bleNearby}"><span class="knob"></span></button>
+      </div>
+      <div class="note">When circle members are physically near you, exchange updates phone-to-phone over Bluetooth — no relay, no internet needed. Beta, Android only; the relay still carries everything as normal.</div>
     </div>` : ''}
     <div class="section-title" style="margin-top:18px">Tips &amp; help</div>
     <div class="card stack">
@@ -1695,6 +1759,12 @@ async function publishSignal(unsigned: { kind: number; content: string; tags: st
   if (!circle || !signer) return
   const inbox = deriveInbox(circle.seedHex)
   const wrap = await giftWrap(signer, inbox.pk, unsigned)
+  // Off-relay hop FIRST, so a relay outage (or airplane mode) never suppresses BLE
+  // delivery — working when the relay can't is the whole point of BLE-nearby.
+  // Best-effort + never throws; scoped to the ACTIVE circle (BLE = its advertId).
+  if (bleActive && circle.id === activeCircle()?.id) {
+    try { const ble = await import('../../native/ble'); await ble.broadcastBle(JSON.stringify(wrap)) } catch { /* best-effort */ }
+  }
   await svc.publishSigned(persisted.relayUrls, wrap as never)
 }
 
@@ -2259,6 +2329,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'toggle-advanced': showAdvanced = !showAdvanced; render(); break
     case 'toggle-stay-reachable': void toggleStayReachable(); break
     case 'open-dnd': openDnd(); break
+    case 'toggle-ble': void toggleBle(); break
     case 'reset-hints':
       persisted.hints = { on: true, dismissed: [] }
       store.save(persisted); toast('Tips are back on'); render(); break
@@ -2543,6 +2614,19 @@ async function toggleStayReachable(): Promise<void> {
   }
 }
 
+/** Flip BLE-nearby: persist, then bring the transport up/down. Starting it prompts
+ *  for Bluetooth permission (the plugin asks). Off-relay + additive — the relay
+ *  path is unaffected either way. */
+async function toggleBle(): Promise<void> {
+  persisted.bleNearby = !persisted.bleNearby
+  store.save(persisted)
+  render()
+  await syncBle()
+  toast(persisted.bleNearby
+    ? 'Bluetooth nearby on — finding co-located circle members off-relay'
+    : 'Bluetooth nearby off')
+}
+
 function onFix(f: svc.Fix): void {
   fix = f
   geoIssue = null // any successful fix clears the location-trouble card
@@ -2766,6 +2850,8 @@ async function hideNow(): Promise<void> {
   // await their teardown BEFORE sealing and reloading.
   await stopBgWatch()
   await stopStayReachable()
+  try { await (await import('../../native/ble')).stopBle() } catch { /* not running */ }
+  bleActive = false // a decoy must be radio-inert — no BLE advertising/scanning
   const sealed = await sealState(JSON.stringify(persisted), cfg.salt, cfg.key)
   store.lockSaves()
   localStorage.setItem(DECOY_CACHE_KEY, sealed)
@@ -2932,6 +3018,7 @@ function resetDevice(): void {
   stopWatch?.(); stopWatch = null
   void stopBgWatch() // native shell: the foreground service (and its notification) must not outlive the reset
   void stopStayReachable() // and the stay-reachable service likewise
+  void import('../../native/ble').then((b) => b.stopBle()).catch(() => { /* not running */ }); bleActive = false // BLE radio must not outlive the reset
   stopAllSubs()
   stopInviteSub?.(); stopInviteSub = null
   inviteSubKey = ''
@@ -2980,7 +3067,10 @@ function stopAllSubs(): void {
   subs.clear()
 }
 
-async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: string }, inboxSk: Uint8Array): Promise<void> {
+async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: string; id?: string }, inboxSk: Uint8Array): Promise<void> {
+  // Dedup a wrap that arrives via BOTH relay and BLE — guarded on bleActive so the
+  // relay-only path (web, e2e, anyone not opted in) is never altered.
+  if (bleActive && wrap.id && !markWrapSeen(wrap.id)) return
   const rumor = await giftUnwrap(rawNip44Decrypt(inboxSk), wrap)
   if (rumor) await onIncoming(circleId, rumor)
 }

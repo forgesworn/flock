@@ -32,7 +32,7 @@ const manifestPath = resolve(here, '../android/app/src/main/AndroidManifest.xml'
 // the app-local plugin (npm plugins auto-register; this one can't).
 const JAVA_SRC = resolve(here, 'android-src')
 const JAVA_DEST = resolve(here, '../android/app/src/main/java/cc/trotters/flock')
-for (const f of ['StayReachableService.java', 'StayReachablePlugin.java', 'FlockNotifyPlugin.java', 'MainActivity.java']) {
+for (const f of ['StayReachableService.java', 'StayReachablePlugin.java', 'FlockNotifyPlugin.java', 'FlockBlePlugin.java', 'MainActivity.java']) {
   copyFileSync(resolve(JAVA_SRC, f), resolve(JAVA_DEST, f))
 }
 console.error('copied stay-reachable native sources into android/')
@@ -58,6 +58,12 @@ const PERMISSIONS = [
   // the alarm still sounds on the alarm audio stream, through ring-silent.
   'android.permission.USE_FULL_SCREEN_INTENT',
   'android.permission.ACCESS_NOTIFICATION_POLICY',
+  // BLE-nearby transport (FlockBlePlugin): phone-to-phone off-relay delivery when
+  // circle members are co-located. ADVERTISE + CONNECT are bare; SCAN carries
+  // neverForLocation (we never derive location from BLE) and is added separately
+  // below with that flag. flock already declares FINE/COARSE location (geofencing).
+  'android.permission.BLUETOOTH_ADVERTISE',
+  'android.permission.BLUETOOTH_CONNECT',
 ]
 
 let xml = readFileSync(manifestPath, 'utf8')
@@ -68,6 +74,15 @@ for (const p of PERMISSIONS) {
     xml = xml.replace('</manifest>', `    <uses-permission android:name="${p}" />\n</manifest>`)
     changed = true
   }
+}
+
+// BLUETOOTH_SCAN needs the neverForLocation flag (a plain name-only <uses-permission>
+// can't express it), and BLE is declared as an optional feature. Idempotent.
+if (!xml.includes('BLUETOOTH_SCAN')) {
+  xml = xml.replace('</manifest>',
+    `    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />\n` +
+    `    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />\n</manifest>`)
+  changed = true
 }
 
 if (xml.includes('android:allowBackup="true"')) {

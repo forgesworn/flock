@@ -64,6 +64,59 @@ as it is. Non-negotiable guarantees:
   the flag, festival wiring). Any can be reverted without touching the others;
   relay-only is always the fallback.
 
+## Two modes: discreet (default) + crowd mesh (2026-07-04 decision)
+
+The spike proved 1-circle point-to-point delivery, but the real target is a
+crowd: N co-located people across M **overlapping** circles (5 in A, 5 in B, 3 of
+each also in C). That breaks a per-circle-UUID point-to-point model three ways:
+a BLE advert (~31 B) barely holds ONE 128-bit UUID (can't advertise M circles);
+two people sharing circle C but scanning different active-circle UUIDs never find
+each other; and 10 people ≠ 10 GATT links (BLE caps ~7 connections → needs
+relaying, not full mesh). So BLE-nearby has **two modes**:
+
+- **Discreet (default).** Per-circle rotating advertId (`bleId.ts`), the ACTIVE
+  circle only, single-hop, members-only discovery. **Zero presence leak** — a
+  scanner can't even tell flock is present. For everyday "me + a mate".
+- **Crowd mesh (opt-in, tied to festival / "Find each other").** A **common**
+  flock discovery UUID so ANY two flock phones in range connect regardless of
+  circles; messages stay opaque `kind:1059` wraps that **flood + relay** across
+  the crowd; each device **decrypts every circle it's in** and blindly relays the
+  rest. Overlapping circles + sub-group bridging fall out for free (a relayer
+  can't read what it forwards). This is the multi-hop mesh meatchat/mesh-kit punted.
+
+**The unavoidable tradeoff (accepted):** a cross-circle mesh needs a *common*
+discovery identifier — so a passive scanner learns "a flock device is nearby"
+(never who / which circle / what; proximity-only ~10–100 m). You cannot have both
+"hide flock's presence" AND "mesh across circles that share no secret". Mitigate:
+the common UUID rotates on a **coarse public epoch** (daily) — `meshUuid =
+uuid(HKDF("flock-ble-mesh-v1", floor(now/86400)))`, no secret, every device
+computes the same per day → discoverable but not a permanent beacon; plus OS MAC
+randomisation. The leak only happens in **crowd mode**, which is coupled to the
+explicit "I'm in a crowd" festival signal.
+
+**Mesh mechanics (crowd mode):**
+- Discovery: advertise + scan the common daily `meshUuid`. `room = meshUuid` so the
+  plugin's room check passes for all participants.
+- Envelope gains a **TTL/hop** byte (absent today). Flood: on an unseen frame →
+  try-decrypt-all-my-circles (render if one works) → re-broadcast to my *other*
+  links with TTL−1. Dedup by message id (`seenIds`, already present) stops loops.
+- **Connection cap**: initiate at most K (≈4) GATT client links; flooding gives
+  reach past directly-connected peers. Role **arbitration** (below) halves links.
+- Decrypt-all-circles is a JS change (`onBleFrame` → try every circle's inbox key,
+  like the relay multi-inbox subscription), and applies in both modes.
+
+**Slicing:**
+1. **Harden the connection layer (both modes):** role arbitration (advertised
+   tiebreak → only the higher side initiates, kills dual-role glare / "out of
+   resources"), reconnect backoff, and native logging. *(This slice — the spike's
+   churn fix; foundational for the mesh.)*
+2. **Mesh transport:** common daily `meshUuid`, TTL envelope + flood/relay,
+   connection cap, a mode flag from JS.
+3. **JS integration:** `syncBle` picks discreet vs mesh (festival active →
+   mesh); `onBleFrame` decrypts across all circles; wire festival → crowd mode.
+4. **Validate on-device** (multi-hop truly needs ≥3 phones; 2 proves mesh-mode
+   delivery + decrypt-all-circles, not relay depth — log the gap).
+
 ## Reuse map (from the survey)
 
 | Piece | Verdict |
