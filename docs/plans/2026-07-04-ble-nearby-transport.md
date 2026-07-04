@@ -119,11 +119,22 @@ explicit "I'm in a crowd" festival signal.
    decrypts across **all** circles; `publishSignal` floods every circle's wrap in
    mesh mode; festival start/stop/expiry re-sync the mode (transition-tracked so
    the radio isn't restarted every tick).
-4. ⏳ **Validate on-device** — the live 2-device exchange (arbitration → 1
-   bidirectional link; NOTIFY reverse direction) + 3-device multi-hop. Code
-   compiles + boots on real hardware; the peer exchange is **not yet field-proven**
-   (needs both phones unlocked/driven). 2 phones prove mesh-mode delivery +
-   decrypt-all-circles, not relay depth — log the gap.
+4. ✅ **Validate on-device (2026-07-04)** — proven on A32 ↔ Pixel with all
+   networking off (Wi-Fi off both, data off A32, No-SIM Pixel → relay impossible):
+   - **Arbitration**: the lower-tiebreak phone yields (server-only, zero
+     `connect ->`); the higher initiates + links. Roles flip correctly when the
+     tiebreaks change on restart.
+   - **NOTIFY reverse channel**: a buzz from the *yielded* (server) side rendered
+     on the initiator — the server→client direction that was impossible before.
+   - **Both directions end-to-end**: WRITE (A32→Pixel) and NOTIFY (Pixel→A32)
+     buzzes decrypted + rendered on a shared circle.
+   - **Mode switch**: festival on → BLE restarts discreet (advertId, hops=0) →
+     crowd mesh (common meshUuid, hops=3); mesh buzz + streaming festival beacons
+     delivered with h=3.
+   - **Gaps**: 3-device multi-hop (relay depth, h>0 past one hop) still needs a
+     third phone; GrapheneOS address rotation makes a peer appear under ~3 rotating
+     addresses → up to MAX_CLIENT_LINKS redundant client links (churn tamed by the
+     cap, not eliminated) — a tuning follow-up.
 
 ## Reuse map (from the survey)
 
