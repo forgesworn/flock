@@ -115,10 +115,12 @@ let pendingJoin: store.Circle | null = null // a link/QR join awaiting the guest
  *  (downloads/apk.json), NOT the website deploy — the site redeploys on nearly
  *  every commit but a new APK ships far less often, so comparing to /version.json
  *  nagged "update available" after every content deploy (see isApkUpdateAvailable).
- *  Only the download-page nudge on Home hangs off it — never an auto-update. */
+ *  Only the download-page nudge on Home hangs off it — never an auto-update.
+ *  Always re-verifies rather than latching true forever: a build published
+ *  while this session was already flagged (or one that gets rolled back to
+ *  match) must be able to clear the nudge again, not just set it once. */
 let lastUpdateCheck = 0
 async function checkForUpdate(): Promise<void> {
-  if (updateAvailable) return // found once — stop asking
   // A backgrounded WebView suspends timers, so the 6-hour interval is unreliable;
   // the resume/visibility hooks below drive most real checks. Throttle so rapid
   // foreground/background toggles don't hammer the deploy.
@@ -127,12 +129,10 @@ async function checkForUpdate(): Promise<void> {
   lastUpdateCheck = now
   try {
     const res = await fetch(`${shareOrigin()}/downloads/apk.json`, { cache: 'no-store' })
-    if (!res.ok) return // no APK published yet (or offline) → never nag
+    if (!res.ok) return // no APK published yet (or offline) → leave the current state as-is
     const v = (await res.json()) as { build?: string }
-    if (isApkUpdateAvailable(__FLOCK_BUILD__, v.build)) {
-      updateAvailable = true
-      render()
-    }
+    const next = isApkUpdateAvailable(__FLOCK_BUILD__, v.build)
+    if (next !== updateAvailable) { updateAvailable = next; render() }
   } catch { /* offline — checked again on the next boot, resume, or 6-hour tick */ }
 }
 let showAdvanced = false // You-tab advanced settings fold (session-only)
