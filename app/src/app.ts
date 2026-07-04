@@ -1440,7 +1440,7 @@ function settingsSections(me: store.Identity, c: store.Circle): string {
         <span>Show public profiles</span>
         <button class="switch${persisted.showProfiles ? ' on' : ''}" data-action="toggle-profiles" role="switch" aria-checked="${!!persisted.showProfiles}"><span class="knob"></span></button>
       </div>
-      <div class="note">Off by default. When on, flock fetches public names &amp; photos from public relays — which tells them who you're looking up. Your private nicknames always work and never leave this device.</div>
+      <div class="note">Off by default. When on, flock asks public relays for each person's name/photo one at a time — never your whole circle in one request — but a relay can still notice several of your requests arriving close together and infer they're linked. Your private nicknames always work and never leave this device.</div>
     </div>
     <div class="section-title" style="margin-top:18px">Backup</div>
     <div class="card stack">
