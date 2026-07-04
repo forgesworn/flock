@@ -16,7 +16,7 @@ import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
 import { createMeshBuffer, remember as rememberMeshWrap, liveEntries as liveMeshEntries, type MeshBufferState } from './meshBuffer'
-import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, wordInviteParkKey, buildWordInviteRef, readWordInviteRef, buildWordInviteDeletion } from './wordcode'
+import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, wordInviteParkKey, buildWordInviteRef, readWordInviteRef, buildWordInviteDeletion, suggestWords } from './wordcode'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure'
@@ -775,6 +775,14 @@ function bootUnlocked(): void {
     void syncTor().then(() => render())
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
+    // Belt-and-braces against a relay subscription going quietly dead even in a
+    // long CONTINUOUSLY-foregrounded session (onForeground's rebuild only fires
+    // on an actual background→foreground transition, which never happens if
+    // the app was simply left open) — force a full teardown + rebuild every
+    // few minutes regardless. ensureSubscriptions() is idempotent by design, so
+    // this is a no-op the rest of the time; it's just insurance for the case
+    // where a subscription looks fine to us but silently stopped delivering.
+    window.setInterval(() => { stopAllSubs(); ensureSubscriptions() }, 180_000)
     // The interval above is unreliable while backgrounded, so also re-check the
     // moment the user brings flock forward — a fresh deploy then shows within
     // seconds of reopening, not up to 6 hours later. Capacitor resume is the
@@ -947,7 +955,8 @@ function render(opts?: { animate?: boolean }): void {
   ensureProfiles()
   startMonitor()
   const body = tab === 'home' ? homeView() : tab === 'chat' ? chatView() : tab === 'circle' ? circleView() : youView()
-  root.innerHTML = `${findPingBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${tab === 'home' ? 'home-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
+  const screenMod = tab === 'home' ? 'home-screen' : tab === 'chat' ? 'chat-screen' : ''
+  root.innerHTML = `${findPingBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${screenMod}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   patchBuzzBanner() // the buzz banner lives in its own layer — keep it in sync after a render
   wireApp()
   if (dmPeer) mountDmSheet() // a full render drops the overlay — put it back
@@ -1140,17 +1149,11 @@ function homeView(): string {
       <div id="offline-oob" class="offline-oob" hidden></div>
       <div class="home-overlay home-overlay-top">
         ${topbar()}
-        ${updateAvailable ? `
-        <div class="card stack">
-          <div><strong>A newer version of flock is ready</strong></div>
-          <div class="note">Download it and install over the top. Everything on this phone stays put.</div>
-          <a class="btn small primary" href="https://flock.forgesworn.dev/get.html">Get the update</a>
-        </div>` : ''}
+        <div class="home-share-bar" id="home-share-bar">${homeShareBarInner()}</div>
         <div id="home-alerts">${geoIssueCard()}${batteryCard()}${rollCallCard()}${lostCard(c)}</div>
       </div>
       <div class="home-overlay home-overlay-bottom">
         <div id="home-strip">${memberStrip()}</div>
-        <div class="home-share-bar" id="home-share-bar">${homeShareBarInner()}</div>
       </div>
     </div>`
 }
@@ -1413,7 +1416,7 @@ function inviteSections(): string {
         <div class="note">Read these six words to them, or send them over Signal: they tap “Join with a code” and type them in. Works when a QR can’t be scanned. Good for 15 minutes, then make a new one.</div>
       ` : `
         <button class="btn primary" data-action="share-word-code"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Setting up…' : 'Make a spoken code'}</button>
-        <div class="note">Four plain words you can read out or send over Signal — no scanning, no long link. The words aren’t the secret; they unlock a one-time invite parked on your private relay, and expire in 15 minutes.</div>
+        <div class="note">${WORD_INVITE.words} plain words you can read out or send over Signal — no scanning, no long link. The words aren’t the secret; they unlock a one-time invite parked on your private relay, and expire in 15 minutes.</div>
       `}
     </div>
 
@@ -1482,6 +1485,12 @@ function youView(): string {
   return `
     ${topbar()}
     <h2 style="margin-bottom:14px">You</h2>
+    ${updateAvailable ? `
+    <div class="card stack" style="margin-bottom:14px">
+      <div><strong>A newer version of flock is ready</strong></div>
+      <div class="note">Download it and install over the top — everything on this phone stays put.</div>
+      <a class="btn small primary" href="https://flock.forgesworn.dev/get.html">Get the update</a>
+    </div>` : ''}
     <div class="section-title">Identity</div>
     <div class="card stack">
       <div class="kv"><span class="k">Your invite key</span><span>${shortNpub(me.pk)}</span></div>
@@ -1500,7 +1509,8 @@ function youView(): string {
     ${privateChatsSection()}
     <button class="btn ghost" data-action="toggle-settings" style="margin-top:18px" aria-expanded="${showSettings}">${showSettings ? 'Hide settings' : 'Settings…'}</button>
     ${showSettings ? settingsSections(me, c) : ''}
-    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose<br/>version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
+    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose</div>
+    <div class="app-version">version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
 }
 
 /** The 1:1 threads — most recent first, unread badged. PMs live here (Home is
@@ -1682,9 +1692,13 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
 }
 
 function navView(): string {
-  const item = (id: string, label: string, icon: string, unread = 0): string =>
-    `<button data-action="tab" data-tab="${id}" aria-current="${tab === id}">${icon}<span>${label}</span>${unread ? `<span class="nav-badge">${unread > 9 ? '9+' : unread}</span>` : ''}</button>`
-  return `<nav class="nav">${item('home', 'Home', ICON.home)}${item('chat', 'Chat', ICON.chat, groupUnreadTotal())}${item('circle', 'Circle', ICON.circle)}${item('you', 'You', ICON.you, dmUnreadTotal())}</nav>`
+  const item = (id: string, label: string, icon: string, unread = 0, dot = false): string =>
+    `<button data-action="tab" data-tab="${id}" aria-current="${tab === id}">${icon}<span>${label}</span>${unread ? `<span class="nav-badge">${unread > 9 ? '9+' : unread}</span>` : dot ? '<span class="nav-dot" aria-label="Update available"></span>' : ''}</button>`
+  const youUnread = dmUnreadTotal()
+  // An available update is a nudge, not urgent — a small dot on You (where the
+  // download lives), never a big card muscling in on Home. Yields to a real
+  // unread count instead of stacking two badges on one icon.
+  return `<nav class="nav">${item('home', 'Home', ICON.home)}${item('chat', 'Chat', ICON.chat, groupUnreadTotal())}${item('circle', 'Circle', ICON.circle)}${item('you', 'You', ICON.you, youUnread, !youUnread && updateAvailable)}</nav>`
 }
 
 // ── Map screen ───────────────────────────────────────────────────────────────
@@ -1723,8 +1737,9 @@ function onboardingView(): string {
   } else if (onboardStep === 'join') {
     inner = `
       <h1>Join a circle</h1>
-      <p class="tagline">Type the six words someone read you, paste an invite code, or join remotely by sharing your key.</p>
-      <div class="field" style="text-align:left;margin-bottom:12px"><label for="jwords">Spoken words</label><input class="input" id="jwords" placeholder="six words, in order" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      <p class="tagline">Type the six words someone read you — just the first few letters of each finds it, no need to spell the whole thing — or paste an invite code, or join remotely by sharing your key.</p>
+      <div class="field" style="text-align:left;margin-bottom:4px"><label for="jwords">Spoken words</label><input class="input" id="jwords" placeholder="six words, in order" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      <div id="jwords-suggest" class="word-suggest"></div>
       <div class="actions" style="margin-bottom:18px">
         <button class="btn primary" data-action="join-words"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Finding invite…' : 'Join with words'}</button>
       </div>
@@ -1795,12 +1810,39 @@ function onboardingView(): string {
         ${signetRow}
       </div>
       <div class="note onboard-note">No account, no sign-up. flock makes an anonymous key that lives only on this phone.</div>
-      <div class="note onboard-note">version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
+      <div class="app-version">version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
   }
   return `<main class="screen onboard fade-in">${inner}</main><div class="toast" id="toast"></div>`
 }
 
 // ── Wiring ───────────────────────────────────────────────────────────────────
+/** Type-ahead under the "spoken words" join field: as you type the word
+ *  currently in progress (the last space-separated token), show up to 6
+ *  matches starting with those letters — tapping one completes it and moves
+ *  on to the next word. You only need to recognise a word, not spell it
+ *  correctly from memory. */
+function wireWordSuggest(): void {
+  const input = document.getElementById('jwords') as HTMLInputElement | null
+  const box = document.getElementById('jwords-suggest')
+  if (!input || !box) return
+  const render = (): void => {
+    const value = input.value
+    const current = value.split(/\s+/).pop() ?? ''
+    const matches = suggestWords(current)
+    box.innerHTML = matches.map((w) => `<button type="button" class="suggest-chip" data-word="${esc(w)}">${esc(w)}</button>`).join('')
+    box.querySelectorAll<HTMLElement>('.suggest-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const word = chip.dataset.word ?? ''
+        const prefix = value.slice(0, value.length - current.length)
+        input.value = `${prefix}${word} `
+        input.focus()
+        render()
+      })
+    })
+  }
+  input.addEventListener('input', render)
+}
+
 function wireOnboard(): void {
   if (onboardStep === 'await') {
     const qrEl = document.getElementById('qr-npub')
@@ -1815,6 +1857,7 @@ function wireOnboard(): void {
       } catch { qrEl.remove() }
     }
   }
+  if (onboardStep === 'join') wireWordSuggest()
   root.querySelectorAll('[data-action]').forEach((node) => {
     node.addEventListener('click', () => {
       const a = node.getAttribute('data-action')
@@ -2116,11 +2159,16 @@ function refresh(): void {
 function patchNavBadges(): void {
   const nav = document.querySelector('.nav')
   if (!nav) return
-  const set = (tabId: string, n: number): void => {
+  const set = (tabId: string, n: number, dot = false): void => {
     const btn = nav.querySelector(`[data-tab="${tabId}"]`)
     if (!btn) return
+    btn.querySelector('.nav-dot')?.remove()
     const existing = btn.querySelector('.nav-badge')
-    if (!n) { existing?.remove(); return }
+    if (!n) {
+      existing?.remove()
+      if (dot) btn.appendChild(Object.assign(document.createElement('span'), { className: 'nav-dot' }))
+      return
+    }
     const label = n > 9 ? '9+' : String(n)
     if (existing) { existing.textContent = label; return }
     const el = document.createElement('span')
@@ -2128,8 +2176,9 @@ function patchNavBadges(): void {
     el.textContent = label
     btn.appendChild(el)
   }
+  const youUnread = dmUnreadTotal()
   set('chat', groupUnreadTotal())
-  set('you', dmUnreadTotal())
+  set('you', youUnread, !youUnread && updateAvailable)
 }
 
 /** The share toggle + status chip — its own function so both the initial
@@ -3437,6 +3486,16 @@ function onForeground(): void {
   void refreshDndAccess()
   // Orbot may have been started/stopped while flock was backgrounded.
   void syncTor().then(() => render())
+  // A long background spell can leave a relay subscription quietly dead — the
+  // socket-level reconnect (SimplePool's enableReconnect/enablePing) doesn't
+  // always mean the REQ itself survived a background WebView's suspended
+  // timers. ensureSubscriptions() is normally idempotent (skips a circle it
+  // already believes it's subscribed to), so it can't tell "stale" from
+  // "healthy" — force a full teardown + rebuild the moment the user actually
+  // looks at the app again, when staleness would otherwise show up as
+  // "messages just don't arrive" until the next full app restart.
+  stopAllSubs()
+  ensureSubscriptions()
   // The app being open IS the read — clear delivered message notifications,
   // exactly as Signal does. Foreground-service notifications are immune.
   void import('../../native/notify').then((n) => n.clearDelivered()).catch(() => { /* shell only */ })

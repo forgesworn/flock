@@ -39,7 +39,7 @@
 import { scryptAsync } from '@noble/hashes/scrypt.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
-import { getWord, indexOf, WORDLIST_SIZE } from 'canary-kit'
+import { getWord, indexOf, WORDLIST, WORDLIST_SIZE } from 'canary-kit'
 import { deriveGroupKey, encryptEnvelope, decryptEnvelope, hashGroupTag } from 'canary-kit/sync'
 import { derive, fromNsec } from 'nsec-tree'
 import { fromHex } from './store'
@@ -91,6 +91,22 @@ export function wordCodeFromEntropy(entropy: Uint8Array, count = WORD_INVITE.wor
 /** A fresh code from the platform CSPRNG. */
 export function newWordCode(count = WORD_INVITE.words): string[] {
   return wordCodeFromEntropy(crypto.getRandomValues(new Uint8Array(count * 2)), count)
+}
+
+/** Words starting with `prefix` — powers a type-ahead so joining only needs a
+ *  few letters per word, not the exact full spelling recalled from memory
+ *  (mirrors a BIP39 recovery phrase's UX). This wordlist isn't guaranteed
+ *  unique at 4 letters the way BIP39's own list is (a handful of pairs like
+ *  "beach"/"beacon" share a prefix) — an empty prefix suggests nothing at all
+ *  rather than dumping all 2048 words. */
+export function suggestWords(prefix: string, limit = 6): string[] {
+  const p = prefix.trim().toLowerCase()
+  if (!p) return []
+  const out: string[] = []
+  for (const w of WORDLIST) {
+    if (w.startsWith(p)) { out.push(w); if (out.length >= limit) break }
+  }
+  return out
 }
 
 /** Lowercase, split on spaces/commas/hyphens, and validate every word is in the

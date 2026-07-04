@@ -29,6 +29,33 @@ test.describe('invites — both ways', () => {
     await expect(B.locator('.circle-chip.on')).toContainText('Say it out loud')
   })
 
+  // The type-ahead exists so joining never depends on spelling six words exactly
+  // from memory — prove it actually completes a real join, not just that chips render.
+  test('spoken word code — tapping the type-ahead\'s suggestions (not typing full words) still joins', async ({ browser }) => {
+    const A = await newPerson(browser)
+    const B = await newPerson(browser)
+    await createCircle(A, { name: 'Type-ahead trip' })
+
+    await gotoTab(A, 'circle')
+    await A.click('[data-action="share-word-code"]')
+    await expect(A.locator('.wc-word').first()).toBeVisible()
+    const words = await A.locator('.wc-word').allTextContents()
+    await settle(A)
+
+    await B.click('[data-action="join"]')
+    for (const word of words) {
+      await B.locator('#jwords').pressSequentially(word.slice(0, 4))
+      await B.locator('.suggest-chip', { hasText: new RegExp(`^${word}$`) }).click()
+    }
+    await expect(B.locator('#jwords')).toHaveValue(`${words.join(' ')} `)
+    await B.click('[data-action="join-words"]')
+
+    await expect(B.locator('[data-action="join-skip"]')).toBeVisible()
+    await B.click('[data-action="join-skip"]')
+    await gotoTab(B, 'circle')
+    await expect(B.locator('.circle-chip.on')).toContainText('Type-ahead trip')
+  })
+
   test('join by code (in person): the secret travels in the code, no relay needed', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)

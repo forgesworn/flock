@@ -9,6 +9,7 @@ import {
   buildWordInviteRef,
   readWordInviteRef,
   buildWordInviteDeletion,
+  suggestWords,
   type WordInviteRef,
 } from './wordcode'
 
@@ -30,6 +31,22 @@ describe('word-code invite — speakable code, secret never in the code', () => 
     const messy = `  ${words[0].toUpperCase()} ${words[1]}-${words[2]}, ${words[3]}  ${words[4]} ${words[5]}`
     expect(normaliseWordCode(messy)).toEqual(words)
     expect(() => normaliseWordCode('zznotaword banana apple cat dog fish')).toThrow()
+  })
+
+  it('suggestWords: an empty prefix suggests nothing (never dumps all 2048)', () => {
+    expect(suggestWords('')).toEqual([])
+    expect(suggestWords('   ')).toEqual([])
+  })
+
+  it('suggestWords: matches are case-insensitive, capped at the limit, and start with the prefix', () => {
+    const hits = suggestWords('appl', 3)
+    expect(hits.length).toBeLessThanOrEqual(3)
+    for (const w of hits) expect(w.startsWith('appl')).toBe(true)
+    expect(suggestWords('APPL', 3)).toEqual(hits)
+  })
+
+  it('suggestWords: an unmatched prefix suggests nothing', () => {
+    expect(suggestWords('zzzz')).toEqual([])
   })
 
   it('derives a stable 64-hex seed per code; different code → different seed', async () => {

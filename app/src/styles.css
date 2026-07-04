@@ -368,6 +368,7 @@ a.btn { text-decoration: none; }
    no-account promise) — readable size and contrast, not fine print. */
 .onboard-note { margin-top: 16px; font-size: 14px; color: var(--muted); }
 .onboard-note a { color: var(--safe); }
+.app-version { margin-top: 6px; text-align: center; font-size: 14px; font-weight: 600; color: var(--text); }
 
 .actions { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 4px; }
 
@@ -468,6 +469,13 @@ a.btn { text-decoration: none; }
 
 /* ── Map (Home — it IS the map now, full screen) ─────────────── */
 .home-screen { padding: 0; }
+/* Chat needs to be height-LOCKED to the viewport (not just min-height, which
+   lets the whole page grow past the fold and bury the composer/shortcuts
+   under a scroll) — the thread scrolls internally instead, so the shortcuts +
+   composer stay pinned right above the nav, and the thread itself is still
+   independently scrollable to read back through history. */
+.chat-screen { height: 100dvh; overflow: hidden; }
+.chat-screen .chat-card { min-height: 0; }
 .home-shell { position: relative; flex: 1; min-height: 0; }
 /* maplibre-gl tags this same #map element with `.maplibregl-map { position: relative }`,
    which loads after this file at equal specificity and was overriding the rule below —
@@ -574,9 +582,17 @@ a.btn { text-decoration: none; }
 .buzz-banner.private { background: var(--safe); }
 .buzz-banner.private .bz-icon { animation: none; }
 .buzz-banner .bz-icon { font-size: 20px; animation: ring 0.6s ease-in-out 3; transform-origin: 50% 12%; }
-/* Spoken invite code — four words, big and clear enough to read down the phone. */
+/* Spoken invite code — six words, big and clear enough to read down the phone. */
 .wordcode { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 4px 0 10px; }
 .wc-word { font-size: 20px; font-weight: 700; letter-spacing: 0.01em; padding: 8px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line-strong); color: var(--text); }
+
+/* Join-by-words type-ahead: tap a match instead of spelling the whole word. */
+.word-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 14px; min-height: 0; }
+.suggest-chip {
+  font-size: 13px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line-strong); color: var(--text); cursor: pointer;
+}
+.suggest-chip:active { transform: scale(0.96); }
 
 .buzz-banner .bz-text { flex: 1; min-width: 0; }
 .buzz-banner .bz-x { opacity: 0.6; font-size: 13px; }
@@ -826,6 +842,12 @@ a.btn { text-decoration: none; }
   display: grid; place-items: center; line-height: 1;
 }
 .nav-badge.inline { position: static; flex: none; }
+/* A quiet nudge (update available) — a plain dot, never a number; yields to a
+   real unread badge on the same icon instead of stacking both. */
+.nav-dot {
+  position: absolute; top: 7px; right: calc(50% - 20px);
+  width: 8px; height: 8px; border-radius: 50%; background: var(--alert);
+}
 .dm-row { cursor: pointer; }
 .dm-row:active { transform: scale(0.99); }
 

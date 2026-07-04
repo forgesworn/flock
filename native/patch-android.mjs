@@ -90,6 +90,19 @@ if (xml.includes('android:allowBackup="true"')) {
   changed = true
 }
 
+// Without this, Android's default (adjustPan) leaves the WebView's own layout
+// viewport oblivious to the keyboard — it just pans the whole window, so `dvh`
+// units never shrink and a bottom sheet (DM/chat composer) can end up jammed
+// half under the keyboard. adjustResize actually shrinks the WebView, so the
+// compose sheet's own `max-height: 82dvh` does its job.
+if (!xml.includes('android:windowSoftInputMode="adjustResize"')) {
+  xml = xml.replace(
+    /(<activity\b[^>]*android:name="\.MainActivity"[^>]*)(>)/,
+    (_m, attrs, close) => `${attrs} android:windowSoftInputMode="adjustResize"${close}`,
+  )
+  changed = true
+}
+
 // Verified App Link for invite links/QRs. Appended after the MAIN/LAUNCHER
 // intent filter of the only activity in the generated manifest.
 //
