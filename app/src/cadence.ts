@@ -97,3 +97,48 @@ export function nextPollDelaySeconds(stationaryStreak: number, bounds: PollBound
   const streak = Math.max(0, Math.floor(stationaryStreak)) + (opts?.conserve ? 1 : 0)
   return Math.min(bounds.minSeconds * 2 ** streak, bounds.maxSeconds)
 }
+
+// ── Timing hygiene (audit F1 / PRIVACY.md "cover traffic so silence vs
+// activity isn't itself a signal") ───────────────────────────────────────────
+// A perfectly fixed 45 s (moving) / 300 s (still) cadence is itself a signal to
+// a relay logging arrival timing: it reads the exact schedule, and the ~6x gap
+// between the two rates tells it moving from stationary without decrypting
+// anything. Two independent mitigations, both pure/deterministic (the caller
+// supplies `rand` — mirrors the rest of flock's "caller supplies randomness"
+// convention, e.g. giftwrap.ts's NIP-59 backdating):
+
+/**
+ * Add up to ±`jitterFraction` random spread to a base interval (seconds), so a
+ * cadence never lands on the exact same period twice. `rand` is a caller-supplied
+ * value in [0,1] (out-of-range input is clamped, not inverted); 0.5 reproduces
+ * the base exactly. Applies to any interval — the move floor, the still
+ * heartbeat, or the cover-traffic interval below.
+ */
+export function jitteredSeconds(baseSeconds: number, jitterFraction: number, rand: number): number {
+  const r = Math.min(1, Math.max(0, rand))
+  const fraction = Math.min(1, Math.max(0, jitterFraction))
+  const factor = 1 + (r * 2 - 1) * fraction
+  return Math.max(1, Math.round(baseSeconds * factor))
+}
+
+/** Tuning for {@link shouldEmitCover}. */
+export interface CoverOptions {
+  /** Roughly how often a cover publish fires while stationary (seconds). */
+  intervalSeconds: number
+  /** ± jitter applied to intervalSeconds, so the cover cadence isn't fixed either. */
+  jitterFraction: number
+}
+
+/**
+ * Low-rate cover-traffic gate: while `shouldEmitBeacon` is suppressing real
+ * sends (standing still, inside the heartbeat window), this decides when to
+ * fire a wire-identical DECOY publish instead — narrowing the moving-vs-still
+ * cadence gap without ever carrying real information (the payload is random
+ * filler; see `src/signals.ts`'s `cover` signal type — receivers discard it
+ * unconditionally, wire-indistinguishable from any other signal). Independent
+ * of the real beacon cadence: call it only when the real gate just said no.
+ */
+export function shouldEmitCover(lastCoverAt: number, now: number, opts: CoverOptions, rand: number): boolean {
+  if (!lastCoverAt) return true // nothing sent yet — start the low-rate drip promptly
+  return now - lastCoverAt >= jitteredSeconds(opts.intervalSeconds, opts.jitterFraction, rand)
+}

@@ -11,7 +11,7 @@ import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
-import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
+import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
@@ -68,6 +68,17 @@ const beaconCadence = new Map<string, BeaconCadence>()
 // "stale" window, so a still member keeps reading as "active" without spamming.
 const COARSE_MIN_INTERVAL = 45 // never faster than this
 const COARSE_HEARTBEAT = 300 //  …but re-affirm presence every 5 min when still
+// Timing hygiene (audit F1): jitter softens the exact 45s/300s periods; cover
+// traffic narrows the ~6x moving-vs-still swing with a low-rate decoy publish
+// that fills the quiet stretch between heartbeats (src/signals.ts `cover` type
+// — wire-identical, discarded unread by every receiver). Math.random() here
+// mirrors giftwrap.ts's own NIP-59 timing blur (non-secret, purely obfuscating
+// a fixed schedule).
+const CADENCE_JITTER_FRACTION = 0.2
+const COVER_INTERVAL_SECONDS = 90 // between the move floor and the still heartbeat
+// Last cover-traffic publish per circle — session-scoped is enough, a restart
+// just resumes the low-rate drip promptly (mirrors beaconCadence's reset-on-restart).
+const coverCadence = new Map<string, number>()
 // Adaptive sampling: back off the GPS poll when stationary, staying under the
 // 600 s presence "stale" window so a still member never reads as "gone home".
 const SAMPLE_POLL_BOUNDS = { minSeconds: 30, maxSeconds: 180 }
@@ -295,6 +306,7 @@ function removeCircle(id: string): void {
   persisted.circles = persisted.circles.filter((c) => c.id !== id)
   circleStates.delete(id)
   beaconCadence.delete(id)
+  coverCadence.delete(id)
   delete persisted.presence[id]
   if (persisted.activeCircleId === id) persisted.activeCircleId = persisted.circles[0]?.id ?? null
   store.save(persisted)
@@ -304,7 +316,7 @@ function sweepExpired(): boolean {
   const now = nowSec()
   const live = persisted.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
   if (live.length === persisted.circles.length) return false
-  for (const c of persisted.circles) if (!live.includes(c)) { circleStates.delete(c.id); beaconCadence.delete(c.id); delete persisted.presence[c.id] }
+  for (const c of persisted.circles) if (!live.includes(c)) { circleStates.delete(c.id); beaconCadence.delete(c.id); coverCadence.delete(c.id); delete persisted.presence[c.id] }
   persisted.circles = live
   if (!live.some((c) => c.id === persisted.activeCircleId)) persisted.activeCircleId = live[0]?.id ?? null
   store.save(persisted)
@@ -2160,6 +2172,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     cstate(existing.id).beacons.clear()
     cstate(existing.id).lost.clear()
     beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
+    coverCadence.delete(existing.id)
     dropPresence(existing.id) // old-key pins are meaningless under the new seed
     toast("This circle's security was reset")
     refresh()
@@ -2203,6 +2216,7 @@ async function reseedCircle(removePk?: string, circle: store.Circle | null = act
     cstate(c.id).beacons.clear()
     cstate(c.id).lost.clear()
     beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
+    coverCadence.delete(c.id)
     dropPresence(c.id) // old-key pins are meaningless under the new seed
     if (!silent) toast(removePk ? 'Member removed — circle security reset' : 'Circle security reset')
     render()
@@ -3215,17 +3229,35 @@ async function autoEmit(): Promise<void> {
   if (!type || type === 'help' || plan.action === 'withhold') { refresh(); return }
   const geohash = encode(f.lat, f.lon, plan.precision)
   const prev = beaconCadence.get(c.id) ?? { lastGeohash: null, lastSentAt: 0 }
-  if (!shouldEmitBeacon(geohash, prev, nowSec(), {
-    minIntervalSeconds: COARSE_MIN_INTERVAL,
-    heartbeatSeconds: COARSE_HEARTBEAT,
-  })) { refresh(); return }
+  const now = nowSec()
+  // Timing hygiene (audit F1): re-roll the cadence each tick so the interval
+  // itself isn't perfectly periodic on the wire.
+  if (!shouldEmitBeacon(geohash, prev, now, {
+    minIntervalSeconds: jitteredSeconds(COARSE_MIN_INTERVAL, CADENCE_JITTER_FRACTION, Math.random()),
+    heartbeatSeconds: jitteredSeconds(COARSE_HEARTBEAT, CADENCE_JITTER_FRACTION, Math.random()),
+  })) {
+    // The real gate just said no (standing still, inside the heartbeat window) —
+    // consider a low-rate decoy instead, narrowing the moving-vs-still cadence
+    // gap without disclosing anything (best-effort; never blocks the UI).
+    if (shouldEmitCover(coverCadence.get(c.id) ?? 0, now, { intervalSeconds: COVER_INTERVAL_SECONDS, jitterFraction: CADENCE_JITTER_FRACTION }, Math.random())) {
+      coverCadence.set(c.id, now)
+      const filler = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, '0')).join('')
+      try {
+        const cover = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: 'cover', geohash: filler, precision: plan.precision })
+        await publishSignal(cover, c)
+      } catch { /* best-effort — a missed decoy is not a missed alert */ }
+    }
+    refresh()
+    return
+  }
   try {
     const template = await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision })
     await publishSignal(template, c)
     // Only record the send (local pin + cadence) once a relay has accepted it, so a
     // transient failure is retried on the next fix rather than silently swallowed.
-    saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
-    beaconCadence.set(c.id, { lastGeohash: geohash, lastSentAt: nowSec() })
+    saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: now })
+    beaconCadence.set(c.id, { lastGeohash: geohash, lastSentAt: now })
+    coverCadence.set(c.id, now) // a real send counts as this cycle's cover too — no doubling up
   } catch { /* no relay accepted — leave cadence untouched so the next fix retries */ }
   refresh()
 }
@@ -3608,6 +3640,7 @@ function resetDevice(): void {
   fix = null
   circleStates.clear()
   beaconCadence.clear()
+  coverCadence.clear()
   persisted = store.load()
   onboardStep = 'intro'
   tab = 'home'
