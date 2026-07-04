@@ -60,3 +60,37 @@ export function advertIdsToScan(seedHexes: string[], nowSec: number, windowSecon
   for (const s of seedHexes) for (const dw of [-1, 0, 1]) ids.add(advertId(s, w + dw))
   return [...ids]
 }
+
+// ── Crowd-mesh discovery identity (the second mode) ───────────────────────────
+// The rotating advertId above hides flock's presence but is members-only, so two
+// people who share a circle yet scan different active circles never find each
+// other, and a BLE advert can't carry every circle's UUID. Crowd mode (tied to
+// festival "find each other") instead uses ONE common daily UUID so ANY two flock
+// phones in range connect; messages stay opaque kind:1059 wraps that flood the
+// crowd, and each device decrypts only the circles it's actually in. The cost —
+// stated and accepted in the design doc — is a proximity-only presence signal (a
+// passive scanner learns "a flock device is near", never who/which circle/what).
+
+/** BLE-mesh discovery epoch, seconds. Daily — coarse enough that the common UUID
+ *  is not a permanent beacon, fine enough that every co-located device computes
+ *  the same one for the day. Deliberately keyless (crowd mode bridges circles
+ *  that share no secret). */
+export const BLE_MESH_EPOCH_SECONDS = 86_400
+
+/** The window index for a unix-seconds timestamp, on the daily mesh epoch. */
+export function meshEpoch(nowSec: number, epochSeconds = BLE_MESH_EPOCH_SECONDS): number {
+  return Math.floor(nowSec / epochSeconds)
+}
+
+/** The common crowd-mesh discovery UUID for a daily epoch. No secret, so every
+ *  flock device computes the same value for the same day — that is the point:
+ *  crowd mode connects across circles that share no seed. Rotates daily (+ OS MAC
+ *  randomisation) so it is discoverable-when-present, never a permanent beacon. */
+export function meshUuid(epoch: number): string {
+  return toUuid(sha256(enc.encode(`flock:ble-mesh:v1:${epoch}`)))
+}
+
+/** The crowd-mesh UUID to advertise/scan now (this device's current daily epoch). */
+export function meshUuidNow(nowSec: number, epochSeconds = BLE_MESH_EPOCH_SECONDS): string {
+  return meshUuid(meshEpoch(nowSec, epochSeconds))
+}

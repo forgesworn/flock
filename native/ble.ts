@@ -15,7 +15,7 @@
 import { registerPlugin, type PluginListenerHandle } from '@capacitor/core'
 
 interface FlockBlePlugin {
-  start(opts: { room: string; selfId: string; serviceUuid: string }): Promise<void>
+  start(opts: { room: string; selfId: string; serviceUuid: string; hops?: number }): Promise<void>
   stop(): Promise<void>
   broadcast(opts: { data: string }): Promise<{ queuedPeers?: number }>
   send(opts: { peer: string; data: string }): Promise<void>
@@ -29,13 +29,15 @@ const FlockBle = registerPlugin<FlockBlePlugin>('FlockBle')
 let frameHandle: PluginListenerHandle | null = null
 let running = false
 
-/** Start BLE-nearby for a circle. `serviceUuid === room ===` the rotating advertId,
- *  so the advert (and its room-hash) rotate together; `selfId` = my pubkey (only
- *  ever sent inside an established GATT link, never advertised). `onFrame` gets each
- *  reassembled wrap payload. Throws if BLE is unavailable/denied — the caller treats
- *  that as "BLE off" and carries on over the relay. */
+/** Start BLE-nearby. `serviceUuid === room ===` the discovery UUID — the rotating
+ *  members-only advertId (discreet mode) or the common daily meshUuid (crowd mode);
+ *  either way the advert and its room-hash rotate together and nothing static hits
+ *  the air. `selfId` = my pubkey (only ever sent inside an established GATT link).
+ *  `hops` is the mesh flood budget: 0 (default) = discreet single-hop, >0 = crowd
+ *  mesh flood/relay. `onFrame` gets each reassembled wrap payload. Throws if BLE is
+ *  unavailable/denied — the caller treats that as "BLE off" and uses the relay. */
 export async function startBle(
-  opts: { room: string; selfId: string; serviceUuid: string },
+  opts: { room: string; selfId: string; serviceUuid: string; hops?: number },
   onFrame: (data: string, from: string) => void,
 ): Promise<void> {
   await stopBle()

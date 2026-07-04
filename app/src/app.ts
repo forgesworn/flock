@@ -14,7 +14,7 @@ import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
-import { advertIdNow } from './bleId'
+import { advertIdNow, meshUuidNow } from './bleId'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
@@ -132,11 +132,18 @@ const pingAnsweredAt = new Map<string, number>()
 // return-to-foreground (e.g. back from the settings screen).
 let dndAccess: boolean | null = null
 
-// BLE-nearby: true while the off-relay Bluetooth transport is running for the
-// active circle. STRICTLY ADDITIVE — every BLE path is gated on this, so with it
-// false (the default, and always on web/e2e) the relay path is byte-for-byte
-// unchanged. See docs/plans/2026-07-04-ble-nearby-transport.md.
+// BLE-nearby: true while the off-relay Bluetooth transport is running. STRICTLY
+// ADDITIVE — every BLE path is gated on this, so with it false (the default, and
+// always on web/e2e) the relay path is byte-for-byte unchanged. `bleMode` is the
+// active discovery mode: 'discreet' (per-circle rotating advertId, single-hop,
+// zero presence leak — the default) or 'mesh' (common daily UUID, flood/relay
+// across circles, tied to festival). See docs/plans/2026-07-04-ble-nearby-transport.md.
 let bleActive = false
+let bleMode: 'discreet' | 'mesh' = 'discreet'
+// Crowd-mesh flood budget: how many extra hops a wrap is relayed past its first
+// recipient. 3 covers a large room via a couple of intermediaries without letting
+// traffic churn indefinitely (the native plugin also dedups by id + clamps hops).
+const BLE_MESH_HOPS = 3
 // Wraps already handled this session, so a wrap arriving via BOTH relay and BLE
 // is processed once. Only consulted while BLE is active (bleActive), so it can
 // never alter the relay-only path.
@@ -438,38 +445,48 @@ function openDnd(): void {
 }
 
 // ── BLE-nearby (off-relay, native, opt-in) ───────────────────────────────────
-/** Bring BLE up/down to match the opt-in flag + the active circle. Advertises a
- *  ROTATING, members-only UUID (serviceUuid = room = advertId), so nothing static
- *  is broadcast. Never throws — BLE unavailable/denied just leaves it off and the
- *  relay carries everything, exactly as today. */
+/** Bring BLE up/down to match the opt-in flag, and pick the mode. Never throws —
+ *  BLE unavailable/denied just leaves it off and the relay carries everything.
+ *
+ *  Two modes (docs/plans/2026-07-04-ble-nearby-transport.md):
+ *   - CROWD MESH when "find each other" (festival) is on for ANY circle: advertise
+ *     + scan the COMMON daily meshUuid so any flock phone in range connects, and
+ *     flood wraps (hops > 0) so they bridge overlapping circles across a crowd.
+ *   - DISCREET otherwise: the ACTIVE circle's rotating, members-only advertId,
+ *     single-hop (hops 0), zero presence leak. */
 async function syncBle(): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
-  const want = isNativeShell() && !!persisted.bleNearby && !!c && !!id
+  const mesh = persisted.circles.some((x) => festivalActive(x))
+  const want = isNativeShell() && !!persisted.bleNearby && !!id && (mesh || !!c)
   try {
     const ble = await import('../../native/ble')
-    if (want && c && id) {
-      const uuid = advertIdNow(c.seedHex, nowSec())
-      await ble.startBle({ room: uuid, selfId: id.pk, serviceUuid: uuid }, onBleFrame)
+    if (want && id && (mesh || c)) {
+      const uuid = mesh ? meshUuidNow(nowSec()) : advertIdNow((c as store.Circle).seedHex, nowSec())
+      const hops = mesh ? BLE_MESH_HOPS : 0
+      await ble.startBle({ room: uuid, selfId: id.pk, serviceUuid: uuid, hops }, onBleFrame)
       bleActive = true
+      bleMode = mesh ? 'mesh' : 'discreet'
     } else if (bleActive || ble.bleRunning()) {
       await ble.stopBle()
       bleActive = false
+      bleMode = 'discreet'
     }
-  } catch { bleActive = false /* older shell / BLE unavailable / denied — relay carries on */ }
+  } catch { bleActive = false; bleMode = 'discreet' /* older shell / BLE unavailable / denied — relay carries on */ }
 }
 
-/** A wrap arrived over BLE: feed it into the SAME pipeline as a relay wrap. It is
- *  scoped (by the plugin's room = the active circle's advertId) to the active
- *  circle, so decrypt with that circle's inbox. Dedup happens in onSignalWrap. */
+/** A wrap arrived over BLE: feed it into the SAME pipeline as a relay wrap. The
+ *  crowd meshUuid carries EVERY circle's traffic (and even discreet frames may be
+ *  for any circle a peer shares), so try every circle's inbox — giftUnwrap fails
+ *  silently for the ones it isn't for. Dedup ONCE here (a mesh frame floods and may
+ *  also arrive via relay), then dispatch per circle without re-deduping. */
 function onBleFrame(data: string): void {
-  const c = activeCircle()
-  if (!c) return
   let ev: { id?: unknown; pubkey?: unknown; content?: unknown }
   try { ev = JSON.parse(data) } catch { return }
   if (typeof ev?.id !== 'string' || typeof ev.pubkey !== 'string' || typeof ev.content !== 'string') return
-  const inbox = deriveInbox(c.seedHex)
-  void onSignalWrap(c.id, { pubkey: ev.pubkey, content: ev.content, id: ev.id }, inbox.sk)
+  if (bleActive && !markWrapSeen(ev.id)) return
+  const wrap = { pubkey: ev.pubkey, content: ev.content, id: ev.id }
+  for (const c of persisted.circles) void dispatchWrap(c.id, wrap, deriveInbox(c.seedHex).sk)
 }
 
 function toast(msg: string): void {
@@ -1516,6 +1533,7 @@ function startFestival(hours: number): void {
   patchActive({ festivalUntil: until })
   festivalWasActive = true
   beaconCadence.delete(c.id) // the step-up should show up now, not on the next cadence tick
+  bleMeshDesiredLast = meshDesired(); void syncBle() // "find each other" flips BLE-nearby into crowd-mesh mode (if opted in)
   if (!sharing) { startSharing(); return } // startSharing emits at the new (festival) precision
   syncWatch() // exact-spot → high-accuracy GPS sampling tier
   void autoEmit()
@@ -1530,6 +1548,7 @@ function stopFestival(): void {
   patchActive({ festivalUntil: undefined })
   festivalWasActive = false
   beaconCadence.delete(c.id)
+  bleMeshDesiredLast = meshDesired(); void syncBle() // back to discreet mode (or off) now the crowd boost has ended
   syncWatch()
   if (sharing) void autoEmit()
   toast('Find each other off — back to your usual detail')
@@ -1761,8 +1780,10 @@ async function publishSignal(unsigned: { kind: number; content: string; tags: st
   const wrap = await giftWrap(signer, inbox.pk, unsigned)
   // Off-relay hop FIRST, so a relay outage (or airplane mode) never suppresses BLE
   // delivery — working when the relay can't is the whole point of BLE-nearby.
-  // Best-effort + never throws; scoped to the ACTIVE circle (BLE = its advertId).
-  if (bleActive && circle.id === activeCircle()?.id) {
+  // Best-effort + never throws. In discreet mode BLE is scoped to the ACTIVE circle
+  // (room = its advertId), so only its wraps go out; in crowd mesh the common
+  // meshUuid carries EVERY circle, so any circle's wrap floods (only members decrypt).
+  if (bleActive && (bleMode === 'mesh' || circle.id === activeCircle()?.id)) {
     try { const ble = await import('../../native/ble'); await ble.broadcastBle(JSON.stringify(wrap)) } catch { /* best-effort */ }
   }
   await svc.publishSigned(persisted.relayUrls, wrap as never)
@@ -1918,6 +1939,14 @@ function isEditing(): boolean {
 // closes — otherwise GPS would keep sampling at the festival (high) tier and the
 // last fine beacon would linger on the circle's maps until an unrelated fix.
 let festivalWasActive = false
+// Whether BLE crowd-mesh was wanted at the last reconcile — so we flip modes only
+// on a real transition, never restart the radio on every monitor tick.
+let bleMeshDesiredLast = false
+/** BLE should be in crowd-mesh mode when opted in and ANY circle is in "find each
+ *  other" — even a non-active one, since the common meshUuid spans all circles. */
+function meshDesired(): boolean {
+  return isNativeShell() && !!persisted.bleNearby && persisted.circles.some((x) => festivalActive(x))
+}
 function reconcileFestival(): void {
   const now = festivalActive(activeCircle())
   if (festivalWasActive && !now) {
@@ -1925,6 +1954,10 @@ function reconcileFestival(): void {
     if (sharing) void autoEmit() // re-emit coarse so the circle stops seeing me finely
   }
   festivalWasActive = now
+  // Follow crowd-mesh on/off when a festival window opens or closes on its own
+  // (this includes a non-active circle's, which the check above ignores).
+  const md = meshDesired()
+  if (md !== bleMeshDesiredLast) { bleMeshDesiredLast = md; void syncBle() }
 }
 
 function startMonitor(): void {
@@ -3069,8 +3102,16 @@ function stopAllSubs(): void {
 
 async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: string; id?: string }, inboxSk: Uint8Array): Promise<void> {
   // Dedup a wrap that arrives via BOTH relay and BLE — guarded on bleActive so the
-  // relay-only path (web, e2e, anyone not opted in) is never altered.
+  // relay-only path (web, e2e, anyone not opted in) is never altered. The BLE path
+  // (onBleFrame) dedups once up front then calls dispatchWrap per circle directly,
+  // so it never consumes this guard on a circle that simply fails to decrypt.
   if (bleActive && wrap.id && !markWrapSeen(wrap.id)) return
+  await dispatchWrap(circleId, wrap, inboxSk)
+}
+
+/** Decrypt one wrap against one circle's inbox and route the rumor. No dedup — the
+ *  caller owns that (onSignalWrap for relay; onBleFrame once, then all circles). */
+async function dispatchWrap(circleId: string, wrap: { pubkey: string; content: string; id?: string }, inboxSk: Uint8Array): Promise<void> {
   const rumor = await giftUnwrap(rawNip44Decrypt(inboxSk), wrap)
   if (rumor) await onIncoming(circleId, rumor)
 }

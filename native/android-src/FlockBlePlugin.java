@@ -1,11 +1,22 @@
-// flock — offline BLE mesh transport (dual-role peripheral + central), ported
-// from meatchat's MeatchatNativeBlePlugin with identity/packaging changes only.
-// The BLE machinery (advertise/scan/GATT server+client, chunking/reassembly,
-// dedup, frame/status events) is unchanged in behaviour.
+// flock — offline BLE mesh transport (dual-role peripheral + central), forked
+// from meatchat's plugin then evolved for flock's two-mode design.
 //
-// flock computes and passes its OWN serviceUuid at start() time (a rotating
-// per-window UUID) — the service UUID is never hardcoded here, it stays a
-// runtime parameter end to end (advertise filter, scan filter, GATT service).
+// flock computes and passes its OWN serviceUuid at start() time — never hardcoded,
+// it stays a runtime parameter end to end (advertise filter, scan filter, GATT
+// service). In DISCREET mode that is a rotating per-window members-only UUID; in
+// CROWD/MESH mode it is the common daily UUID (see app/src/bleId.ts).
+//
+// Two things distinguish this from the spike (Slice 2):
+//   1. BIDIRECTIONAL SINGLE LINK. The frame characteristic is write-only
+//      (client→server); a NOTIFY characteristic carries the reverse (server→
+//      client). So one physical GATT connection now moves data BOTH ways, which
+//      lets us re-enable role ARBITRATION: of any two peers, only the one with the
+//      higher advertised tiebreak initiates the connection (the other serves +
+//      notifies). One link per pair, not two — essential because BLE caps at ~7
+//      connections and a crowd needs the budget.
+//   2. FLOOD/RELAY. The envelope carries a hop count (`h`); in mesh mode an
+//      unseen frame is re-broadcast to every OTHER peer with h-1, so a wrap
+//      reaches past directly-connected peers. Dedup by envelope id stops loops.
 //
 // Injected by native/patch-android.mjs; registered in MainActivity.
 package cc.trotters.flock;
@@ -17,6 +28,7 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattServer;
 import android.bluetooth.BluetoothGattServerCallback;
 import android.bluetooth.BluetoothGattService;
@@ -30,6 +42,7 @@ import android.bluetooth.le.BluetoothLeAdvertiser;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
@@ -89,7 +102,13 @@ public class FlockBlePlugin extends Plugin {
     private static final String EVENT_FRAME = "frame";
     private static final String EVENT_STATUS = "status";
     private static final String BROADCAST = "*";
+    // Frame characteristic: client → server (WRITE). Inbox characteristic: server →
+    // client (NOTIFY) — the reverse direction that makes a single arbitrated link
+    // bidirectional. CCCD is the standard Client Characteristic Configuration
+    // Descriptor a client writes to subscribe to notifications.
     private static final UUID FRAME_CHARACTERISTIC_UUID = UUID.fromString("29b8d9f3-2c2b-4ed1-a12c-7401e5b7b37f");
+    private static final UUID INBOX_CHARACTERISTIC_UUID = UUID.fromString("29b8d9f3-2c2b-4ed1-a12c-7401e5b7b380");
+    private static final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
     private static final byte CHUNK_MAGIC = 0x4d;
     private static final byte CHUNK_VERSION = 0x01;
@@ -107,9 +126,11 @@ public class FlockBlePlugin extends Plugin {
     private static final long CONNECT_THROTTLE_MS = 1500L; // global: ≤1 new connection per window
     private static final int MAX_CLIENT_LINKS = 3; // cap client-initiated links (peers rotate BLE addresses)
     private static final int TIEBREAK_BYTES = 4;
+    private static final int MAX_HOPS = 8; // clamp the mesh hop budget (loop/storm backstop)
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final Map<String, Link> links = new ConcurrentHashMap<>();
+    private final Map<String, Link> links = new ConcurrentHashMap<>();           // links WE initiated (client role)
+    private final Map<String, ServerLink> serverLinks = new ConcurrentHashMap<>(); // peers that connected to US (server role)
     private final Map<String, Reassembly> inbound = new ConcurrentHashMap<>();
     private final Map<String, String> peerAddresses = new ConcurrentHashMap<>();
     private final LinkedHashMap<String, Boolean> seenIds = new LinkedHashMap<>();
@@ -126,11 +147,16 @@ public class FlockBlePlugin extends Plugin {
     private BluetoothLeAdvertiser advertiser;
     private BluetoothLeScanner scanner;
     private BluetoothGattServer gattServer;
+    private BluetoothGattCharacteristic inboxCharacteristic; // server→client NOTIFY channel
 
     private UUID serviceUuid;
     private byte[] roomHash = new byte[0];
     private String room;
     private String selfId;
+    // Initial hop budget stamped on our own frames. 0 = discreet (single-hop, no
+    // relay). >0 = crowd mesh: an unseen frame is re-broadcast with h-1 until it
+    // hits 0, so a wrap reaches peers we are not directly connected to.
+    private int initialHops = 0;
     private boolean running = false;
     private boolean advertisingActive = false;
     private boolean scanningActive = false;
@@ -264,8 +290,14 @@ public class FlockBlePlugin extends Plugin {
             peers.put(peer);
         }
 
+        int subscribedServerLinks = 0;
+        for (ServerLink server : serverLinks.values()) if (server.subscribed) subscribedServerLinks += 1;
+
         status.put("connectedPeers", links.size());
         status.put("writablePeers", writablePeers);
+        status.put("serverLinks", serverLinks.size());
+        status.put("notifiablePeers", subscribedServerLinks);
+        status.put("hops", initialHops);
         status.put("knownPeers", peerAddresses.size());
         status.put("queuedChunks", queuedChunks);
         status.put("txFrames", txFrames);
@@ -347,8 +379,11 @@ public class FlockBlePlugin extends Plugin {
         new SecureRandom().nextBytes(tiebreak);
         room = nextRoom;
         selfId = nextSelfId;
+        // `hops` selects the mode: 0 (default) = discreet single-hop; >0 = crowd mesh
+        // flood/relay. Clamped so a hostile/oversized value can't create a storm.
+        initialHops = Math.max(0, Math.min(MAX_HOPS, call.getInt("hops", 0)));
         roomHash = roomHash(nextRoom);
-        Log.d(TAG, "start uuid=" + nextServiceUuid + " tiebreak=" + hex(tiebreak));
+        Log.d(TAG, "start uuid=" + nextServiceUuid + " hops=" + initialHops + " tiebreak=" + hex(tiebreak));
         txFrames = 0;
         txChunks = 0;
         rxFrames = 0;
@@ -378,12 +413,28 @@ public class FlockBlePlugin extends Plugin {
         if (gattServer == null) return false;
 
         BluetoothGattService service = new BluetoothGattService(serviceUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY);
+        // Client → server: the peer who initiated the link WRITEs frames here.
         BluetoothGattCharacteristic frameCharacteristic = new BluetoothGattCharacteristic(
             FRAME_CHARACTERISTIC_UUID,
             BluetoothGattCharacteristic.PROPERTY_WRITE | BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
             BluetoothGattCharacteristic.PERMISSION_WRITE
         );
         service.addCharacteristic(frameCharacteristic);
+        // Server → client: we NOTIFY frames back over the SAME link, so the peer
+        // that connected to us never needs to open a second connection. This is the
+        // reverse channel that makes role arbitration (one link per pair) safe.
+        BluetoothGattCharacteristic inbox = new BluetoothGattCharacteristic(
+            INBOX_CHARACTERISTIC_UUID,
+            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_READ
+        );
+        BluetoothGattDescriptor cccd = new BluetoothGattDescriptor(
+            CCCD_UUID,
+            BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE
+        );
+        inbox.addDescriptor(cccd);
+        service.addCharacteristic(inbox);
+        inboxCharacteristic = inbox;
         return gattServer.addService(service);
     }
 
@@ -500,6 +551,7 @@ public class FlockBlePlugin extends Plugin {
             }
         }
         links.clear();
+        serverLinks.clear();
 
         if (gattServer != null) {
             try {
@@ -509,11 +561,13 @@ public class FlockBlePlugin extends Plugin {
             }
             gattServer = null;
         }
+        inboxCharacteristic = null;
 
         inbound.clear();
         peerAddresses.clear();
         lastAttempt.clear();
         tiebreak = null;
+        initialHops = 0;
         synchronized (seenIds) {
             seenIds.clear();
         }
@@ -584,7 +638,7 @@ public class FlockBlePlugin extends Plugin {
             return;
         }
 
-        int queued = writeEnvelope(target, envelope);
+        int queued = broadcastEnvelope(envelope, null);
         txFrames += 1;
         JSObject result = new JSObject();
         result.put("queuedPeers", queued);
@@ -599,31 +653,42 @@ public class FlockBlePlugin extends Plugin {
         envelope.put("t", target);
         envelope.put("f", selfId);
         envelope.put("id", UUID.randomUUID().toString());
+        envelope.put("h", initialHops);
         envelope.put("d", data);
         return envelope.toString();
     }
 
-    private int writeEnvelope(String target, byte[] envelope) {
-        List<Link> targets = targetLinks(target);
-        for (Link link : targets) {
-            List<byte[]> chunks = chunksFor(link, envelope);
+    /** Send an already-serialised envelope to every reachable peer — both links we
+     *  initiated (client WRITE) and peers that connected to us (server NOTIFY) —
+     *  except `excludeAddress` (the immediate hop a relayed frame came from, so it
+     *  is never echoed straight back). flock addresses inside the opaque wrap, so
+     *  the BLE layer always floods; the wire `t` field is kept only for the self /
+     *  broadcast checks on receive. Returns the number of peers enqueued to. */
+    private int broadcastEnvelope(byte[] envelope, String excludeAddress) {
+        int queued = 0;
+        for (Link link : links.values()) {
+            if (link.characteristic == null) continue; // not yet ready to write
+            if (excludeAddress != null && excludeAddress.equals(link.address)) continue;
+            List<byte[]> chunks = chunksFor(link.mtu, envelope);
+            if (chunks.isEmpty()) continue;
             txChunks += chunks.size();
             enqueue(link, chunks);
+            queued += 1;
         }
-        return targets.size();
+        for (ServerLink server : serverLinks.values()) {
+            if (!server.subscribed) continue; // client hasn't enabled notifications yet
+            if (excludeAddress != null && excludeAddress.equals(server.address)) continue;
+            List<byte[]> chunks = chunksFor(server.mtu, envelope);
+            if (chunks.isEmpty()) continue;
+            txChunks += chunks.size();
+            enqueueServer(server, chunks);
+            queued += 1;
+        }
+        return queued;
     }
 
-    private List<Link> targetLinks(String target) {
-        if (!BROADCAST.equals(target)) {
-            String address = peerAddresses.get(target);
-            Link link = address == null ? null : links.get(address);
-            if (link != null) return Collections.singletonList(link);
-        }
-        return new ArrayList<>(links.values());
-    }
-
-    private List<byte[]> chunksFor(Link link, byte[] envelope) {
-        int payloadBytes = Math.max(1, Math.min(MAX_CHUNK_PAYLOAD, link.mtu - CHUNK_HEADER_BYTES));
+    private List<byte[]> chunksFor(int mtu, byte[] envelope) {
+        int payloadBytes = Math.max(1, Math.min(MAX_CHUNK_PAYLOAD, mtu - CHUNK_HEADER_BYTES));
         int total = Math.max(1, (envelope.length + payloadBytes - 1) / payloadBytes);
         if (total > MAX_CHUNKS) return Collections.emptyList();
 
@@ -654,6 +719,49 @@ public class FlockBlePlugin extends Plugin {
             link.queue.addAll(chunks);
         }
         mainHandler.post(() -> flush(link));
+        emitStatus();
+    }
+
+    private void enqueueServer(ServerLink server, List<byte[]> chunks) {
+        if (chunks.isEmpty()) return;
+        synchronized (server) {
+            server.queue.addAll(chunks);
+        }
+        mainHandler.post(() -> flushServer(server));
+        emitStatus();
+    }
+
+    /** Push the next queued chunk to a peer that connected to US, over the NOTIFY
+     *  characteristic. Flow-controlled by onNotificationSent (one in flight), so it
+     *  mirrors the client-side flush() write loop. */
+    @SuppressWarnings("deprecation")
+    @SuppressLint("MissingPermission")
+    private void flushServer(ServerLink server) {
+        if (!running || gattServer == null || inboxCharacteristic == null || !server.subscribed || server.writing) return;
+
+        byte[] next;
+        synchronized (server) {
+            next = server.queue.poll();
+            if (next == null) return;
+            server.writing = true;
+        }
+
+        boolean accepted;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            accepted = gattServer.notifyCharacteristicChanged(server.device, inboxCharacteristic, false, next)
+                == BluetoothStatusCodes.SUCCESS;
+        } else {
+            inboxCharacteristic.setValue(next);
+            accepted = gattServer.notifyCharacteristicChanged(server.device, inboxCharacteristic, false);
+        }
+
+        if (!accepted) {
+            synchronized (server) {
+                server.writing = false;
+            }
+            rememberError("BLE notification was not accepted");
+            closeServerLink(server.address);
+        }
         emitStatus();
     }
 
@@ -693,6 +801,32 @@ public class FlockBlePlugin extends Plugin {
                 emitStatus();
             }
         }, 750);
+    }
+
+    /** Enable notifications on the peer's INBOX characteristic — the reverse channel
+     *  that carries their replies back over this one link. Writes the standard CCCD
+     *  ENABLE_NOTIFICATION_VALUE; the peer's onDescriptorWriteRequest then marks us
+     *  subscribed and starts notifying. Best-effort — a missing inbox/CCCD (older
+     *  peer) just leaves this link write-only, which still works. */
+    @SuppressWarnings("deprecation")
+    @SuppressLint("MissingPermission")
+    private void subscribeInbox(BluetoothGatt gatt, BluetoothGattService service) {
+        if (gatt == null || service == null) return;
+        BluetoothGattCharacteristic inbox = service.getCharacteristic(INBOX_CHARACTERISTIC_UUID);
+        if (inbox == null) return;
+        try {
+            gatt.setCharacteristicNotification(inbox, true);
+            BluetoothGattDescriptor cccd = inbox.getDescriptor(CCCD_UUID);
+            if (cccd == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+            } else {
+                cccd.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                gatt.writeDescriptor(cccd);
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "subscribeInbox failed: " + e.getMessage());
+        }
     }
 
     @SuppressWarnings("deprecation")
@@ -793,6 +927,7 @@ public class FlockBlePlugin extends Plugin {
             String target = envelope.optString("t", null);
             String id = envelope.optString("id", null);
             String data = envelope.optString("d", null);
+            int hops = envelope.optInt("h", 0);
 
             if (room == null || !room.equals(envelopeRoom)) {
                 dropInboundFrame();
@@ -817,15 +952,41 @@ public class FlockBlePlugin extends Plugin {
 
             peerAddresses.put(from, source);
             rxFrames += 1;
-            Log.d(TAG, "rx frame from " + tail(source) + " (" + data.length() + "B)");
+            Log.d(TAG, "rx frame from " + tail(source) + " (" + data.length() + "B, h=" + hops + ")");
             JSObject event = new JSObject();
             event.put("from", from);
             event.put("data", data);
             mainHandler.post(() -> notifyListeners(EVENT_FRAME, event));
+            // Crowd mesh: blindly relay an unseen frame onward with one fewer hop, to
+            // every peer EXCEPT the one it came from. dedup (rememberSeen) above means
+            // each frame is relayed at most once here, so this cannot loop. We relay
+            // even frames we cannot decrypt — the payload is opaque; a relayer can't
+            // read what it forwards. No-op in discreet mode (initialHops == 0).
+            if (initialHops > 0 && hops > 0) relayEnvelope(source, envelopeRoom, target, from, id, data, hops - 1);
             emitStatus();
         } catch (JSONException ignored) {
             // Hostile or stale BLE payloads are dropped silently.
             dropInboundFrame();
+        }
+    }
+
+    /** Re-broadcast a received frame one hop further out (crowd mesh flood). Keeps
+     *  the original id (so downstream dedup works) and origin `f`, only decrementing
+     *  the hop count; excludes the immediate source so it is never echoed back. */
+    private void relayEnvelope(String source, String envRoom, String target, String from, String id, String data, int hops) {
+        try {
+            JSONObject relay = new JSONObject();
+            relay.put("v", 1);
+            relay.put("r", envRoom);
+            relay.put("t", target);
+            relay.put("f", from);
+            relay.put("id", id);
+            relay.put("h", hops);
+            relay.put("d", data);
+            byte[] bytes = relay.toString().getBytes(StandardCharsets.UTF_8);
+            if (bytes.length <= MAX_ENVELOPE_BYTES) broadcastEnvelope(bytes, source);
+        } catch (JSONException ignored) {
+            // Should never happen (we just parsed these fields); drop if it does.
         }
     }
 
@@ -857,6 +1018,21 @@ public class FlockBlePlugin extends Plugin {
         Link link = links.remove(address);
         if (link == null) return;
         link.close();
+        peerAddresses.values().removeAll(Collections.singleton(address));
+        emitStatus();
+    }
+
+    /** Forget a peer that had connected to our GATT server (they dropped, or their
+     *  notify failed). The connection itself is owned by the OS GATT server; we only
+     *  drop our outbound bookkeeping for it. */
+    private void closeServerLink(String address) {
+        ServerLink server = serverLinks.remove(address);
+        if (server == null) return;
+        synchronized (server) {
+            server.queue.clear();
+            server.writing = false;
+            server.subscribed = false;
+        }
         peerAddresses.values().removeAll(Collections.singleton(address));
         emitStatus();
     }
@@ -900,6 +1076,15 @@ public class FlockBlePlugin extends Plugin {
             if (x != y) return x < y ? -1 : 1;
         }
         return Integer.compare(a.length, b.length);
+    }
+
+    /** Arbitration: do WE initiate the connection to a peer with this advertised
+     *  tiebreak? Yes if ours is higher (or equal — a rare tie, both connect), or if
+     *  we can't read theirs (connect rather than risk nobody connecting). The peer
+     *  runs the mirror test, so exactly one side initiates when both reads succeed. */
+    private boolean shouldInitiate(byte[] peerTiebreak) {
+        if (tiebreak == null || peerTiebreak == null || peerTiebreak.length == 0) return true;
+        return compareUnsigned(tiebreak, peerTiebreak) >= 0;
     }
 
     /** Last 5 chars of an address — concise, non-identifying log token. */
@@ -951,14 +1136,17 @@ public class FlockBlePlugin extends Plugin {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
             if (!running || result == null || result.getDevice() == null) return;
-            // NOTE: full role arbitration (only the higher tiebreak connects) would
-            // give exactly one link per pair, but the frame characteristic is
-            // write-only (client→server), so a single link is UNIDIRECTIONAL. Until
-            // the mesh slice adds NOTIFY (server→client) for a bidirectional single
-            // link, BOTH sides connect as client (bidirectional). The storm that
-            // caused is tamed by the global throttle + link cap + backoff in
-            // connect(). The tiebreak is still advertised, ready for that slice.
-            connect(result.getDevice());
+            // Role arbitration: of any two peers, only the one with the HIGHER
+            // tiebreak initiates the GATT connection; the lower yields and is served
+            // over the reverse NOTIFY channel instead. One link per pair — critical
+            // for the crowd mesh (BLE caps ~7 connections). Safe now that the INBOX
+            // characteristic makes a single link bidirectional. If we cannot read
+            // the peer's tiebreak (older peer / advert clipped), we connect anyway —
+            // worst case two links, never zero, so no pair can deadlock.
+            byte[] peerTiebreak = null;
+            ScanRecord record = result.getScanRecord();
+            if (record != null) peerTiebreak = record.getManufacturerSpecificData(MANUF_ID);
+            if (shouldInitiate(peerTiebreak)) connect(result.getDevice());
         }
 
         @Override
@@ -984,6 +1172,75 @@ public class FlockBlePlugin extends Plugin {
     };
 
     private final BluetoothGattServerCallback serverCallback = new BluetoothGattServerCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+            if (device == null) return;
+            String address = device.getAddress();
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                // A peer connected to our server (they won arbitration on their side).
+                // Track it so we can NOTIFY back once they subscribe to the CCCD.
+                serverLinks.computeIfAbsent(address, ignored -> new ServerLink(device));
+                Log.d(TAG, "server: peer connected " + tail(address));
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                Log.d(TAG, "server: peer disconnected " + tail(address));
+                closeServerLink(address);
+            }
+            emitStatus();
+        }
+
+        @Override
+        @SuppressLint("MissingPermission")
+        public void onDescriptorWriteRequest(
+            BluetoothDevice device,
+            int requestId,
+            BluetoothGattDescriptor descriptor,
+            boolean preparedWrite,
+            boolean responseNeeded,
+            int offset,
+            byte[] value
+        ) {
+            boolean handled = false;
+            if (running && device != null && descriptor != null && CCCD_UUID.equals(descriptor.getUuid()) && value != null) {
+                boolean enable = value.length >= 2 && (value[0] & 0xff) != 0; // ENABLE_NOTIFICATION_VALUE = {0x01,0x00}
+                ServerLink server = serverLinks.computeIfAbsent(device.getAddress(), ignored -> new ServerLink(device));
+                synchronized (server) {
+                    server.subscribed = enable;
+                }
+                handled = true;
+                Log.d(TAG, "server: " + (enable ? "subscribed " : "unsubscribed ") + tail(device.getAddress()));
+                if (enable) mainHandler.post(() -> flushServer(server)); // drain anything queued before subscribe
+            }
+            if (responseNeeded && gattServer != null) {
+                gattServer.sendResponse(device, requestId, handled ? BluetoothGatt.GATT_SUCCESS : BluetoothGatt.GATT_FAILURE, offset, null);
+            }
+            emitStatus();
+        }
+
+        @Override
+        public void onMtuChanged(BluetoothDevice device, int mtu) {
+            if (device == null) return;
+            ServerLink server = serverLinks.get(device.getAddress());
+            if (server != null && mtu > 0) server.mtu = mtu;
+            emitStatus();
+        }
+
+        @Override
+        public void onNotificationSent(BluetoothDevice device, int status) {
+            if (device == null) return;
+            ServerLink server = serverLinks.get(device.getAddress());
+            if (server == null) return;
+            synchronized (server) {
+                server.writing = false;
+            }
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                mainHandler.post(() -> flushServer(server));
+            } else {
+                rememberError("BLE notification failed (" + status + ")");
+                closeServerLink(device.getAddress());
+            }
+            emitStatus();
+        }
+
         @Override
         @SuppressLint("MissingPermission")
         public void onCharacteristicWriteRequest(
@@ -1084,8 +1341,26 @@ public class FlockBlePlugin extends Plugin {
             link.characteristic = characteristic;
             link.serviceDiscoveryAttempts = 0;
             Log.d(TAG, "linked " + tail(address) + " (frame characteristic ready)");
+            // Subscribe to the peer's NOTIFY channel so this single link is
+            // bidirectional (they WRITE to us is not applicable here — WE are the
+            // client, so THEY notify US over INBOX). Best-effort: if the peer is an
+            // older build with no inbox characteristic, we still have the write path.
+            subscribeInbox(gatt, service);
             emitStatus();
             mainHandler.post(() -> flush(link));
+        }
+
+        @Override
+        @SuppressWarnings("deprecation")
+        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+            if (characteristic == null || !INBOX_CHARACTERISTIC_UUID.equals(characteristic.getUuid())) return;
+            handleChunk(addressFor(gatt), characteristic.getValue());
+        }
+
+        @Override
+        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value) {
+            if (characteristic == null || !INBOX_CHARACTERISTIC_UUID.equals(characteristic.getUuid())) return;
+            handleChunk(addressFor(gatt), value);
         }
 
         @Override
@@ -1135,6 +1410,24 @@ public class FlockBlePlugin extends Plugin {
             }
             queue.clear();
             writing = false;
+        }
+    }
+
+    /** A peer that connected to OUR GATT server (they won arbitration). We reach
+     *  them by NOTIFYing the INBOX characteristic — the reverse of a client Link.
+     *  The OS owns the connection; we only hold the outbound queue + subscribe/MTU
+     *  state. */
+    private static final class ServerLink {
+        final String address;
+        final BluetoothDevice device;
+        final Queue<byte[]> queue = new ArrayDeque<>();
+        int mtu = 23;
+        boolean subscribed = false;
+        boolean writing = false;
+
+        ServerLink(BluetoothDevice device) {
+            this.device = device;
+            this.address = device.getAddress();
         }
     }
 

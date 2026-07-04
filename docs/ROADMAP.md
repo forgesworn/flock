@@ -297,6 +297,27 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
     the kit repo — its gates are green; consider flipping the repo public to
     match the sibling kits) → then swap flock's vendored
     `vendor/keystore-kit-0.1.0.tgz` dep to a version range and delete `vendor/`.
+- [~] **BLE-nearby transport** — the first rung of the off-relay ladder (opaque
+  `kind:1059` wraps phone-to-phone over Bluetooth LE when circle members are
+  co-located; no relay, no cell, no internet). **Strictly additive** — native-only,
+  opt-in, off by default; the relay path is byte-identical when off. Design +
+  two-mode rationale in `docs/plans/2026-07-04-ble-nearby-transport.md`.
+  - [x] **Spike + Slice 1 (hardened, shipped `19111e5`)** — rotating members-only
+    advertId (`app/src/bleId.ts`), the forked `FlockBlePlugin`, the additive tap;
+    proven A32↔Pixel with all radios off (relay impossible). Slice 1 tamed the
+    GrapheneOS rotating-address connection storm (global throttle + link cap +
+    backoff + native logging).
+  - [x] **Slice 2 — bidirectional single link + crowd mesh** (built, unit-tested,
+    APK installed both devices). A **NOTIFY** characteristic carries server→client,
+    so re-enabled **role arbitration** gives one link per pair (BLE caps ~7 conns).
+    A hop-count envelope floods/relays in crowd mode; discreet stays single-hop.
+  - [x] **Slice 3 — JS mesh integration** — `syncBle` picks discreet (per-circle
+    advertId) vs **crowd mesh** (common daily `meshUuid`) from festival "find each
+    other"; `onBleFrame` decrypts across **all** circles; festival↔mesh wired.
+  - [ ] **Validate the mesh path on hardware** — the live 2-device exchange
+    (arbitration → 1 bidirectional link; NOTIFY reverse direction) + 3-device
+    multi-hop. Needs both phones unlocked/driven (A32 is PIN-locked to adb). The
+    code compiles + boots on-device; peer exchange is **not yet field-proven**.
 - [ ] **mesh-kit** / **mesh-webrtc-lan** — off-relay LAN transport (no internet).
 - [ ] **LoRa mesh transport** — phone ↔ a pocket LoRa device over **BLE**, via **Meshtastic** or **MeshCore**. flock signals ride as opaque **E2E-encrypted bytes** (already true post gift-wrap-everything) over the LoRa mesh → works **fully off-grid** (no relay, no cell, no internet) — the ultimate "the relay can't track you". Web Bluetooth (Android/GrapheneOS Chromium) for the PWA; **Capacitor BLE** for iOS. **Rides on the `intermesh-plans` Meshtastic↔MeshCore/MQTT substrate** (active spike). Slots behind the same transport seam (`services.ts`).
 

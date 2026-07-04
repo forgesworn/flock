@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { advertId, advertIdNow, advertIdsToScan, bleWindow, BLE_WINDOW_SECONDS } from './bleId'
+import {
+  advertId,
+  advertIdNow,
+  advertIdsToScan,
+  bleWindow,
+  BLE_WINDOW_SECONDS,
+  BLE_MESH_EPOCH_SECONDS,
+  meshEpoch,
+  meshUuid,
+  meshUuidNow,
+} from './bleId'
 
 const SEED_A = 'a'.repeat(64)
 const SEED_B = 'b'.repeat(64)
@@ -73,5 +83,43 @@ describe('advertIdNow / advertIdsToScan', () => {
     const advertising = advertIdNow(SEED_A, now)
     const scannerOneWindowAhead = advertIdsToScan([SEED_A], now + BLE_WINDOW_SECONDS)
     expect(scannerOneWindowAhead).toContain(advertising)
+  })
+})
+
+// The common crowd-mesh discovery UUID — the deliberate opposite of advertId: NOT
+// members-only, so any two flock phones in a crowd connect and flood opaque wraps
+// across overlapping circles. These tests pin the properties that keep it a
+// daily-rotating proximity signal rather than a permanent, circle-linked tracker.
+describe('meshUuid / meshUuidNow', () => {
+  it('is a well-formed v4 UUID', () => {
+    expect(meshUuid(19_000)).toMatch(UUID_RE)
+  })
+
+  // Keyless + deterministic: every flock device computes the SAME UUID per day
+  // (that is the whole point — crowd mode spans circles that share no secret).
+  it('is deterministic per epoch across devices', () => {
+    expect(meshUuid(19_000)).toBe(meshUuid(19_000))
+  })
+
+  // Daily rotation: not a permanent beacon.
+  it('rotates every epoch', () => {
+    expect(meshUuid(19_000)).not.toBe(meshUuid(19_001))
+  })
+
+  // It takes no seed at all — it must not coincide with any circle's advertId.
+  it('is independent of any circle seed', () => {
+    expect(meshUuid(19_000)).not.toBe(advertId(SEED_A, 19_000))
+    expect(meshUuid(19_000)).not.toBe(advertId(SEED_B, 19_000))
+  })
+
+  it('meshEpoch buckets unix seconds into the daily epoch', () => {
+    expect(meshEpoch(0)).toBe(0)
+    expect(meshEpoch(BLE_MESH_EPOCH_SECONDS - 1)).toBe(0)
+    expect(meshEpoch(BLE_MESH_EPOCH_SECONDS)).toBe(1)
+  })
+
+  it('meshUuidNow is the current epoch s UUID', () => {
+    const now = 19_000 * BLE_MESH_EPOCH_SECONDS + 5
+    expect(meshUuidNow(now)).toBe(meshUuid(19_000))
   })
 })

@@ -106,16 +106,24 @@ explicit "I'm in a crowd" festival signal.
   like the relay multi-inbox subscription), and applies in both modes.
 
 **Slicing:**
-1. **Harden the connection layer (both modes):** role arbitration (advertised
-   tiebreak → only the higher side initiates, kills dual-role glare / "out of
-   resources"), reconnect backoff, and native logging. *(This slice — the spike's
-   churn fix; foundational for the mesh.)*
-2. **Mesh transport:** common daily `meshUuid`, TTL envelope + flood/relay,
-   connection cap, a mode flag from JS.
-3. **JS integration:** `syncBle` picks discreet vs mesh (festival active →
-   mesh); `onBleFrame` decrypts across all circles; wire festival → crowd mode.
-4. **Validate on-device** (multi-hop truly needs ≥3 phones; 2 proves mesh-mode
-   delivery + decrypt-all-circles, not relay depth — log the gap).
+1. ✅ **Harden the connection layer** (shipped `19111e5`): reconnect backoff,
+   global connect throttle + link cap, native logging. Role arbitration was
+   deferred here (write-only characteristic → a single link was unidirectional).
+2. ✅ **Mesh transport** (built): a **NOTIFY** characteristic (server→client) makes
+   a single link bidirectional, so role **arbitration** is re-enabled (advertised
+   tiebreak → only the higher side initiates → one link per pair). A hop-count
+   (`h`) envelope floods/relays in crowd mode; the common daily `meshUuid` and the
+   `hops` mode flag come from JS. Discreet mode = `hops 0` (single-hop, no relay).
+3. ✅ **JS integration** (built): `syncBle` picks discreet vs mesh (any circle in
+   "find each other" → mesh, common `meshUuid`); `onBleFrame` dedups once then
+   decrypts across **all** circles; `publishSignal` floods every circle's wrap in
+   mesh mode; festival start/stop/expiry re-sync the mode (transition-tracked so
+   the radio isn't restarted every tick).
+4. ⏳ **Validate on-device** — the live 2-device exchange (arbitration → 1
+   bidirectional link; NOTIFY reverse direction) + 3-device multi-hop. Code
+   compiles + boots on real hardware; the peer exchange is **not yet field-proven**
+   (needs both phones unlocked/driven). 2 phones prove mesh-mode delivery +
+   decrypt-all-circles, not relay depth — log the gap.
 
 ## Reuse map (from the survey)
 
