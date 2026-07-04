@@ -1,7 +1,24 @@
 # flock — the goal
 
-One line: **a safety net for the people you actually trust, that no company
-gets to hold, sell, subpoena, or lose.**
+## THE GOAL
+
+**A phone in a pocket, screen off, tracks and alerts exactly as reliably as
+one held in your hand, open, staring at it.** Right now it doesn't — that's
+the single biggest thing standing between flock and what it's for. Everything
+else in this document is context for why that's the goal and what it's in
+service of; it is not a substitute for it.
+
+Concretely, right now: fix background publish (see
+[`docs/plans/2026-07-05-native-background-publish.md`](plans/2026-07-05-native-background-publish.md)) —
+move the fix→beacon→publish pipeline into native code so it keeps working
+when Android suspends the WebView's JS in the background. That is the
+literal next thing to build. Everything below is why it matters and what it
+has to be consistent with while we build it.
+
+## One line
+
+A safety net for the people you actually trust, that no company gets to
+hold, sell, subpoena, or lose.
 
 This document is the "why" and "what we're building toward" — the thing every
 other doc, plan, and line of code should trace back to. `README.md` is the
@@ -127,18 +144,16 @@ locked and unlocked) validated a lot of it working exactly as intended:
   toggling sharing, responding to a roll-call, sending a message — worked
   instantly and correctly, every time, all night.
 
-## The one gap that matters most right now
+## The evidence behind THE GOAL
 
-**Background reliability is not yet good enough for the product's own
-promise.** Tonight surfaced this clearly and repeatedly: a phone locked and
-carried while walking produced one location jump instead of continuous
-tracking; Android's own location indicator went dark the moment the app left
-the foreground; a "your phone was reported lost" alert only appeared once the
-recipient reopened the app, never as a background notification — even with
-every relevant permission and battery setting confirmed correct.
+Tonight, live, at a real event: a phone locked and carried while walking
+produced one location jump instead of continuous tracking; Android's own
+location indicator went dark the moment the app left the foreground; a
+"your phone was reported lost" alert only appeared once the recipient
+reopened the app, never as a background notification — even with every
+relevant permission and battery setting confirmed correct.
 
-The root cause is now understood precisely (see
-[`docs/plans/2026-07-05-native-background-publish.md`](plans/2026-07-05-native-background-publish.md)):
+The root cause is now understood precisely (see the plan doc linked above):
 native GPS sampling likely keeps working via the foreground service, but
 delivering that fix into JavaScript — and everything downstream of it
 (cadence gating, encryption, gift-wrap, publish) — depends on the WebView
@@ -147,13 +162,6 @@ backgrounded. The fix isn't a setting; it's moving that pipeline into native
 code, sharing infrastructure with the existing (also not-yet-built) plan for
 receiving alerts in the background
 ([`docs/plans/2026-06-30-background-inbound.md`](plans/2026-06-30-background-inbound.md)).
-
-This matters more than any single feature because **this is the product's
-core promise**: a kid's phone in their pocket, a night out where nobody is
-staring at their screen, a domestic-safety scenario where the phone has to
-work unattended. A safety app that only reliably works while someone is
-actively looking at it is not yet the thing flock is trying to be. Closing
-this gap is the highest-priority work ahead of it.
 
 ## Roadmap shape
 
