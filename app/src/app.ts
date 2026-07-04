@@ -15,6 +15,7 @@ import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shou
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
+import { createMeshBuffer, remember as rememberMeshWrap, liveEntries as liveMeshEntries, type MeshBufferState } from './meshBuffer'
 import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, wordInviteParkKey, buildWordInviteRef, readWordInviteRef, buildWordInviteDeletion } from './wordcode'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -192,6 +193,16 @@ function markWrapSeen(id: string): boolean {
   if (seenWrapIds.size > 1000) seenWrapIds.delete(seenWrapIds.values().next().value as string)
   return true
 }
+// Mesh v2 store-and-forward (app/src/meshBuffer.ts): wraps seen in crowd-mesh
+// mode are RETAINED (200 wraps / 15 min TTL) and re-offered to later-arriving
+// peers on the next mesh (re)start — today a frame floods only to peers
+// connected at that instant, so a phone walking into range a minute later got
+// nothing. Only touched in mesh mode; discreet mode stays single-hop, as
+// designed. A full peer-connect manifest handshake (DarkFi tips-DAG-style) is
+// hardware-gated — see docs/plans/2026-07-04-ble-mesh-v2-test-plan.md — this
+// is the pure retention half plus a best-effort periodic re-flood using only
+// the EXISTING plugin surface (broadcastBle), needing no native changes.
+let meshBuffer: MeshBufferState = createMeshBuffer()
 // The open private-chat thread sheet, when any: the peer's pubkey. Mounted as an
 // overlay (like the old compose sheet) so opening it never tears the map.
 let dmPeer: string | null = null
@@ -520,6 +531,14 @@ async function syncBle(): Promise<void> {
       await ble.startBle({ room: uuid, selfId: id.pk, serviceUuid: uuid, hops }, onBleFrame)
       bleActive = true
       bleMode = mesh ? 'mesh' : 'discreet'
+      // Mesh v2 store-and-forward: re-offer everything still-live in the buffer
+      // on every mesh (re)start — the JS-level approximation of "re-advertise
+      // to later-arriving peers" until a native peer-connect hook exists (see
+      // the test-plan doc). Best-effort; a peer who already has an entry just
+      // dedups it (markWrapSeen on their side).
+      if (bleMode === 'mesh') {
+        for (const entry of liveMeshEntries(meshBuffer, nowSec())) void ble.broadcastBle(entry.data)
+      }
     } else if (bleActive || ble.bleRunning()) {
       await ble.stopBle()
       bleActive = false
@@ -606,6 +625,10 @@ function onBleFrame(data: string): void {
   try { ev = JSON.parse(data) } catch { return }
   if (typeof ev?.id !== 'string' || typeof ev.pubkey !== 'string' || typeof ev.content !== 'string') return
   if (bleActive && !markWrapSeen(ev.id)) return
+  // Mesh v2 store-and-forward: retain it (mesh mode only — discreet stays
+  // single-hop) so a peer who walks into range after this instant still gets
+  // it on the next mesh (re)start (see syncBle's re-flood, above).
+  if (bleMode === 'mesh') meshBuffer = rememberMeshWrap(meshBuffer, { id: ev.id, data }, nowSec())
   const wrap = { pubkey: ev.pubkey, content: ev.content, id: ev.id }
   for (const c of persisted.circles) void dispatchWrap(c.id, wrap, deriveInbox(c.seedHex).sk)
   // BRIDGE: a wrap that reached me over Bluetooth may have come from a phone
@@ -3765,6 +3788,7 @@ function resetDevice(): void {
   circleStates.clear()
   beaconCadence.clear()
   coverCadence.clear()
+  meshBuffer = createMeshBuffer()
   persisted = store.load()
   onboardStep = 'intro'
   tab = 'home'
@@ -3804,6 +3828,18 @@ async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: s
   // (onBleFrame) dedups once up front then calls dispatchWrap per circle directly,
   // so it never consumes this guard on a circle that simply fails to decrypt.
   if (bleActive && wrap.id && !markWrapSeen(wrap.id)) return
+  // Mesh v2 downlink bridging: a phone with relay connectivity floods what it
+  // JUST received DOWN into the mesh too — the mirror of onBleFrame's uplink
+  // bridge, so members out of relay range but still BLE-meshed hear it. Gated
+  // on crowd-mesh actually being active (festival) and the wrap being newly
+  // seen (the markWrapSeen check above already ran); same buffer as every
+  // other mesh frame, so it's also re-offered to later-arriving peers.
+  if (bleActive && bleMode === 'mesh' && wrap.id && persisted.circles.some((x) => festivalActive(x))) {
+    const id = wrap.id
+    const frame = JSON.stringify({ id, pubkey: wrap.pubkey, content: wrap.content })
+    meshBuffer = rememberMeshWrap(meshBuffer, { id, data: frame }, nowSec())
+    try { const ble = await import('../../native/ble'); await ble.broadcastBle(frame) } catch { /* best-effort */ }
+  }
   await dispatchWrap(circleId, wrap, inboxSk)
 }
 
