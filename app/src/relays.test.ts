@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseRelayList, resolveRelays, PRIVATE_RELAYS } from './relays'
+import { parseRelayList, resolveRelays, isKnownNoLogRelay, unknownRelays, PRIVATE_RELAYS } from './relays'
 
 describe('parseRelayList', () => {
   it('splits one-per-line and trims each', () => {
@@ -51,5 +51,24 @@ describe('resolveRelays (persisted-state migration)', () => {
     expect(resolveRelays({ relayUrls: [] })).toEqual([...PRIVATE_RELAYS])
     expect(resolveRelays({ relayUrls: ['nope', 'http://x'] })).toEqual([...PRIVATE_RELAYS])
     expect(resolveRelays({ relayUrl: 'not-a-relay' })).toEqual([...PRIVATE_RELAYS])
+  })
+})
+
+// F5 hardening: the settings relay textarea used to accept any relay silently —
+// warn when one falls outside the pre-vetted no-log set, so adding a random
+// public relay is a deliberate, informed choice rather than a silent leak.
+describe('isKnownNoLogRelay / unknownRelays (F5 — warn on an unvetted relay)', () => {
+  it('every PRIVATE_RELAYS entry is known', () => {
+    for (const r of PRIVATE_RELAYS) expect(isKnownNoLogRelay(r)).toBe(true)
+  })
+
+  it('a relay outside the vetted set is not known', () => {
+    expect(isKnownNoLogRelay('wss://nos.lol')).toBe(false)
+    expect(isKnownNoLogRelay('wss://some-random-relay.example')).toBe(false)
+  })
+
+  it('unknownRelays returns only the entries outside the vetted set, order preserved', () => {
+    expect(unknownRelays([...PRIVATE_RELAYS, 'wss://nos.lol'])).toEqual(['wss://nos.lol'])
+    expect(unknownRelays([...PRIVATE_RELAYS])).toEqual([])
   })
 })

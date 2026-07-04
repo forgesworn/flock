@@ -54,6 +54,19 @@ export function parseRelayList(text: string): string[] {
   return cleanRelays(String(text ?? '').split(/[\s,]+/))
 }
 
+/** Whether a relay URL is one of the pre-vetted, trusted-not-to-log set. Anything
+ *  else is unknown — added at the user's own risk (audit F5: the settings
+ *  textarea used to accept and save any relay with no warning at all). */
+export function isKnownNoLogRelay(url: string): boolean {
+  return (PRIVATE_RELAYS as readonly string[]).includes(url)
+}
+
+/** The entries in `list` that fall outside the vetted set, in order — empty when
+ *  every relay is known. Drives the honest warning in Settings (F5). */
+export function unknownRelays(list: readonly string[]): string[] {
+  return list.filter((r) => !isKnownNoLogRelay(r))
+}
+
 /** The effective relay set from persisted state: prefer a saved `relayUrls` list,
  *  migrate a legacy single `relayUrl`, and always return a non-empty, cleaned set
  *  (falling back to PRIVATE_RELAYS when nothing usable is saved). */

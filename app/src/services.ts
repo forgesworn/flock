@@ -2,7 +2,7 @@
 
 import { SimplePool } from 'nostr-tools/pool'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
-import type { FlockSigner, EventTemplate } from './signer'
+import type { EventTemplate } from './signer'
 
 export type { EventTemplate }
 export interface Fix { lat: number; lon: number; accuracy: number; at: number }
@@ -53,13 +53,6 @@ async function fanOut(relays: readonly string[], signed: unknown): Promise<void>
   const attempts = getPool().publish([...relays], signed as never).map((p) => withTimeout(p, PUBLISH_TIMEOUT_MS))
   const results = await Promise.allSettled(attempts)
   if (deliveredCount(results) === 0) throw new Error('No relay accepted the event')
-}
-
-/** Sign an unsigned flock builder event via the signer and fan it out to the relays. */
-export async function publishEvent(relays: readonly string[], template: EventTemplate, signer: FlockSigner) {
-  const signed = await signer.signEvent(template)
-  await fanOut(relays, signed)
-  return signed
 }
 
 /** Fan an already-signed event (e.g. a NIP-59 gift wrap) out to the relays. */
@@ -123,20 +116,6 @@ export function subscribeGiftWraps(
   const sub = getPool().subscribeMany(
     [...relays],
     { kinds: [1059], '#p': [pTag] },
-    { onevent: onEvent },
-  )
-  return () => sub.close()
-}
-
-/** Subscribe to a circle's kind-20078 signals by hashed d-tag, across all relays. Returns an unsubscribe fn. */
-export function subscribeSignals(
-  relays: readonly string[],
-  dTag: string,
-  onEvent: (e: { pubkey: string; content: string; tags: string[][]; created_at: number }) => void,
-): () => void {
-  const sub = getPool().subscribeMany(
-    [...relays],
-    { kinds: [20_078], '#d': [dTag] },
     { onevent: onEvent },
   )
   return () => sub.close()

@@ -6,7 +6,7 @@ import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
 import { buildSignInOptions } from './signin'
-import { PRIVATE_RELAYS, parseRelayList } from './relays'
+import { PRIVATE_RELAYS, parseRelayList, unknownRelays } from './relays'
 import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { getProfile, fetchProfiles } from './profiles'
@@ -3302,7 +3302,12 @@ function saveRelay(): void {
   store.save(persisted)
   ensureInviteSub()
   ensureSubscriptions()
-  toast(relays.length > 1 ? `Saved ${relays.length} relays` : 'Relay saved')
+  // F5: a relay outside our vetted no-log set used to save silently — an
+  // unvetted server still sees opaque wraps' timing + your IP, so say so.
+  const unknown = unknownRelays(relays)
+  toast(unknown.length
+    ? `Saved. ${unknown.length} of ${relays.length} ${unknown.length === 1 ? "isn't" : "aren't"} on our vetted no-log list — only add a server you trust not to log.`
+    : (relays.length > 1 ? `Saved ${relays.length} relays` : 'Relay saved'))
 }
 
 /** Leave a circle (local removal). Defaults to the active one; the chip menu
