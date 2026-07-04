@@ -41,6 +41,37 @@ the member is guaranteed inside the square, whose centre is the grid's, never
 their position; the old circular halo only approximated it (a member near a
 cell corner sat outside the inscribed circle).
 
+## Chat-led Home & reliability (2026-07-04 pm)
+
+- [x] **Map-led scrollable Home**: hero map → presence **member strip** →
+  **circle chat** — one Signal-style thread per circle (mine right-aligned,
+  senders named, times shown), quick actions as composer preset chips, all
+  persisted (`store.chats`, capped, deduped against relay replays by the
+  rumor's `(from, at, text)` triple). **PMs are full 1:1 thread sheets** and
+  live under **You → Private chats** with unread badges (nav badges on
+  Home/You). You leads with the person; settings fold behind "Settings…".
+- [x] **Locked-screen sharing fixed at the root** (GrapheneOS field report):
+  Doze suspends the WebView's relay socket unless flock is battery-exempt —
+  exemption now requested when sharing starts + an actionable Home card.
+- [x] **Reconnect fix**: `SimplePool({ enableReconnect, enablePing })` — one
+  socket drop no longer kills incoming until an app restart.
+- [x] **Update-nag chain closed end-to-end**: apk.json + Caddy conf live,
+  `flock-12629e4.apk` published (the first APK whose update check compares
+  against the published-APK marker, not the website deploy).
+- [x] **Precision slider self-change fixed**: drag-deferred panel rebuilds +
+  a detached slider's stale `change` is ignored.
+- [x] **Check-in roll-call**: fans to EVERY circle with an encrypted
+  `ask:'location'`; recipients sharing freshen their beacon, others get an
+  explicit "share once?" card at their own detail — never automatic (§6).
+- [x] **MessagingStyle conversation notifications** (one per conversation,
+  updated in place, cleared when the app comes forward).
+- [x] **BLE→relay bridge v1**: a wrap received over Bluetooth re-publishes to
+  the relays from any connected phone (opt-in, deduped, best-effort).
+- [ ] **Mesh & bridge v2 + audit hardening + Tor toggle** — the executable
+  goal in `docs/plans/2026-07-04-mesh-bridge-goal.md` (running on a Sonnet 5
+  agent, branch `mesh-bridge-goal`). Audit:
+  `docs/research/2026-07-04-relay-privacy-audit.md`.
+
 ## Lost phone ("back of a taxi")
 
 A phone that is *sharing* is a findable phone — that's the pitch for leaving
