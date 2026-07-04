@@ -27,6 +27,8 @@ import { registerPlugin } from '@capacitor/core'
 interface FlockNotifyPlugin {
   notify(opts: { id?: number; channelId: string; title: string; body: string; group?: string }): Promise<void>
   ring(opts: { id?: number; title: string; body: string; group?: string }): Promise<void>
+  checkDndAccess(): Promise<{ granted: boolean }>
+  openDndAccessSettings(): Promise<void>
 }
 const FlockNotify = registerPlugin<FlockNotifyPlugin>('FlockNotify')
 
@@ -91,6 +93,17 @@ export async function ensureNotifyPermission(): Promise<void> {
     if (s.display !== 'granted') await LocalNotifications.requestPermissions()
   } catch { /* denied or unavailable — notify() becomes a no-op */ }
   await ensureChannels()
+}
+
+/** Whether flock is allowed to bypass Do Not Disturb (needed for "Make it ring"
+ *  to sound in full DND). False on any non-native / older shell. */
+export async function hasDndAccess(): Promise<boolean> {
+  try { return (await FlockNotify.checkDndAccess()).granted } catch { return false }
+}
+
+/** Open the system Do Not Disturb access screen so the user can grant flock. */
+export async function openDndAccessSettings(): Promise<void> {
+  try { await FlockNotify.openDndAccessSettings() } catch { /* older shell — no-op */ }
 }
 
 /** Raise a system notification on the channel for its kind. Body is the app's

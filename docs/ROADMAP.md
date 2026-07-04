@@ -74,9 +74,13 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   only — never discloses location or changes what's shared; decoy-safe (a hidden
   app has no subscription, so it can't ring). FLOCK.md §6.8. e2e
   `make-it-ring.spec.ts` (B flags A lost → B rings → A's phone goes to the
-  ringing card → A clears it) green over the live relay. *(Follow-up: the DND
-  bypass needs the user to grant notification-policy access — an in-app affordance
-  to request it is unbuilt; the alarm stream already sounds through silent.)*
+  ringing card → A clears it) green over the live relay. **DND-access affordance
+  shipped (2026-07-04):** You → Notifications → "Ring through Do Not Disturb"
+  shows the grant status and a one-tap **Allow** that opens the system DND-access
+  screen (`FlockNotifyPlugin.checkDndAccess`/`openDndAccessSettings`,
+  `native/notify.ts` `hasDndAccess`/`openDndAccessSettings`; re-checked on the You
+  tab + return-to-foreground). Native-only; without the grant the alarm still
+  sounds through silent, just not full DND. *(On-device validation pending.)*
 - [x] **Remote exact ping ("find my phone")** (2026-07-04): a member asks; the
   lost device answers with a **one-shot exact beacon** (reusing the come-to-me
   answer, refactored to `sendExactBeacon`). **The consent design was the work**

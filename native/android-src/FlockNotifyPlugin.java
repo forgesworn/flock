@@ -30,8 +30,10 @@ import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -162,6 +164,29 @@ public class FlockNotifyPlugin extends Plugin {
 
   private int AudioManagerStreamAlarm() {
     return android.media.AudioManager.STREAM_ALARM;
+  }
+
+  // Is flock allowed to bypass Do Not Disturb? Channel-level setBypassDnd(true)
+  // (on the ring channel) only takes effect once the user grants this special
+  // access; without it the alarm still sounds on the alarm stream through silent,
+  // just not full DND. This lets the UI show whether the grant is in place.
+  @PluginMethod
+  public void checkDndAccess(PluginCall call) {
+    NotificationManager nm = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+    boolean granted = nm != null && nm.isNotificationPolicyAccessGranted();
+    JSObject ret = new JSObject();
+    ret.put("granted", granted);
+    call.resolve(ret);
+  }
+
+  // Open the system "Do Not Disturb access" screen so the user can grant flock.
+  // A one-time settings trip — we can't grant it programmatically.
+  @PluginMethod
+  public void openDndAccessSettings(PluginCall call) {
+    Intent i = new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS);
+    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    getContext().startActivity(i);
+    call.resolve();
   }
 
   // Tapping opens flock (the launcher activity), like every other notification.

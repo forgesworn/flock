@@ -126,6 +126,10 @@ let findPingPending: { circleId: string; from: string; deadline: number } | null
 let findPingTimer = 0
 // Per-circle clock of when we last answered a find-ping — rate-limit (in-memory).
 const pingAnsweredAt = new Map<string, number>()
+// Native only: is flock allowed to bypass Do Not Disturb (so "Make it ring"
+// sounds in full DND)? null = not yet checked. Refreshed on the You tab and on
+// return-to-foreground (e.g. back from the settings screen).
+let dndAccess: boolean | null = null
 // The compose sheet, when open: a free-text message aimed at the whole group or one
 // member (their pubkey). Mounted as an overlay so opening it never tears the map.
 let compose: { target: 'group' | string } | null = null
@@ -400,6 +404,21 @@ function notifyIfHidden(msg: string, opts?: NotifyOpts): void {
   }
 }
 
+/** Re-read whether flock may bypass Do Not Disturb (native only); re-render only
+ *  if it changed, so calling it from render() converges (no loop). */
+async function refreshDndAccess(): Promise<void> {
+  if (!isNativeShell()) return
+  try {
+    const g = await (await import('../../native/notify')).hasDndAccess()
+    if (g !== dndAccess) { dndAccess = g; render() }
+  } catch { /* older shell / unsupported — leave as null */ }
+}
+
+/** Open the system Do Not Disturb access screen, then re-check on return. */
+function openDnd(): void {
+  void import('../../native/notify').then((n) => n.openDndAccessSettings()).catch(() => { /* shell only */ })
+}
+
 function toast(msg: string): void {
   // The hidden-gate also filters naturally: while the app is visible, toasts
   // stay in-app; while hidden, the only toasts firing are incoming signals
@@ -461,7 +480,7 @@ function bootUnlocked(): void {
   // Pause sampling when the app is backgrounded, resume when it returns — a hidden PWA
   // can't sample reliably anyway, so this is pure battery saved. `hidden` starts false
   // and only flips on a real visibilitychange, so headless/normal foreground always samples.
-  document.addEventListener('visibilitychange', () => { hidden = document.hidden; syncWatch() })
+  document.addEventListener('visibilitychange', () => { hidden = document.hidden; syncWatch(); if (!document.hidden) void refreshDndAccess() })
   if (import.meta.env.DEV) (window as unknown as { flockSampling?: () => boolean }).flockSampling = () => !!stopWatch // e2e seam (dev only)
   watchBattery() // battery-aware sampling (conserve when low + discharging)
   rehydratePresence() // restore cached member pins so a refresh doesn't blank the map
@@ -1039,6 +1058,7 @@ function circleView(): string {
 function youView(): string {
   const me = persisted.identity as store.Identity
   const c = activeCircle() as store.Circle
+  void refreshDndAccess() // native: reflect current DND-access grant (re-renders only if it changed)
   return `
     ${topbar()}
     <h2 style="margin-bottom:14px">You &amp; settings</h2>
@@ -1063,6 +1083,11 @@ function youView(): string {
         <button class="switch${persisted.stayReachable ? ' on' : ''}" data-action="toggle-stay-reachable" role="switch" aria-checked="${!!persisted.stayReachable}"><span class="knob"></span></button>
       </div>
       <div class="note">Keeps flock listening even when it's shut, so a message, buzz or safety alert reaches you on the lock screen — like Signal. It shows a quiet "staying reachable" notification while on and uses a little battery, and it's off whenever flock is hidden. If alerts stop arriving overnight, allow flock to ignore battery optimisation when asked.</div>
+      <div class="row" style="justify-content:space-between;margin-top:6px">
+        <span>Ring through Do Not Disturb</span>
+        ${dndAccess ? '<span class="pill active">allowed</span>' : '<button class="btn small" data-action="open-dnd">Allow</button>'}
+      </div>
+      <div class="note">Lets a lost-phone alarm ("Make it ring") sound even in Do Not Disturb. Without it the alarm still plays through silent — just not full DND.</div>
     </div>` : ''}
     <div class="section-title" style="margin-top:18px">Tips &amp; help</div>
     <div class="card stack">
@@ -2233,6 +2258,7 @@ function handleAction(action: string, node: HTMLElement): void {
     }
     case 'toggle-advanced': showAdvanced = !showAdvanced; render(); break
     case 'toggle-stay-reachable': void toggleStayReachable(); break
+    case 'open-dnd': openDnd(); break
     case 'reset-hints':
       persisted.hints = { on: true, dismissed: [] }
       store.save(persisted); toast('Tips are back on'); render(); break
