@@ -69,8 +69,10 @@ export async function readMeetingExactWrap(signer: FlockSigner, wrap: { pubkey: 
 // the seal (the rumor's real pubkey), never carried in plaintext.
 interface DmPayload { t: 'dm'; c: string; text: string }
 
-/** A decrypted direct message: who sent it, which circle it belongs to, the text. */
-export interface DirectMessage { from: string; circleId: string; text: string }
+/** A decrypted direct message: who sent it, which circle it belongs to, the text,
+ *  and when (the rumor's own created_at — stable across relay replays, which is
+ *  what lets the chat thread deduplicate an echoed wrap). */
+export interface DirectMessage { from: string; circleId: string; text: string; at: number }
 
 // A single wrap can't carry a novel, and an oversized message is a memory/notify
 // hazard — bound it. Trimmed on the way out so a fat paste can't smuggle length.
@@ -93,7 +95,7 @@ export async function readDmWrap(signer: FlockSigner, wrap: { pubkey: string; co
     if (o.t !== 'dm' || typeof o.c !== 'string' || typeof o.text !== 'string') return null
     const text = o.text.trim().slice(0, MAX_DM_LEN)
     if (!text) return null
-    return { from: rumor.pubkey, circleId: o.c, text }
+    return { from: rumor.pubkey, circleId: o.c, text, at: rumor.created_at }
   } catch {
     return null
   }

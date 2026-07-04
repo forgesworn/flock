@@ -136,11 +136,65 @@ export interface Persisted {
    *  can't read it without having decrypted) so a decoy unhide can re-lock.
    *  Device-specific: excluded from backups, like the relay list. */
   lock?: { secret: string }
+  /** Circle chat history (circle id → messages, oldest first). On-device only —
+   *  the wire carries each message once, encrypted; this is the local copy that
+   *  makes the thread readable. Pruned with its circle; capped per thread.
+   *  Plaintext at rest unless the App lock is on (same story as everything here). */
+  chats?: Record<string, ChatMessage[]>
+  /** Private 1:1 threads (peer pubkey → messages, oldest first). Same rules. */
+  dms?: Record<string, ChatMessage[]>
+  /** Last-read unix sec per thread ('c:<circleId>' | 'd:<peerPk>') — unread badges. */
+  chatReadAt?: Record<string, number>
 }
 
 /** Helper-hint state: small "what & why" explanations shown while learning the
  *  app, each dismissible, all silencable from settings once comfortable. */
 export interface Hints { on: boolean; dismissed: string[] }
+
+// ── Chat history (circle chat + private 1:1 threads) ─────────────────────────
+/** One message in a thread. `from` is the sender's pubkey; `at` unix seconds
+ *  (the rumor's own timestamp, so a relay replay carries the identical triple). */
+export interface ChatMessage { from: string; text: string; at: number }
+
+/** Cap per thread — a safety app's chat is a running conversation, not an archive. */
+export const CHAT_MAX_PER_THREAD = 200
+
+/**
+ * Append a message to a thread, deduplicating relay replays: gift wraps are
+ * replayed on every fresh subscribe, and the SAME rumor decrypts to the same
+ * (from, at, text) triple — an exact match is an echo, not a new message.
+ * Returns null when nothing changed (echo), else a fresh capped list kept in
+ * `at` order so a delayed relay delivery still lands where it belongs.
+ */
+export function withChatMessage(list: ChatMessage[] | undefined, msg: ChatMessage, max = CHAT_MAX_PER_THREAD): ChatMessage[] | null {
+  const cur = list ?? []
+  if (cur.some((m) => m.at === msg.at && m.from === msg.from && m.text === msg.text)) return null
+  const next = [...cur, msg].sort((a, b) => a.at - b.at)
+  return next.length > max ? next.slice(next.length - max) : next
+}
+
+/** Keep only group threads whose circle still exists — leaving/disbanding a
+ *  circle must take its conversation with it. Pure; returns a fresh object. */
+export function pruneChats(chats: Record<string, ChatMessage[]> | undefined, circleIds: string[]): Record<string, ChatMessage[]> {
+  const live = new Set(circleIds)
+  const out: Record<string, ChatMessage[]> = {}
+  for (const [cid, list] of Object.entries(chats ?? {})) {
+    if (live.has(cid) && list.length) out[cid] = list
+  }
+  return out
+}
+
+/** Keep only 1:1 threads with people still in at least one of my circles —
+ *  when the last shared circle goes, so does the thread (ephemerality is the
+ *  point; nothing here should outlive the relationship that produced it). */
+export function pruneDms(dms: Record<string, ChatMessage[]> | undefined, knownPks: Iterable<string>): Record<string, ChatMessage[]> {
+  const known = new Set(knownPks)
+  const out: Record<string, ChatMessage[]> = {}
+  for (const [pk, list] of Object.entries(dms ?? {})) {
+    if (known.has(pk) && list.length) out[pk] = list
+  }
+  return out
+}
 
 /** Should this hint render? Fresh devices (undefined state) show everything. */
 export function hintShown(h: Hints | undefined, id: string): boolean {
@@ -239,6 +293,13 @@ function hydrate(o: Partial<Persisted> & { circle?: Circle | null; relayUrl?: st
   }
   // Rehydrate cached presence, but drop ancient pins and any circle we've since left.
   state.presence = prunePresence(o.presence ?? {}, state.circles.map((c) => c.id), now, PRESENCE_MAX_AGE_SEC)
+  // Chat threads follow their circle / their person — an expired night-out
+  // takes its conversation with it, and a 1:1 with someone no longer in any
+  // circle doesn't linger on disk.
+  state.chats = pruneChats(o.chats, state.circles.map((c) => c.id))
+  const knownPks = new Set<string>()
+  for (const c of state.circles) for (const pk of c.members ?? []) knownPks.add(pk)
+  state.dms = pruneDms(o.dms, knownPks)
   return state
 }
 

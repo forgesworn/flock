@@ -90,8 +90,12 @@ describe('private direct message (personal-inbox gift-wrap)', () => {
     const pTag = wrap.tags.find((t) => t[0] === 'p')?.[1]
     expect(pTag).toBe(personalInboxTag(bob.pubkey))
     expect(pTag).not.toBe(bob.pubkey)
-    // The sender is recovered from the seal (the rumor's pubkey), not carried in plaintext.
-    expect(await readDmWrap(bob, wrap)).toEqual({ from: alice.pubkey, circleId: 'circle-1', text: 'on my way to you' })
+    // The sender is recovered from the seal (the rumor's pubkey), not carried in
+    // plaintext — and `at` is the rumor's own stamp, stable across relay replays.
+    const dm = await readDmWrap(bob, wrap)
+    expect(dm).toMatchObject({ from: alice.pubkey, circleId: 'circle-1', text: 'on my way to you' })
+    expect(dm?.at).toBeTypeOf('number')
+    expect(Math.abs((dm?.at ?? 0) - Math.floor(Date.now() / 1000))).toBeLessThan(60)
   })
 
   it('is readable ONLY by the named recipient — the whole circle cannot read it (privacy invariant)', async () => {
