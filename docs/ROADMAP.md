@@ -67,10 +67,22 @@ cell corner sat outside the inscribed circle).
   updated in place, cleared when the app comes forward).
 - [x] **BLE→relay bridge v1**: a wrap received over Bluetooth re-publishes to
   the relays from any connected phone (opt-in, deduped, best-effort).
-- [ ] **Mesh & bridge v2 + audit hardening + Tor toggle** — the executable
-  goal in `docs/plans/2026-07-04-mesh-bridge-goal.md` (running on a Sonnet 5
-  agent, branch `mesh-bridge-goal`). Audit:
-  `docs/research/2026-07-04-relay-privacy-audit.md`.
+- [x] **Mesh & bridge v2 + audit hardening + Tor toggle** — executed by a
+  Sonnet 5 agent from `docs/plans/2026-07-04-mesh-bridge-goal.md`, reviewed and
+  merged same day (7 commits): dead bare-20078 paths deleted + unvetted-relay
+  warning (F5); cadence jitter + wire-identical `cover` traffic (F1); profile
+  fetch unbatched per pubkey (F3); word-invite hardened — **6 words, scrypt
+  2^17, parks an encrypted one-time REFERENCE not the seed, delete-on-fetch,
+  and a real bug fixed: kind 20079 was in Nostr's EPHEMERAL range so relays
+  never stored parked invites (now kind 8078)** (F4); FLOCK.md/PRIVACY.md
+  aligned to the wrap-everything wire model; opt-in fail-loud Tor `.onion`
+  toggle (Orbot detection, `ONION_RELAYS` empty until the onion service
+  exists); BLE mesh v2 store-and-forward buffer + manifest reconcile (pure TS,
+  tested; hardware verification per
+  `docs/plans/2026-07-04-ble-mesh-v2-test-plan.md`). DM forward secrecy
+  deliberately deferred (ratchet crypto deserves its own focused session).
+  **Not yet deployed** — the 6-word invite format should ship as a coordinated
+  site + APK pair. Audit: `docs/research/2026-07-04-relay-privacy-audit.md`.
 
 ## Lost phone ("back of a taxi")
 
