@@ -51,6 +51,13 @@ const PERMISSIONS = [
   // aggressive OEM (Samsung) freezes the stay-reachable service overnight.
   'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
   'android.permission.POST_NOTIFICATIONS',
+  // "Make it ring" (FlockNotifyPlugin.ring): a lost phone plays a targeted buzz
+  // as a loud alarm. USE_FULL_SCREEN_INTENT wakes the screen; ACCESS_NOTIFICATION_
+  // POLICY lets the alarm channel bypass Do Not Disturb (best-effort — the user
+  // must still grant DND access). Both degrade gracefully if absent/ungranted:
+  // the alarm still sounds on the alarm audio stream, through ring-silent.
+  'android.permission.USE_FULL_SCREEN_INTENT',
+  'android.permission.ACCESS_NOTIFICATION_POLICY',
 ]
 
 let xml = readFileSync(manifestPath, 'utf8')

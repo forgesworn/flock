@@ -12,6 +12,7 @@ import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, type BeaconCadence } from './cadence'
+import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import type { MapView, MapPoint } from './map'
@@ -105,6 +106,16 @@ let monitorTimer = 0
 // circle) or a private direct message (just me) — `private` flips the styling and
 // copy so a 1:1 message never reads as a circle-wide buzz.
 let activeBuzz: { from: string; reason: string; mine: boolean; circle?: string; private?: boolean } | null = null
+// Set on THIS phone when the circle is ringing it to find it (it's flagged lost
+// and a member buzzed it). Drives the loud "being rung" card on Home; recent-only
+// so a ring from an hour ago doesn't read as sounding right now. See app/src/ring.ts.
+let beingRung: { circleId: string; by: string; at: number } | null = null
+const RING_DISPLAY_WINDOW = 90 // seconds the "being rung" card stays loud after a ring
+function ringingBy(circleId: string): string | null {
+  if (!beingRung || beingRung.circleId !== circleId) return null
+  if (nowSec() - beingRung.at > RING_DISPLAY_WINDOW) return null
+  return beingRung.by
+}
 // The compose sheet, when open: a free-text message aimed at the whole group or one
 // member (their pubkey). Mounted as an overlay so opening it never tears the map.
 let compose: { target: 'group' | string } | null = null
@@ -372,7 +383,7 @@ function avatarHtml(pk: string, isMe: boolean, small = false): string {
  *  arriving with the screen off). `opts` route it to the right channel (private
  *  1:1 / group / alert) with its own heading and stack. Shell only; a silent
  *  no-op in the PWA. */
-type NotifyOpts = { kind?: 'dm' | 'group' | 'alert' | 'general'; title?: string; group?: string }
+type NotifyOpts = { kind?: 'dm' | 'group' | 'alert' | 'ring' | 'general'; title?: string; group?: string }
 function notifyIfHidden(msg: string, opts?: NotifyOpts): void {
   if (document.hidden && isNativeShell()) {
     void import('../../native/notify').then((n) => n.notify(msg, opts)).catch(() => { /* shell only */ })
@@ -820,6 +831,16 @@ function lostCard(c: store.Circle): string {
   const me = persisted.identity?.pk
   const rep = me ? memberLost(c.id, me) : null
   if (!me || !rep) return ''
+  // Louder still while the circle is actively ringing it (a member just buzzed
+  // it, and the alarm channel is sounding) — the finder's cue to look up.
+  const rungBy = ringingBy(c.id)
+  if (rungBy) {
+    return `<div class="card stack geo-issue ringing" style="margin-top:14px" role="alert">
+      <strong>📢 This phone is ringing</strong>
+      <div class="note">${esc(nameFor(rungBy))} is ringing it to find its owner. Found this phone? Please help it home — its owner's friends can see roughly where it is.</div>
+      <button class="btn primary" data-action="found-phone" data-pk="${me}">It's not lost — I've got it</button>
+    </div>`
+  }
   return `<div class="card stack geo-issue" style="margin-top:14px" role="alert">
     <strong>This phone was reported lost</strong>
     <div class="note">${esc(nameFor(rep.by))} flagged it in ${esc(c.name)}. Found this phone? Please help it home — its owner's friends can see roughly where it is.</div>
@@ -902,8 +923,13 @@ function circleMemberRow(pk: string, mePk: string): string {
   // Lost phone: anyone can flag a member's phone, anyone can clear it — a
   // coordination flag, deliberately not gated on the owner (they don't have
   // their phone; that's the point).
+  // A flagged-lost phone can be RUNG — a targeted buzz it plays as a loud alarm
+  // even on silent, so it's findable by sound (the back-of-a-taxi minutes problem).
+  const ringBtn = lost && !isMe
+    ? `<button class="btn small" data-action="make-it-ring" data-pk="${pk}" title="Ring it — sounds even on silent">🔔 Ring</button>`
+    : ''
   const lostBtn = lost
-    ? `<button class="btn small" data-action="found-phone" data-pk="${pk}">Found it</button>`
+    ? `${ringBtn}<button class="btn small" data-action="found-phone" data-pk="${pk}">Found it</button>`
     : isMe ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`
   const edit = isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`
   // Private message — works whether or not they're on the map right now (a pin tap
@@ -1806,6 +1832,19 @@ async function sendBuzz(reason: string, target?: string): Promise<void> {
   } catch { toast('Buzz failed') }
 }
 
+/** Ring a lost phone: a targeted buzz the recipient plays as a loud alarm even on
+ *  silent (it escalates on receipt because it's flagged lost — see app/src/ring.ts).
+ *  No protocol change; on the wire it's an ordinary targeted buzz. */
+async function ringPhone(pk: string): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id || !pk) return
+  try {
+    await publishSignal(await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: RING_REASON, target: pk }), c)
+    toast(`Ringing ${nameFor(pk)}'s phone — it'll sound even on silent`)
+  } catch { toast("Couldn't ring it — check your connection") }
+}
+
 /** Mark (or clear) a member's phone as lost, to the whole circle. Anyone may do
  *  either — the owner doesn't have their phone, so gating on them is useless.
  *  Latest report wins on every device (see the lost signal's inner timestamp). */
@@ -1817,6 +1856,7 @@ async function sendLostReport(pk: string, lost: boolean): Promise<void> {
     const report: LostReport = { member: pk, by: id.pk, lost, timestamp: nowSec() }
     await publishSignal(await buildLostSignal({ groupId: c.id, seedHex: c.seedHex, ...report }), c)
     cstate(c.id).lost.set(pk, report)
+    if (!lost && pk === id.pk && beingRung?.circleId === c.id) beingRung = null // "I've got it" stops the ring card
     lostConfirmPk = null
     toast(lost
       ? `${nameFor(pk)}'s phone is flagged as lost — keep an eye on its last seen`
@@ -2056,6 +2096,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'cancel-lost': lostConfirmPk = null; render(); break
     case 'report-lost': void sendLostReport(node.dataset.pk ?? '', true); break
     case 'found-phone': void sendLostReport(node.dataset.pk ?? '', false); break
+    case 'make-it-ring': void ringPhone(node.dataset.pk ?? ''); break
     case 'come-to-me': comeToMeArmed = !comeToMeArmed; render(); break
     case 'come-to-me-cancel': comeToMeArmed = false; render(); break
     case 'come-to-me-confirm': comeToMeArmed = false; render(); void doComeToMe(); break
@@ -2818,17 +2859,28 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       const bz = await decryptBuzz(c.seedHex, e.content)
       if (!me || bz.from !== me.pk) {
         const mine = !!me && bz.target === me.pk
-        activeBuzz = { from: bz.from, reason: bz.reason, mine, circle: c.name }
-        // The buzz banner is in-app only — with the screen off it must still
-        // land as a system notification, like every other incoming signal.
-        // Group channel, headed by the circle and stacked per circle (Signal
-        // group style: title = "Night out", body = "Alex: Come to me") — a
-        // whole-circle buzz, visibly distinct from a private 1:1 DM.
-        const buzzBody = bz.reason
-          ? `${nameFor(bz.from)}: ${bz.reason}`
-          : `${nameFor(bz.from)} buzzed${mine ? ' you' : ' the circle'}`
-        notifyIfHidden(buzzBody, { kind: 'group', title: c.name, group: `group:${c.id}` })
-        try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
+        // "Make it ring": if THIS phone is flagged lost and a member buzzed it,
+        // escalate to the alarm channel — loud even on silent/DND — so whoever
+        // is near it (a taxi driver, a passer-by) hears it. Output only: it
+        // never discloses location or changes what we share. See app/src/ring.ts.
+        const iAmFlaggedLost = !!me && !!memberLost(c.id, me.pk)?.lost
+        if (shouldRing({ targetedAtMe: mine, iAmFlaggedLost })) {
+          beingRung = { circleId: c.id, by: bz.from, at: nowSec() }
+          notifyIfHidden(`${nameFor(bz.from)} is ringing this phone to help find it`, { kind: 'ring', title: c.name, group: `ring:${c.id}` })
+          try { navigator.vibrate?.(RING_VIBRATION) } catch { /* no haptics */ }
+        } else {
+          activeBuzz = { from: bz.from, reason: bz.reason, mine, circle: c.name }
+          // The buzz banner is in-app only — with the screen off it must still
+          // land as a system notification, like every other incoming signal.
+          // Group channel, headed by the circle and stacked per circle (Signal
+          // group style: title = "Night out", body = "Alex: Come to me") — a
+          // whole-circle buzz, visibly distinct from a private 1:1 DM.
+          const buzzBody = bz.reason
+            ? `${nameFor(bz.from)}: ${bz.reason}`
+            : `${nameFor(bz.from)} buzzed${mine ? ' you' : ' the circle'}`
+          notifyIfHidden(buzzBody, { kind: 'group', title: c.name, group: `group:${c.id}` })
+          try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
+        }
       }
     } else if (t === LOST_SIGNAL_TYPE) {
       const rep = await decryptLost(c.seedHex, e.content)
@@ -2852,8 +2904,10 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
           toast(`📵 ${nameFor(rep.by)} reported ${nameFor(rep.member)}'s phone lost`)
           notifyIfHidden(`${nameFor(rep.member)}'s phone was reported lost`, { kind: 'alert', title: c.name, group: `alert:${c.id}` })
         }
-      } else if (!byMe) {
-        toast(`✓ ${nameFor(rep.member)}'s phone is marked found`)
+      } else {
+        // Cleared. If it was THIS phone, stop reading as "being rung".
+        if (mine && beingRung?.circleId === c.id) beingRung = null
+        if (!byMe) toast(`✓ ${nameFor(rep.member)}'s phone is marked found`)
       }
     } else if (t === DISBAND_SIGNAL_TYPE) {
       const d = await decryptDisband(c.seedHex, e.content)

@@ -21,14 +21,17 @@ import { registerPlugin } from '@capacitor/core'
 
 // App-local native plugin: posts message notifications with notification-level
 // VISIBILITY_PUBLIC so content shows on a securely-locked screen (the
-// LocalNotifications plugin hardcodes PRIVATE). See FlockNotifyPlugin.java.
+// LocalNotifications plugin hardcodes PRIVATE). `ring` posts an alarm-class
+// notification that plays even on silent/DND (the "make it ring" feature — a
+// lost phone findable by sound). See FlockNotifyPlugin.java.
 interface FlockNotifyPlugin {
   notify(opts: { id?: number; channelId: string; title: string; body: string; group?: string }): Promise<void>
+  ring(opts: { id?: number; title: string; body: string; group?: string }): Promise<void>
 }
 const FlockNotify = registerPlugin<FlockNotifyPlugin>('FlockNotify')
 
 /** Which stream a notification belongs to — picks channel, heading fallback and stacking. */
-export type NotifyKind = 'dm' | 'group' | 'alert' | 'general'
+export type NotifyKind = 'dm' | 'group' | 'alert' | 'ring' | 'general'
 
 export interface NotifyOptions {
   kind?: NotifyKind
@@ -63,6 +66,10 @@ const CHANNEL_ID: Record<NotifyKind, string> = {
   dm: 'flock-dm-v1',
   group: 'flock-group-v1',
   alert: 'flock-alert-v1',
+  // 'ring' is created NATIVELY (alarm audio stream + DND bypass — see
+  // FlockNotifyPlugin.ring), never via LocalNotifications, so it is deliberately
+  // absent from CHANNELS above and this id is used only by the fallback below.
+  ring: 'flock-ring-v1',
   general: 'flock-general-v1',
 }
 
@@ -95,6 +102,22 @@ export async function notify(body: string, opts: NotifyOptions = {}): Promise<vo
   const kind = opts.kind ?? 'general'
   const id = seq++
   const title = opts.title || 'flock'
+  if (kind === 'ring') {
+    // The alarm-channel ring: loud even on silent/DND, screen-waking. Native
+    // only — LocalNotifications can't set the alarm audio stream, DND bypass or
+    // a full-screen intent. An older shell without the plugin falls back to a
+    // best-effort high-priority alert notification.
+    try {
+      await FlockNotify.ring({ id, title, body, ...(opts.group ? { group: opts.group } : {}) })
+      return
+    } catch { /* plugin missing — fall through */ }
+    try {
+      await LocalNotifications.schedule({
+        notifications: [{ id, title, body, channelId: CHANNEL_ID.alert, ...(opts.group ? { group: opts.group } : {}) }],
+      })
+    } catch { /* permission denied — nothing else to do */ }
+    return
+  }
   const channelId = CHANNEL_ID[kind]
   try {
     await FlockNotify.notify({ id, channelId, title, body, ...(opts.group ? { group: opts.group } : {}) })

@@ -108,7 +108,7 @@ not stored by relays. Core types (`t` → payload / key / trigger):
 | `rzv-status` | `RendezvousStatus {rendezvousId, member, status, etaSeconds, timestamp}` | group envelope key | a member's en-route / arrived / at-risk update |
 | `mtg-req` | `MeetingRequest {id, setBy, mode, maxTimeMinutes, createdAt}` | group envelope key | propose finding a fair meeting point |
 | `mtg-loc` | `MeetingShare {requestId, member, geohash, precision, mode, timestamp}` | group envelope key (coarse) **or** recipient's key via NIP-59 (exact) | **opt-in** spot toward a meeting point — coarse to the group, or exact to one named person |
-| `buzz` | `Buzz {from, reason, target?, timestamp}` | group envelope key | one-tap ping ("Where are you?", "Come to me") — location-free |
+| `buzz` | `Buzz {from, reason, target?, timestamp}` | group envelope key | one-tap ping ("Where are you?", "Come to me") — location-free. **"Make it ring":** a `buzz` **targeted at** a member whose phone the circle has flagged `lost` is escalated **on that device** to a loud alarm (alarm audio stream, so it sounds through ring-silent). A receiver-side decision, no new wire type — the sender emits an ordinary targeted `buzz`; the lost flag is the gate (§6) |
 | `joined` | `Joined {member, timestamp, handle?}` | group envelope key | newcomer's "I'm here" (+ optional self-chosen handle) so a QR joiner isn't invisible until their first signal |
 | `offgrid` | `OffGrid {from, until, reason?, timestamp}` | group envelope key | pre-announced planned silence; `until ≤ now` = "I'm back" |
 | `disband` | `Disband {by, timestamp}` | group envelope key | owner ends the circle for everyone (tombstone) |
@@ -311,6 +311,13 @@ Grounded in the feasibility research (`docs/research/2026-06-30-feasibility-rese
    blob. Key-at-rest is the **App lock** (opt-in PIN → the whole persisted
    state is AES-256-GCM at rest, keystore-kit); the decoy deliberately shows
    no PIN screen — a lock gate on a "brand new" app would itself be a tell.
+8. **"Make it ring" is output, not disclosure.** A lost phone escalating a
+   targeted `buzz` to a loud alarm changes only what the device *sounds*, never
+   what it *discloses* — no location, no precision change, no sharing toggle
+   (the same ethos as the `lost` flag itself, §3.3). It is gated twice: only a
+   circle member can send a decryptable targeted `buzz`, and only to a phone the
+   circle has already flagged `lost`. Decoy-safe by construction — a hidden app
+   holds no circle and no subscription, so it can never ring (no tell).
 
 ## 7. Open items
 

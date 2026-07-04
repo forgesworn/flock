@@ -60,10 +60,23 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   vibration + system notification. Anyone clears it — including the owner
   tapping "It's not lost — I've got it". Display-only by design: it never
   changes what the device discloses. e2e: `lost-phone.spec.ts`.
-- [ ] **Make it ring**: a targeted buzz variant the APK plays as a loud
-  alarm-channel notification even on silent — the back-of-taxi case is a
-  *minutes* problem. Native work in `native/notify.ts` (alarm channel, sound,
-  maybe bypass-DND permission); no protocol change.
+- [x] **Make it ring** (2026-07-04): a phone the circle has flagged lost plays
+  an incoming **targeted buzz** as a loud **alarm** — alarm audio stream (sounds
+  through ring-silent), best-effort DND bypass, a screen-waking full-screen
+  intent and a long insistent vibration. **No protocol change** — on the wire
+  it's an ordinary targeted `buzz`; the lost flag is the gate and the escalation
+  is a receiver-side decision (pure `shouldRing` in `app/src/ring.ts`, +6 unit
+  tests). Native alarm channel + `ring()` method (`native/notify.ts`,
+  `FlockNotifyPlugin.java`; `USE_FULL_SCREEN_INTENT` + `ACCESS_NOTIFICATION_POLICY`
+  added to `patch-android.mjs`), degrading gracefully on an older shell to a
+  high-priority alert. Finder taps **"🔔 Ring"** on a flagged-lost member's row;
+  the lost phone shows a loud pulsing **"This phone is ringing"** card. Output
+  only — never discloses location or changes what's shared; decoy-safe (a hidden
+  app has no subscription, so it can't ring). FLOCK.md §6.8. e2e
+  `make-it-ring.spec.ts` (B flags A lost → B rings → A's phone goes to the
+  ringing card → A clears it) green over the live relay. *(Follow-up: the DND
+  bypass needs the user to grant notification-policy access — an in-app affordance
+  to request it is unbuilt; the alarm stream already sounds through silent.)*
 - [ ] **Remote exact ping ("find my phone")**: a member asks; the lost device
   answers with a one-shot exact beacon (the existing come-to-me one-shot,
   triggered remotely — targeted buzz as the ask, plain `beacon` as the answer).

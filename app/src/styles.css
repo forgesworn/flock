@@ -592,6 +592,15 @@ a.btn { text-decoration: none; }
 }
 .card.festival-on strong { color: var(--warn); }
 
+/* "Make it ring": the phone is sounding right now — loud, pulsing accent. */
+.card.ringing {
+  border-color: var(--alert);
+  background: linear-gradient(180deg, var(--alert-dim), transparent 60%), var(--surface);
+  animation: ring-pulse 1.1s ease-in-out infinite;
+}
+.card.ringing strong { color: var(--alert); }
+@keyframes ring-pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--alert-dim); } 50% { box-shadow: 0 0 0 6px var(--alert-dim); } }
+
 /* ── Compose sheet (write a message: group or private 1:1) ──────────────────── */
 .compose-sheet {
   position: fixed; inset: 0; z-index: 300;
