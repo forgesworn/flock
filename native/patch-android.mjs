@@ -121,18 +121,35 @@ if (xml.includes(`android:host="${APP_LINK_HOST}"`) && !xml.includes('android:pa
 // specialUse type — a persistent message connection; it does NOT use location.
 // The subtype <property> is mandatory for specialUse on Android 14+. Declared
 // inside <application>, right before its close.
-if (!xml.includes('.StayReachableService')) {
-  const service = `        <service
+//
+// This MUST correct a stale type, not merely add-once: the generated android/
+// project is cached (gitignored), so an "add if absent" guard let an earlier
+// `dataSync` declaration survive every rebuild while the Java moved to
+// SPECIAL_USE. The mismatch makes startForeground throw
+// `IllegalArgumentException: foregroundServiceType 0x40000000 is not a subset of
+// 0x00000001` — which crashes the whole process the instant "stay reachable"
+// starts. Manifest and StayReachableService.java must never drift.
+const STAY_SERVICE = `        <service
             android:name=".StayReachableService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Receives end-to-end encrypted messages and safety alerts while the app is closed." />
-        </service>
-`
-  xml = xml.replace('</application>', `${service}    </application>`)
+        </service>`
+// Matches an existing StayReachableService element in EITHER form — block
+// (`…>…</service>`) or self-closing (`… />`). The block alternative is tempered
+// with `(?!<service\b)` so it can never swallow a following <service> element.
+const stayServiceRe = /<service\b[^>]*android:name="\.StayReachableService"(?:(?!<service\b)[\s\S])*?<\/service>|<service\b[^>]*android:name="\.StayReachableService"[^>]*\/>/
+const existingStay = xml.match(stayServiceRe)?.[0]
+if (!existingStay) {
+  xml = xml.replace('</application>', `${STAY_SERVICE}\n    </application>`)
   changed = true
+  console.error('added StayReachableService (specialUse) to manifest')
+} else if (!existingStay.includes('android:foregroundServiceType="specialUse"')) {
+  xml = xml.replace(stayServiceRe, STAY_SERVICE)
+  changed = true
+  console.error('corrected StayReachableService foregroundServiceType → specialUse (was stale)')
 }
 
 if (changed) {
