@@ -54,4 +54,32 @@ describe('buildLostSignal / decryptLost', () => {
     const corrupted = event.content.slice(0, -4) + (event.content.endsWith('AAAA') ? 'BBBB' : 'AAAA')
     await expect(decryptLost(SEED, corrupted)).rejects.toThrow()
   })
+
+  it('round-trips an optional message from the reporter', async () => {
+    const event = await buildLostSignal({ groupId: 'g', seedHex: SEED, member: A, by: B, lost: true, message: 'left in the blue Uber' })
+    const back = await decryptLost(SEED, event.content)
+    expect(back.message).toBe('left in the blue Uber')
+  })
+
+  it('trims the message and omits it when blank', async () => {
+    const event = await buildLostSignal({ groupId: 'g', seedHex: SEED, member: A, by: B, lost: true, message: '  on the 08:15 to Leeds  ' })
+    expect((await decryptLost(SEED, event.content)).message).toBe('on the 08:15 to Leeds')
+
+    const blank = await buildLostSignal({ groupId: 'g', seedHex: SEED, member: A, by: B, lost: true, message: '   ' })
+    expect((await decryptLost(SEED, blank.content)).message).toBeUndefined()
+  })
+
+  it('a report with no message round-trips without one (backward compatible)', async () => {
+    const event = await buildLostSignal({ groupId: 'g', seedHex: SEED, member: A, by: B, lost: true })
+    const back = await decryptLost(SEED, event.content)
+    expect(back).toEqual<LostReport>({ member: A, by: B, lost: true, timestamp: back.timestamp })
+    expect(back.message).toBeUndefined()
+  })
+
+  it('caps an overlong message', async () => {
+    const long = 'x'.repeat(300)
+    const event = await buildLostSignal({ groupId: 'g', seedHex: SEED, member: A, by: B, lost: true, message: long })
+    const back = await decryptLost(SEED, event.content)
+    expect(back.message?.length).toBe(200)
+  })
 })

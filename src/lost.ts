@@ -21,6 +21,7 @@ import { deriveGroupKey, encryptEnvelope, decryptEnvelope } from 'canary-kit/syn
 export const LOST_SIGNAL_TYPE = 'lost'
 
 const HEX_64_RE = /^[0-9a-f]{64}$/
+const MAX_MESSAGE = 200
 
 /** A decrypted lost-phone report (or its all-clear). */
 export interface LostReport {
@@ -32,6 +33,10 @@ export interface LostReport {
   lost: boolean
   /** Unix seconds — latest report per member wins. */
   timestamp: number
+  /** Optional note from whoever filed the report — "left in the blue Uber",
+   *  "on the 08:15 to Leeds" — shown on the phone's own lost card for whoever
+   *  finds it. Only meaningful when `lost` is true; an all-clear carries none. */
+  message?: string
 }
 
 /**
@@ -47,14 +52,17 @@ export async function buildLostSignal(params: {
   by: string
   lost: boolean
   timestamp?: number
+  message?: string
 }): Promise<UnsignedEvent> {
   if (!HEX_64_RE.test(params.member)) throw new Error('member must be a 64-character lowercase hex pubkey')
   if (!HEX_64_RE.test(params.by)) throw new Error('by must be a 64-character lowercase hex pubkey')
+  const message = params.message?.trim().slice(0, MAX_MESSAGE)
   const payload: LostReport = {
     member: params.member,
     by: params.by,
     lost: params.lost,
     timestamp: params.timestamp ?? Math.floor(Date.now() / 1000),
+    ...(message ? { message } : {}),
   }
   const encryptedContent = await encryptEnvelope(deriveGroupKey(params.seedHex), JSON.stringify(payload))
   return buildSignalEvent({ groupId: params.groupId, signalType: LOST_SIGNAL_TYPE, encryptedContent })
@@ -82,5 +90,12 @@ export async function decryptLost(seedHex: string, content: string): Promise<Los
   if (typeof o.timestamp !== 'number' || !Number.isFinite(o.timestamp)) {
     throw new Error('Invalid lost report: timestamp must be a number')
   }
-  return { member: o.member, by: o.by, lost: o.lost, timestamp: o.timestamp }
+  const message = typeof o.message === 'string' ? o.message.trim().slice(0, MAX_MESSAGE) : undefined
+  return {
+    member: o.member,
+    by: o.by,
+    lost: o.lost,
+    timestamp: o.timestamp,
+    ...(message ? { message } : {}),
+  }
 }

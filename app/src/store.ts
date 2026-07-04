@@ -259,6 +259,15 @@ export function adoptLegacyFences(circles: Circle[], legacy?: Geofence[]): Circl
   return circles.map((c) => (c.geofences ? c : { ...c, geofences: [...legacy] }))
 }
 
+/** "Let my circle find my phone" is on by default (new circles set it at
+ *  creation/join) — this migrates circles from before that default existed,
+ *  so the change actually takes effect for people who already have circles,
+ *  not just ones made from here on. Never overwrites an explicit choice
+ *  (including a deliberate opt-out) — only an unset field counts. */
+export function withPingConsentDefault(circles: Circle[]): Circle[] {
+  return circles.map((c) => (c.pingConsent === undefined ? { ...c, pingConsent: true } : c))
+}
+
 const toHex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 export const fromHex = (h: string): Uint8Array =>
@@ -299,6 +308,7 @@ function hydrate(o: Partial<Persisted> & { circle?: Circle | null; relayUrl?: st
   // Rotation migration: circles from before automatic seed rotation have no
   // seed age — start their clock now rather than mass-rotating on upgrade day.
   state.circles = state.circles.map((c) => (c.reseededAt ? c : { ...c, reseededAt: now }))
+  state.circles = withPingConsentDefault(state.circles)
   if (!state.circles.some((c) => c.id === state.activeCircleId)) {
     state.activeCircleId = state.circles[0]?.id ?? null
   }
@@ -424,6 +434,7 @@ export function createCircle(name: string, mode: Mode, ownerPk: string, circleRo
     checkinInterval: 0,
     epoch: 0,
     reseededAt: Math.floor(Date.now() / 1000),
+    pingConsent: true,
     ...(expiresAt ? { expiresAt } : {}),
   }
 }

@@ -825,6 +825,7 @@ function completeJoin(circle: store.Circle): void {
   persisted.identity ??= store.createIdentity()
   circle.members = [persisted.identity.pk]
   circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
+  circle.pingConsent = true // on by default: if this phone is ever lost, the circle can ask it to help find it
   upsertCircle(circle, true)
   announceJoin(circle)
   pendingJoin = null
@@ -1273,9 +1274,12 @@ function lostCard(c: store.Circle): string {
       <button class="btn primary" data-action="found-phone" data-pk="${me}">It's not lost — I've got it</button>
     </div>`
   }
+  const note = rep.message
+    ? `${esc(nameFor(rep.by))}: “${esc(rep.message)}”`
+    : `${esc(nameFor(rep.by))} flagged it in ${esc(c.name)}. Found this phone? Please help it home, its owner's friends can see roughly where it is.`
   return `<div class="card stack geo-issue" style="margin-top:14px" role="alert">
     <strong>This phone was reported lost</strong>
-    <div class="note">${esc(nameFor(rep.by))} flagged it in ${esc(c.name)}. Found this phone? Please help it home — its owner's friends can see roughly where it is.</div>
+    <div class="note">${note}</div>
     <button class="btn primary" data-action="found-phone" data-pk="${me}">It's not lost — I've got it</button>
   </div>`
 }
@@ -1327,6 +1331,7 @@ function circleMemberRow(pk: string, mePk: string): string {
     return `<div class="member editing">
       ${avatarHtml(pk, isMe)}
       <div class="meta"><div class="who">${esc(nameFor(pk))}</div><div class="when">Report their phone lost? Everyone sees it flagged, and the phone shows a message for whoever finds it. Nothing about their sharing changes.</div></div>
+      <input class="input" id="lost-note-${pk}" placeholder="Left in the blue Uber… (optional)" maxlength="200" style="flex-basis:100%" />
       <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="report-lost" data-pk="${pk}">Report lost</button>
       <button class="btn small ghost" data-action="cancel-lost" aria-label="Cancel">✕</button>
     </div>`
@@ -1467,7 +1472,7 @@ function circleView(): string {
         <span>Let this circle find my phone</span>
         <button class="switch${c.pingConsent ? ' on' : ''}" data-action="toggle-ping-consent" role="switch" aria-checked="${!!c.pingConsent}" aria-label="Let this circle find my phone"><span class="knob"></span></button>
       </div>
-      <div class="note">${hint('ping-consent', "If your phone is ever lost, members can ask it for its exact location to come and fetch it. It only answers when it's been marked lost, warns you first with a chance to say no, and never turns on ongoing sharing. Off by default.")}</div>
+      <div class="note">${hint('ping-consent', "If your phone is ever lost, members can ask it for its exact location to come and fetch it. It only answers when it's been marked lost, warns you first with a chance to say no, and never turns on ongoing sharing. On by default; turn it off here any time.")}</div>
     </div>`
 }
 
@@ -2317,7 +2322,8 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     const roster = payload.from && payload.from !== signer.pubkey ? [signer.pubkey, payload.from] : [signer.pubkey]
     const joined: store.Circle = {
       id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m,
-      members: roster, joinedAt: nowSec(), reseededAt: nowSec(), ...(payload.x ? { expiresAt: payload.x } : {}),
+      members: roster, joinedAt: nowSec(), reseededAt: nowSec(), pingConsent: true,
+      ...(payload.x ? { expiresAt: payload.x } : {}),
     }
     upsertCircle(joined, true)
     announceJoin(joined) // the inviter expected me, but the REST of the circle didn't
@@ -2609,13 +2615,17 @@ function cancelFindPing(): void {
 
 /** Mark (or clear) a member's phone as lost, to the whole circle. Anyone may do
  *  either — the owner doesn't have their phone, so gating on them is useless.
- *  Latest report wins on every device (see the lost signal's inner timestamp). */
-async function sendLostReport(pk: string, lost: boolean): Promise<void> {
+ *  Latest report wins on every device (see the lost signal's inner timestamp).
+ *  `message` is the reporter's own note ("left in the blue Uber") shown on the
+ *  lost phone's own card instead of the generic text — only meaningful when
+ *  marking lost, never on a clear. */
+async function sendLostReport(pk: string, lost: boolean, message?: string): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id || !pk) return
   try {
-    const report: LostReport = { member: pk, by: id.pk, lost, timestamp: nowSec() }
+    const note = lost ? message?.trim().slice(0, 200) : undefined
+    const report: LostReport = { member: pk, by: id.pk, lost, timestamp: nowSec(), ...(note ? { message: note } : {}) }
     await publishSignal(await buildLostSignal({ groupId: c.id, seedHex: c.seedHex, ...report }), c)
     cstate(c.id).lost.set(pk, report)
     if (!lost && pk === id.pk && beingRung?.circleId === c.id) beingRung = null // "I've got it" stops the ring card
@@ -3018,7 +3028,12 @@ function handleAction(action: string, node: HTMLElement): void {
       break
     case 'ask-lost': lostConfirmPk = node.dataset.pk ?? null; render(); break
     case 'cancel-lost': lostConfirmPk = null; render(); break
-    case 'report-lost': void sendLostReport(node.dataset.pk ?? '', true); break
+    case 'report-lost': {
+      const pk = node.dataset.pk ?? ''
+      const note = (document.getElementById(`lost-note-${pk}`) as HTMLInputElement | null)?.value ?? ''
+      void sendLostReport(pk, true, note)
+      break
+    }
     case 'found-phone': void sendLostReport(node.dataset.pk ?? '', false); break
     case 'make-it-ring': void ringPhone(node.dataset.pk ?? ''); break
     case 'find-exact': void askFindPing(node.dataset.pk ?? ''); break
@@ -3132,6 +3147,7 @@ function doJoin(): void {
     if (persisted.circles.some((c) => c.id === circle.id)) { switchCircle(circle.id); adding = false; return }
     circle.members = [persisted.identity.pk]
     circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
+    circle.pingConsent = true // on by default
     upsertCircle(circle, true)
     onboardStep = 'intro'
     adding = false

@@ -16,9 +16,8 @@ test.describe('find my phone — a pre-authorised lost phone answers with an exa
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // A gives standing consent for this circle to find its phone (off by default).
+    // Standing consent for this circle to find its phone is on by default.
     await gotoTab(A, 'circle')
-    await A.click('[data-action="toggle-ping-consent"]')
     await expect(A.locator('[data-action="toggle-ping-consent"]')).toHaveAttribute('aria-checked', 'true')
 
     // B discovers A on A's first signal.
