@@ -598,7 +598,10 @@ a.btn { text-decoration: none; }
 @keyframes ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-16deg); } 60% { transform: rotate(16deg); } }
 
 /* ── Home map (the members map, replacing the old status orb) ───────────────── */
-.home-map-shell { position: relative; height: 264px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); margin-bottom: 14px; }
+/* The map IS the home screen — hero-sized, with the people and the chat on the
+   scroll below it. Clamped so small phones still show the share button above
+   the fold. */
+.home-map-shell { position: relative; height: clamp(280px, 38vh, 420px); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); margin-bottom: 14px; }
 .home-map-shell > .home-map { position: absolute; inset: 0; }
 /* The old orb copy, now a glass chip laid over the bottom of the map. */
 .map-status {
@@ -709,3 +712,79 @@ a.btn { text-decoration: none; }
 .switch .knob { position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
 .switch.on { background: var(--safe-dim); border-color: var(--safe); }
 .switch.on .knob { transform: translateX(18px); background: var(--safe); }
+
+/* ── Member strip (Home: the circle's people under the map) ─────────────── */
+.member-strip {
+  display: flex; gap: 14px; overflow-x: auto; padding: 12px 2px 6px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.member-strip::-webkit-scrollbar { display: none; }
+.strip-member {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: transparent; border: none; padding: 0; color: var(--text); flex: none;
+  width: 62px; cursor: pointer;
+}
+.strip-member:active { transform: scale(0.96); }
+.strip-avatar { position: relative; display: block; }
+.strip-avatar .avatar {
+  width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  font-size: 15px; font-weight: 700; color: var(--muted); overflow: hidden;
+}
+.strip-avatar .avatar img { width: 100%; height: 100%; object-fit: cover; }
+.strip-avatar.plus {
+  width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center;
+  background: transparent; border: 1px dashed var(--line-strong);
+  font-size: 22px; color: var(--muted);
+}
+.presence-dot {
+  position: absolute; right: 1px; bottom: 1px; width: 13px; height: 13px;
+  border-radius: 50%; border: 2.5px solid var(--bg);
+  background: var(--faint);
+}
+.presence-dot.on { background: var(--safe); }
+.presence-dot.idle { background: var(--faint); }
+.strip-name { font-size: 12px; color: var(--muted); max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Circle chat (the Signal-style thread on Home) ──────────────────────── */
+.chat-card { display: flex; flex-direction: column; gap: 12px; }
+.chat-thread {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 44vh; overflow-y: auto; overscroll-behavior: contain;
+  padding: 2px;
+}
+.dm-thread { max-height: 38vh; min-height: 120px; }
+.chat-empty { padding: 10px 4px; }
+.msg {
+  align-self: flex-start; max-width: 82%;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 16px 16px 16px 5px; padding: 8px 12px 6px; margin-top: 6px;
+}
+.msg.mine {
+  align-self: flex-end;
+  background: rgba(110, 168, 254, 0.13); border-color: rgba(110, 168, 254, 0.28);
+  border-radius: 16px 16px 5px 16px;
+}
+.msg-who { font-size: 12px; font-weight: 700; color: var(--calm); }
+.msg-text { font-size: 14.5px; line-height: 1.4; word-break: break-word; white-space: pre-wrap; }
+.msg-when { font-size: 10.5px; color: var(--faint); align-self: flex-end; }
+.chat-composer { display: flex; gap: 8px; align-items: flex-end; }
+.chat-composer textarea { resize: none; flex: 1; min-height: 42px; max-height: 120px; }
+.chat-composer .btn { flex: none; }
+.chat-presets { padding-top: 2px; }
+
+/* ── Unread badges (bottom nav + You's private-chat rows) ───────────────── */
+.nav button { position: relative; }
+.nav-badge {
+  position: absolute; top: 6px; right: calc(50% - 22px);
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px;
+  background: var(--calm); color: #0b0e12; font-size: 11px; font-weight: 700;
+  display: grid; place-items: center; line-height: 1;
+}
+.nav-badge.inline { position: static; flex: none; }
+.dm-row { cursor: pointer; }
+.dm-row:active { transform: scale(0.99); }
+
+/* The DM sheet is a whole conversation, not a one-shot box — let it breathe. */
+.dm-card { max-height: 82dvh; }

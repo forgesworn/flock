@@ -155,10 +155,12 @@ export async function setSharePrecision(page: Page, precision: number): Promise<
   await settle(page) // let the forced re-emit reach the relay
 }
 
-/** Tap a quick-action chip on Home (Check in / Where are you? / Call me / On my way). */
+/** Tap a quick-action chip in the Home chat (Check in / Where are you? / Call me / On my way).
+ *  "Check in" is its own action — it fans out to every circle as a roll-call. */
 export async function quickAction(page: Page, reason: string): Promise<void> {
   await gotoTab(page, 'home')
-  await page.click(`[data-action="quick-buzz"][data-reason="${reason}"]`)
+  if (reason === 'Check in') await page.click('[data-action="check-in"]')
+  else await page.click(`[data-action="chat-preset"][data-reason="${reason}"]`)
 }
 
 /** "Come to me" — the confirmed quick action that also shares a one-shot exact spot. */
@@ -174,20 +176,28 @@ export function memberPill(page: Page, text: string | RegExp) {
   return page.locator('.member .pill', { hasText: text })
 }
 
-/** Buzz the circle with a custom reason (from the Circle tab). A plain fill +
- *  click, deliberately: renders now preserve the focused input (value + caret)
+/** Send a message to the whole circle from the Home chat composer. A plain fill
+ *  + click, deliberately: renders preserve the focused input (value + caret)
  *  across inbound re-renders, so every call is a live regression test of that
  *  fix. (Before it, an inbound signal between fill and click wiped the field and
- *  the buzz silently no-opped — the audit's input-wipe bug.) */
+ *  the send silently no-opped — the audit's input-wipe bug.) */
 export async function sendBuzz(page: Page, reason: string): Promise<void> {
-  await gotoTab(page, 'circle')
-  await page.fill('#buzz-custom', reason)
-  await page.click('[data-action="buzz"]:not([data-reason])')
+  await gotoTab(page, 'home')
+  await page.fill('#chat-input', reason)
+  await page.click('[data-action="chat-send"]')
 }
 
-/** Expand the You tab's Advanced fold (servers, security, disband, reset). */
-export async function openAdvanced(page: Page): Promise<void> {
+/** Expand the You tab's Settings fold (notifications, backup, units…). */
+export async function openSettings(page: Page): Promise<void> {
   await gotoTab(page, 'you')
+  if (!(await page.locator('[data-action="toggle-advanced"]').isVisible())) {
+    await page.click('[data-action="toggle-settings"]')
+  }
+}
+
+/** Expand Advanced (servers, security, disband, reset) — lives inside Settings. */
+export async function openAdvanced(page: Page): Promise<void> {
+  await openSettings(page)
   if (!(await page.locator('#relay').isVisible())) await page.click('[data-action="toggle-advanced"]')
 }
 

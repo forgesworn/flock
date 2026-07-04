@@ -25,8 +25,9 @@ import { registerPlugin } from '@capacitor/core'
 // notification that plays even on silent/DND (the "make it ring" feature — a
 // lost phone findable by sound). See FlockNotifyPlugin.java.
 interface FlockNotifyPlugin {
-  notify(opts: { id?: number; channelId: string; title: string; body: string; group?: string }): Promise<void>
+  notify(opts: { id?: number; channelId: string; title: string; body: string; group?: string; sender?: string; conversation?: string }): Promise<void>
   ring(opts: { id?: number; title: string; body: string; group?: string }): Promise<void>
+  clearAll(): Promise<void>
   checkDndAccess(): Promise<{ granted: boolean }>
   openDndAccessSettings(): Promise<void>
 }
@@ -41,6 +42,12 @@ export interface NotifyOptions {
   title?: string
   /** Stacks related notifications together (one conversation / circle per stack). */
   group?: string
+  /** The person the message is FROM (display name). When set, the native side
+   *  renders a Signal-style conversation notification (MessagingStyle): one
+   *  notification per conversation, updated in place, each line "Sender: text". */
+  sender?: string
+  /** Conversation title for a GROUP thread (the circle name). Absent = a 1:1. */
+  conversation?: string
 }
 
 // Android channels are immutable once created — importance/visibility set here
@@ -133,12 +140,31 @@ export async function notify(body: string, opts: NotifyOptions = {}): Promise<vo
   }
   const channelId = CHANNEL_ID[kind]
   try {
-    await FlockNotify.notify({ id, channelId, title, body, ...(opts.group ? { group: opts.group } : {}) })
+    await FlockNotify.notify({
+      id, channelId, title, body,
+      ...(opts.group ? { group: opts.group } : {}),
+      ...(opts.sender ? { sender: opts.sender } : {}),
+      ...(opts.conversation ? { conversation: opts.conversation } : {}),
+    })
     return
   } catch { /* plugin missing — fall through to LocalNotifications */ }
   try {
+    // Older shell: no MessagingStyle — fold the sender into the body so a group
+    // message still reads "Alex: on my way" rather than a bare text.
+    const flatBody = opts.sender && opts.conversation ? `${opts.sender}: ${body}` : body
     await LocalNotifications.schedule({
-      notifications: [{ id, title, body, channelId, ...(opts.group ? { group: opts.group } : {}) }],
+      notifications: [{ id, title, body: flatBody, channelId, ...(opts.group ? { group: opts.group } : {}) }],
     })
   } catch { /* permission denied — nothing else to do */ }
+}
+
+/** Clear every delivered flock notification (messages, buzzes, alerts) — called
+ *  when the app comes to the foreground: the app being open IS the read.
+ *  Foreground-service notifications are immune to cancelAll by design. */
+export async function clearDelivered(): Promise<void> {
+  try { await FlockNotify.clearAll(); return } catch { /* older shell — fall through */ }
+  try {
+    const delivered = await LocalNotifications.getDeliveredNotifications()
+    if (delivered.notifications.length) await LocalNotifications.removeDeliveredNotifications(delivered)
+  } catch { /* unavailable — nothing to clear */ }
 }

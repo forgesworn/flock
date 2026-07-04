@@ -1,40 +1,43 @@
 import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, settle, joinRemoteAwait, sendRemoteInvite } from './fixtures'
 
-// Free-text messaging: a written note to the whole circle (shared inbox, like a
-// buzz) and a private 1:1 (gift-wrapped to one member's personal inbox — only
-// they can read it). Both go over the live relay, so a banner on the OTHER
-// person's screen proves the transport.
-test.describe('messaging — group note & private 1:1', () => {
-  test('Home leads with the members map, not the old status orb', async ({ browser }) => {
+// Messaging: the circle chat (one Signal-style thread on Home, shared inbox like
+// a buzz) and private 1:1 threads (gift-wrapped to one member's personal inbox —
+// only they can read it; the thread sheet lives behind people, PMs under You).
+// Everything goes over the live relay, so the OTHER person's screen proves the
+// transport.
+test.describe('messaging — circle chat & private 1:1 threads', () => {
+  test('Home leads with the map, then the people, then the circle chat', async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     await gotoTab(A, 'home')
-    // The map + its glass status chip replace the orb.
+    // The map + its glass status chip lead; the chat composer is on the scroll.
     await expect(A.locator('.home-map-shell')).toBeVisible()
     await expect(A.locator('.map-status')).toBeVisible()
     await expect(A.locator('.orb')).toHaveCount(0)
-    // The group-message entry point is on Home.
-    await expect(A.locator('[data-action="msg-group"]')).toBeVisible()
+    await expect(A.locator('.member-strip')).toBeVisible()
+    await expect(A.locator('#chat-input')).toBeVisible()
   })
 
-  test('group message A→everyone — B gets a banner with the text', async ({ browser }) => {
+  test('circle chat A→everyone — B gets a banner AND the message lands in B\'s thread', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // Open the compose sheet from Home, type a free-text note, send to everyone.
+    // Type into the Home chat composer and send to everyone.
     await gotoTab(A, 'home')
-    await A.click('[data-action="msg-group"]')
-    await expect(A.locator('#compose-sheet')).toBeVisible()
-    await A.fill('#compose-text', 'dinner at eight?')
-    await A.click('[data-action="compose-send"]')
-    await expect(A.locator('#compose-sheet')).toHaveCount(0) // sheet closes on send
+    await A.fill('#chat-input', 'dinner at eight?')
+    await A.click('[data-action="chat-send"]')
+    // A's own message threads immediately (my side of the conversation).
+    await expect(A.locator('#chat-thread .msg.mine')).toContainText('dinner at eight?')
 
     const banner = B.locator('.buzz-banner')
     await expect(banner).toBeVisible()
     await expect(banner).toContainText('dinner at eight?')
+    // …and it's in B's thread too — a conversation, not a fleeting banner.
+    await gotoTab(B, 'home')
+    await expect(B.locator('#chat-thread .msg')).toContainText('dinner at eight?')
   })
 
   test('private 1:1 A→B — B gets a locked, private banner nobody else would', async ({ browser }) => {
@@ -51,21 +54,30 @@ test.describe('messaging — group note & private 1:1', () => {
     await startSharing(B)
     await settle(A)
 
-    // A messages B privately from B's row on the Circle tab (the ✉️ button).
+    // A messages B privately from B's row on the Circle tab (the ✉️ button) —
+    // it opens the whole 1:1 thread, not a one-shot box.
     await gotoTab(A, 'circle')
     await expect(A.locator('.member')).toHaveCount(2)
     await A.locator('.member [data-action="msg-member"]').first().click()
-    await expect(A.locator('#compose-sheet')).toBeVisible()
-    await A.fill('#compose-text', 'meet you round the back')
-    await A.click('[data-action="compose-send"]')
+    await expect(A.locator('#dm-sheet')).toBeVisible()
+    await A.fill('#dm-input', 'meet you round the back')
+    await A.click('[data-action="dm-send"]')
+    // My message appears in the open thread.
+    await expect(A.locator('#dm-thread .msg.mine')).toContainText('meet you round the back')
 
     const banner = B.locator('.buzz-banner.private')
     await expect(banner).toBeVisible()
     await expect(banner).toContainText('meet you round the back')
     await expect(banner).toContainText('just you')
+
+    // And B's copy lives under You → Private chats.
+    await gotoTab(B, 'you')
+    await expect(B.locator('.dm-row')).toContainText('meet you round the back')
+    await B.locator('.dm-row').first().click()
+    await expect(B.locator('#dm-thread .msg')).toContainText('meet you round the back')
   })
 
-  test('tapping a member pin on the map opens a private compose sheet for them', async ({ browser }) => {
+  test('tapping a member pin on the map opens their private thread', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
@@ -81,9 +93,9 @@ test.describe('messaging — group note & private 1:1', () => {
     await expect(pin.first()).toBeVisible()
     await pin.first().click()
 
-    // The tap opens the compose sheet aimed at B, marked private (the lock title).
-    await expect(A.locator('#compose-sheet')).toBeVisible()
-    await expect(A.locator('#compose-sheet')).toContainText('private')
+    // The tap opens B's private thread, marked private (the lock title).
+    await expect(A.locator('#dm-sheet')).toBeVisible()
+    await expect(A.locator('#dm-sheet')).toContainText('private')
   })
 
   test('cold start — a freshly-invited member accepts the inviter\'s first DM', async ({ browser }) => {
@@ -100,8 +112,8 @@ test.describe('messaging — group note & private 1:1', () => {
     // A messages B immediately — B has never emitted a beacon/buzz/join signal.
     await gotoTab(A, 'circle')
     await A.locator('.member [data-action="msg-member"]').first().click()
-    await A.fill('#compose-text', 'welcome aboard')
-    await A.click('[data-action="compose-send"]')
+    await A.fill('#dm-input', 'welcome aboard')
+    await A.click('[data-action="dm-send"]')
 
     const banner = B.locator('.buzz-banner.private')
     await expect(banner).toBeVisible()

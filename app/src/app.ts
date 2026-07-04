@@ -34,7 +34,6 @@ import {
   classifyPresence,
   buildBuzzSignal,
   decryptBuzz,
-  DEFAULT_BUZZ_REASONS,
   buildDisbandSignal,
   decryptDisband,
   DISBAND_SIGNAL_TYPE,
@@ -122,6 +121,7 @@ async function checkForUpdate(): Promise<void> {
   } catch { /* offline — checked again on the next boot, resume, or 6-hour tick */ }
 }
 let showAdvanced = false // You-tab advanced settings fold (session-only)
+let showSettings = false // You-tab settings fold (session-only) — You leads with you, not dials
 let awaitSince = 0 // when the remote-invite wait began — drives the 'still waiting' guidance
 const AWAIT_GUIDE_MS = 60_000
 let monitorTimer = 0
@@ -179,9 +179,22 @@ function markWrapSeen(id: string): boolean {
   if (seenWrapIds.size > 1000) seenWrapIds.delete(seenWrapIds.values().next().value as string)
   return true
 }
-// The compose sheet, when open: a free-text message aimed at the whole group or one
-// member (their pubkey). Mounted as an overlay so opening it never tears the map.
-let compose: { target: 'group' | string } | null = null
+// The open private-chat thread sheet, when any: the peer's pubkey. Mounted as an
+// overlay (like the old compose sheet) so opening it never tears the map.
+let dmPeer: string | null = null
+// Native only: is flock exempt from Doze battery optimisation? Without it Android
+// suspends the WebView's relay connection minutes after the screen locks — fixes
+// keep arriving from the foreground service, but nothing can be PUBLISHED, so the
+// circle silently stops seeing you. null = not yet checked (or web).
+let batteryExempt: boolean | null = null
+let batteryAsked = false // shown the system exemption dialog this session — don't re-nag
+// A pending roll-call ("checked in — where is everyone?") awaiting MY answer.
+// Only ever answered by an explicit tap; expires quietly (see LOC_ASK_WINDOW_SEC).
+let locAsk: { circleId: string; from: string; at: number } | null = null
+const LOC_ASK_WINDOW_SEC = 15 * 60
+// Only a FRESH incoming message rings/notifies — a relay replaying history on a
+// re-subscribe (reconnect, reboot) must repopulate the thread silently.
+const MSG_FRESH_SEC = 3600
 // Long-press-a-chip action sheet, when open: the id of the circle it acts on. Like
 // compose, mounted as an overlay so it survives the re-renders around it.
 let circleMenu: string | null = null
@@ -448,7 +461,7 @@ function avatarHtml(pk: string, isMe: boolean, small = false): string {
  *  arriving with the screen off). `opts` route it to the right channel (private
  *  1:1 / group / alert) with its own heading and stack. Shell only; a silent
  *  no-op in the PWA. */
-type NotifyOpts = { kind?: 'dm' | 'group' | 'alert' | 'ring' | 'general'; title?: string; group?: string }
+type NotifyOpts = { kind?: 'dm' | 'group' | 'alert' | 'ring' | 'general'; title?: string; group?: string; sender?: string; conversation?: string }
 function notifyIfHidden(msg: string, opts?: NotifyOpts): void {
   if (document.hidden && isNativeShell()) {
     void import('../../native/notify').then((n) => n.notify(msg, opts)).catch(() => { /* shell only */ })
@@ -507,12 +520,24 @@ async function syncBle(): Promise<void> {
  *  silently for the ones it isn't for. Dedup ONCE here (a mesh frame floods and may
  *  also arrive via relay), then dispatch per circle without re-deduping. */
 function onBleFrame(data: string): void {
-  let ev: { id?: unknown; pubkey?: unknown; content?: unknown }
+  let ev: { id?: unknown; pubkey?: unknown; content?: unknown; sig?: unknown }
   try { ev = JSON.parse(data) } catch { return }
   if (typeof ev?.id !== 'string' || typeof ev.pubkey !== 'string' || typeof ev.content !== 'string') return
   if (bleActive && !markWrapSeen(ev.id)) return
   const wrap = { pubkey: ev.pubkey, content: ev.content, id: ev.id }
   for (const c of persisted.circles) void dispatchWrap(c.id, wrap, deriveInbox(c.seedHex).sk)
+  // BRIDGE: a wrap that reached me over Bluetooth may have come from a phone
+  // with no signal — if I have connectivity, piggyback it up to the relays so
+  // the rest of the circle (not in radio range) still hears it. Best-effort,
+  // deduped above; relays drop duplicates by id, and the wrap is opaque
+  // (kind 1059) so I re-publish nothing I can't already see on the wire.
+  // Metadata cost: in crowd-mesh this links MY IP to another circle's inbox
+  // tag on my relays — accepted within the festival opt-in (it IS the feature:
+  // whoever has bars carries the crowd). Discreet mode only ever carries the
+  // active circle's wraps, which my IP already subscribes to.
+  if (bleActive && typeof ev.sig === 'string' && navigator.onLine) {
+    void svc.publishSigned(persisted.relayUrls, ev as never).catch(() => { /* best-effort */ })
+  }
 }
 
 function toast(msg: string): void {
@@ -623,11 +648,14 @@ function bootUnlocked(): void {
     // moment the user brings flock forward — a fresh deploy then shows within
     // seconds of reopening, not up to 6 hours later. Capacitor resume is the
     // robust signal; visibilitychange is the WebView-level fallback. Both are
-    // throttled inside checkForUpdate.
-    void import('../../native/lifecycle').then((l) => l.onResume(() => { void checkForUpdate() }))
+    // throttled inside checkForUpdate. Coming forward also re-reads the battery
+    // exemption (the user may just have granted it in system settings) and
+    // clears delivered message notifications — the app being open IS the read.
+    void import('../../native/lifecycle').then((l) => l.onResume(() => { onForeground() }))
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') void checkForUpdate()
+      if (document.visibilityState === 'visible') onForeground()
     })
+    void refreshBatteryExempt()
   }
   void restoreSignet()
 }
@@ -790,9 +818,20 @@ function render(opts?: { animate?: boolean }): void {
   root.innerHTML = `${findPingBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   patchBuzzBanner() // the buzz banner lives in its own layer — keep it in sync after a render
   wireApp()
-  if (compose) mountCompose() // a full render drops the overlay — put it back
+  if (dmPeer) mountDmSheet() // a full render drops the overlay — put it back
   if (circleMenu) mountCircleMenu() // same for the long-press action sheet
   restoreFocusedInput(keep)
+  // Being ON Home with the thread in view IS reading it (Signal-in-the-chat).
+  if (tab === 'home' && !document.hidden && activeCircle()) markThreadRead(chatKeyOf((activeCircle() as store.Circle).id))
+  scrollChatToEnd()
+}
+
+/** Pin the visible thread(s) to their newest message after a (re)render. */
+function scrollChatToEnd(): void {
+  for (const id of ['chat-thread', 'dm-thread']) {
+    const el = document.getElementById(id)
+    if (el) el.scrollTop = el.scrollHeight
+  }
 }
 
 // ── Views: app ───────────────────────────────────────────────────────────────
@@ -895,38 +934,61 @@ function festivalCard(c: store.Circle): string {
   </div>`
 }
 
-/** One-tap "buzz the circle" quick actions. "Come to me" is special: it also
- *  shares a one-shot exact spot, so it asks first (see doComeToMe). */
+/** One-tap "buzz the circle" quick actions — now the chat's preset chips.
+ *  "Come to me" is special: it also shares a one-shot exact spot, so it asks
+ *  first (see doComeToMe). "Check in" is special too: it fans out to EVERY
+ *  circle and asks them all to show where they are (see doCheckIn). */
 const QUICK_ACTIONS = ['Check in', 'Come to me', 'Where are you?', 'Call me', 'On my way'] as const
 
-function quickActionsCard(c: store.Circle): string {
-  const chip = (r: string): string => r === 'Come to me'
-    ? `<button class="btn small${comeToMeArmed ? ' primary' : ''}" data-action="come-to-me">${esc(r)}</button>`
-    : `<button class="btn small" data-action="quick-buzz" data-reason="${esc(r)}">${esc(r)}</button>`
-  const confirm = comeToMeArmed
-    ? `<div class="note">Buzz everyone and share your <strong>exact spot</strong> with ${esc(c.name)} — just this once? Your slider setting stays as it is.</div>
-       <div class="row" style="gap:10px">
-         <button class="btn small primary" data-action="come-to-me-confirm">Yes — come to me</button>
-         <button class="btn small ghost" data-action="come-to-me-cancel">Cancel</button>
-       </div>`
-    : ''
-  return `<div class="section-title" style="margin-top:22px">Buzz the circle</div>
-  <div class="card stack">
-    <div class="chip-row">${QUICK_ACTIONS.map(chip).join('')}</div>
-    ${confirm}
-    ${hint('quick-buzz', "One tap buzzes everyone's phone with your message. “Come to me” also shares your exact spot once — it asks before it does.")}
-  </div>`
+/** How much of a thread the UI renders (the store keeps CHAT_MAX_PER_THREAD). */
+const CHAT_SHOWN = 50
+
+// ── Chat history (threads live in persisted.chats / persisted.dms) ──────────
+const chatKeyOf = (circleId: string): string => `c:${circleId}`
+const dmKeyOf = (pk: string): string => `d:${pk}`
+
+/** Append to a circle's group thread. False = a replay echo (nothing changed). */
+function appendChat(circleId: string, m: store.ChatMessage): boolean {
+  const next = store.withChatMessage(persisted.chats?.[circleId], m)
+  if (!next) return false
+  persisted.chats = { ...(persisted.chats ?? {}), [circleId]: next }
+  store.save(persisted)
+  return true
 }
 
-/** "Send a message" — free text to the whole circle, or (by tapping a pin) to one
- *  person privately. This card is the group entry point; the per-member entry is a
- *  map pin or a Circle-tab row. */
-function messageCard(c: store.Circle): string {
-  return `<div class="section-title" style="margin-top:22px">Messages</div>
-  <div class="card stack">
-    <button class="btn small primary" data-action="msg-group">✍️ Message everyone in ${esc(c.name)}</button>
-    <div class="note">Send a written note to the whole circle. To message just one person, tap their pin on the map — that message is private to them.</div>
-  </div>`
+/** Append to a 1:1 thread. False = a replay echo. */
+function appendDm(peer: string, m: store.ChatMessage): boolean {
+  const next = store.withChatMessage(persisted.dms?.[peer], m)
+  if (!next) return false
+  persisted.dms = { ...(persisted.dms ?? {}), [peer]: next }
+  store.save(persisted)
+  return true
+}
+
+function threadReadAt(key: string): number { return persisted.chatReadAt?.[key] ?? 0 }
+
+function markThreadRead(key: string): void {
+  const now = nowSec()
+  if (threadReadAt(key) >= now) return
+  persisted.chatReadAt = { ...(persisted.chatReadAt ?? {}), [key]: now }
+  store.save(persisted)
+}
+
+/** Unread = newer than my last read and not mine. */
+function unreadIn(list: store.ChatMessage[] | undefined, key: string): number {
+  const me = persisted.identity?.pk
+  const since = threadReadAt(key)
+  return (list ?? []).reduce((n, m) => n + (m.at > since && m.from !== me ? 1 : 0), 0)
+}
+
+/** Unread group messages across every circle — the Home tab badge. */
+function groupUnreadTotal(): number {
+  return persisted.circles.reduce((n, c) => n + unreadIn(persisted.chats?.[c.id], chatKeyOf(c.id)), 0)
+}
+
+/** Unread private messages across every 1:1 thread — the You tab badge. */
+function dmUnreadTotal(): number {
+  return Object.entries(persisted.dms ?? {}).reduce((n, [pk, list]) => n + unreadIn(list, dmKeyOf(pk)), 0)
 }
 
 function homeView(): string {
@@ -946,9 +1008,10 @@ function homeView(): string {
     <div id="home-panel">${homePanelInner(c)}</div>`
 }
 
-/** Everything below the Home map — the share toggle, precision, messaging and
- *  invite cards. Isolated so a presence tick can re-render it in place, leaving
- *  the live map above untouched (mirrors the map tab's #map-panel pattern). */
+/** Everything below the Home map — the scrollable home: share toggle, the
+ *  people, the circle chat, then the dials (precision, find-each-other).
+ *  Isolated so a presence tick can re-render it in place, leaving the live map
+ *  above untouched (mirrors the map tab's #map-panel pattern). */
 function homePanelInner(c: store.Circle): string {
   return `
     <div class="actions">
@@ -957,13 +1020,111 @@ function homePanelInner(c: store.Circle): string {
       </button>
       ${hint('home-watch', 'Sharing live lets your circle see where you are — you choose how closely with the slider below. Stop any time; nothing is shared while it\'s off. Tap anyone on the map to message them privately.')}
     </div>
-    ${lostCard(c)}
-    ${precisionCard(c)}
-    ${festivalCard(c)}
-    ${messageCard(c)}
-    ${quickActionsCard(c)}
     ${geoIssueCard()}
-    ${inviteCta()}`
+    ${batteryCard()}
+    ${rollCallCard()}
+    ${lostCard(c)}
+    ${memberStrip()}
+    ${inviteCta()}
+    ${chatSection(c)}
+    ${precisionCard(c)}
+    ${festivalCard(c)}`
+}
+
+/** The circle's people at a glance — avatars with a presence dot, right under
+ *  the map. Tap someone to message them privately; tap yourself for your row
+ *  on the Circle tab; the ＋ leads to inviting. */
+function memberStrip(): string {
+  const me = persisted.identity?.pk ?? ''
+  const st = active()
+  const items = members().map((pk) => {
+    const b = st?.beacons.get(pk)
+    const p = b ? classifyPresence([b], nowSec(), { staleAfterSeconds: 600 })[0] : null
+    const dot = p ? (p.status === 'active' ? 'on' : 'idle') : ''
+    const isMe = pk === me
+    const label = isMe ? 'You' : nameFor(pk)
+    return `<button class="strip-member" data-action="strip-member" data-pk="${pk}" aria-label="${esc(isMe ? 'You' : `Message ${label} privately`)}">
+      <span class="strip-avatar">${avatarHtml(pk, isMe)}${dot ? `<span class="presence-dot ${dot}"></span>` : ''}</span>
+      <span class="strip-name">${esc(label.length > 9 ? `${label.slice(0, 8)}…` : label)}</span>
+    </button>`
+  }).join('')
+  return `<div class="member-strip">${items}<button class="strip-member add" data-action="go-invite" aria-label="Invite someone">
+    <span class="strip-avatar plus">＋</span><span class="strip-name">Invite</span>
+  </button></div>`
+}
+
+/** The circle chat — one running, Signal-style thread for everyone in the
+ *  circle. Quick actions live here as presets (they ARE messages); "Come to me"
+ *  keeps its confirm because it also shares an exact spot. */
+function chatSection(c: store.Circle): string {
+  const list = persisted.chats?.[c.id] ?? []
+  const thread = list.slice(-CHAT_SHOWN).map((m, i, arr) => chatBubble(m, arr[i - 1])).join('')
+    || `<div class="note chat-empty">No messages yet — say something. Everyone in ${esc(c.name)} sees it; it's encrypted end-to-end and lives only on your phones.</div>`
+  const chip = (r: string): string => r === 'Come to me'
+    ? `<button class="btn small${comeToMeArmed ? ' primary' : ''}" data-action="come-to-me">${esc(r)}</button>`
+    : r === 'Check in'
+      ? `<button class="btn small" data-action="check-in">${esc(r)}</button>`
+      : `<button class="btn small" data-action="chat-preset" data-reason="${esc(r)}">${esc(r)}</button>`
+  const confirm = comeToMeArmed
+    ? `<div class="note">Buzz everyone and share your <strong>exact spot</strong> with ${esc(c.name)} — just this once? Your slider setting stays as it is.</div>
+       <div class="row" style="gap:10px">
+         <button class="btn small primary" data-action="come-to-me-confirm">Yes — come to me</button>
+         <button class="btn small ghost" data-action="come-to-me-cancel">Cancel</button>
+       </div>`
+    : ''
+  return `<div class="section-title" style="margin-top:22px">Chat · ${esc(c.name)}</div>
+  <div class="card chat-card">
+    <div class="chat-thread" id="chat-thread">${thread}</div>
+    <div class="chip-row chat-presets">${QUICK_ACTIONS.map(chip).join('')}</div>
+    ${confirm}
+    <div class="chat-composer">
+      <textarea class="input" id="chat-input" rows="1" maxlength="500" placeholder="Message ${esc(c.name)}…" autocapitalize="sentences"></textarea>
+      <button class="btn small primary" data-action="chat-send">Send</button>
+    </div>
+    ${hint('chat', 'Messages go to everyone in this circle, encrypted end-to-end — the servers never see them. “Check in” also asks all your circles to show where they are. To message one person privately, tap them above or on the map.')}
+  </div>`
+}
+
+/** One chat bubble. The sender's name heads a run of their messages (Signal
+ *  style) — never on my own (right-aligned) bubbles. */
+function chatBubble(m: store.ChatMessage, prev?: store.ChatMessage): string {
+  const mine = m.from === persisted.identity?.pk
+  const who = !mine && (!prev || prev.from !== m.from) ? `<span class="msg-who">${esc(nameFor(m.from))}</span>` : ''
+  return `<div class="msg${mine ? ' mine' : ''}">${who}<span class="msg-text">${esc(m.text)}</span><span class="msg-when">${esc(fmtChatTime(m.at))}</span></div>`
+}
+
+/** "14:02" today, "Wed 14:02" earlier — a running conversation's clock. */
+function fmtChatTime(at: number): string {
+  const d = new Date(at * 1000)
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
+}
+
+/** Sharing is on but flock isn't battery-exempt: the one setting that makes
+ *  locked-screen sharing actually hold. Actionable card, not a silent gap. */
+function batteryCard(): string {
+  if (!isNativeShell() || !sharing || batteryExempt !== false) return ''
+  return `<div class="card stack geo-issue" style="margin-top:14px">
+    <strong>Keep sharing with the screen off</strong>
+    <div class="note">Android pauses flock's connection a few minutes after the phone locks, so your circle would stop seeing you mid-walk. Allow flock to ignore battery optimisation — it's the same setting Signal asks for, and the location toggle still rules what's shared.</div>
+    <button class="btn small primary" data-action="battery-allow">Allow</button>
+  </div>`
+}
+
+/** A pending roll-call: someone checked in and asked where everyone is. Only an
+ *  explicit tap answers it — never automatic (FLOCK §6: an ask is not a demand). */
+function rollCallCard(): string {
+  if (!locAsk || nowSec() - locAsk.at > LOC_ASK_WINDOW_SEC) return ''
+  const c = persisted.circles.find((x) => x.id === locAsk?.circleId)
+  if (!c) return ''
+  return `<div class="card stack geo-issue" style="margin-top:14px" role="alert">
+    <strong>${esc(nameFor(locAsk.from))} asked where everyone is</strong>
+    <div class="note">Share your location once with ${esc(c.name)}? They'd see you to within <strong>${esc(precisionSize(sharePrecisionOf(c)))}</strong> — your usual detail, one time. A place you've marked private stays private.</div>
+    <div class="row" style="gap:10px">
+      <button class="btn small primary" data-action="rollcall-share">Share once</button>
+      <button class="btn small ghost" data-action="rollcall-dismiss">Not now</button>
+    </div>
+  </div>`
 }
 
 /** Shown on THIS phone when the circle has flagged it lost — written for
@@ -1165,18 +1326,6 @@ function circleView(): string {
         <button class="switch${c.pingConsent ? ' on' : ''}" data-action="toggle-ping-consent" role="switch" aria-checked="${!!c.pingConsent}" aria-label="Let this circle find my phone"><span class="knob"></span></button>
       </div>
       <div class="note">${hint('ping-consent', "If your phone is ever lost, members can ask it for its exact location to come and fetch it. It only answers when it's been marked lost, warns you first with a chance to say no, and never turns on ongoing sharing. Off by default.")}</div>
-    </div>
-
-    <div class="section-title" style="margin-top:22px">Buzz the circle</div>
-    <div class="card stack">
-      <div class="chip-row">
-        ${DEFAULT_BUZZ_REASONS.map((r) => `<button class="btn small" data-action="buzz" data-reason="${esc(r)}">${esc(r)}</button>`).join('')}
-      </div>
-      <div class="row" style="gap:8px">
-        <input class="input" id="buzz-custom" placeholder="Custom reason…" autocapitalize="sentences" />
-        <button class="btn small primary" data-action="buzz">Buzz</button>
-      </div>
-      <div class="note">A gentle alert to everyone — their phone buzzes with your reason.</div>
     </div>`
 }
 
@@ -1186,7 +1335,7 @@ function youView(): string {
   void refreshDndAccess() // native: reflect current DND-access grant (re-renders only if it changed)
   return `
     ${topbar()}
-    <h2 style="margin-bottom:14px">You &amp; settings</h2>
+    <h2 style="margin-bottom:14px">You</h2>
     <div class="section-title">Identity</div>
     <div class="card stack">
       <div class="kv"><span class="k">Your invite key</span><span>${shortNpub(me.pk)}</span></div>
@@ -1201,6 +1350,40 @@ function youView(): string {
           ? 'Quick-start key, encrypted at rest by your App lock. Sign in with a signer to keep the key out of flock entirely.'
           : 'Quick-start key, stored in this browser only. Turn on the App lock (Advanced) to encrypt it at rest, or sign in with a signer.'}</div>
     </div>
+    <div class="section-title" style="margin-top:18px">Private chats</div>
+    ${privateChatsSection()}
+    <button class="btn ghost" data-action="toggle-settings" style="margin-top:18px" aria-expanded="${showSettings}">${showSettings ? 'Hide settings' : 'Settings…'}</button>
+    ${showSettings ? settingsSections(me, c) : ''}
+    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose<br/>version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
+}
+
+/** The 1:1 threads — most recent first, unread badged. PMs live here (Home is
+ *  the circle's shared space; your private conversations are yours). */
+function privateChatsSection(): string {
+  const me = persisted.identity?.pk
+  const entries = Object.entries(persisted.dms ?? {})
+    .map(([pk, list]) => ({ pk, last: list[list.length - 1], unread: unreadIn(list, dmKeyOf(pk)) }))
+    .filter((e) => e.last && e.pk !== me)
+    .sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0))
+  if (!entries.length) {
+    return '<div class="card muted">No private chats yet. Tap someone on the map or on Home to message them — only the two of you can read it.</div>'
+  }
+  const rows = entries.map(({ pk, last, unread }) => {
+    const preview = (last?.from === me ? 'You: ' : '') + (last?.text ?? '')
+    return `<div class="member dm-row" data-action="open-dm" data-pk="${pk}" role="button" tabindex="0">
+      ${avatarHtml(pk, false)}
+      <div class="meta"><div class="who">${esc(nameFor(pk))}</div><div class="when">${esc(preview.length > 44 ? `${preview.slice(0, 43)}…` : preview)}</div></div>
+      <span class="muted" style="font-size:12px">${last ? esc(fmtAgo(nowSec() - last.at)) : ''}</span>
+      ${unread ? `<span class="nav-badge inline">${unread > 9 ? '9+' : unread}</span>` : ''}
+    </div>`
+  }).join('')
+  return `<div class="list">${rows}</div>`
+}
+
+/** Day-to-day preferences, folded out of the way — You leads with the person
+ *  and their conversations; the dials appear on request. */
+function settingsSections(me: store.Identity, c: store.Circle): string {
+  return `
     ${isNativeShell() ? `<div class="section-title" style="margin-top:18px">Notifications</div>
     <div class="card stack">
       <div class="row" style="justify-content:space-between">
@@ -1257,8 +1440,7 @@ function youView(): string {
       </div>
     </div>
     <button class="btn ghost" data-action="toggle-advanced" style="margin-top:18px" aria-expanded="${showAdvanced}">${showAdvanced ? 'Hide advanced settings' : 'Advanced settings…'}</button>
-    ${showAdvanced ? advancedSections(me, c) : ''}
-    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose<br/>version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
+    ${showAdvanced ? advancedSections(me, c) : ''}`
 }
 
 /** The sharp tools, folded away by default: servers, security, disband, reset.
@@ -1346,9 +1528,9 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
 }
 
 function navView(): string {
-  const item = (id: string, label: string, icon: string): string =>
-    `<button data-action="tab" data-tab="${id}" aria-current="${tab === id}">${icon}<span>${label}</span></button>`
-  return `<nav class="nav">${item('home', 'Home', ICON.home)}${item('map', 'Map', ICON.map)}${item('circle', 'Circle', ICON.circle)}${item('you', 'You', ICON.you)}</nav>`
+  const item = (id: string, label: string, icon: string, unread = 0): string =>
+    `<button data-action="tab" data-tab="${id}" aria-current="${tab === id}">${icon}<span>${label}</span>${unread ? `<span class="nav-badge">${unread > 9 ? '9+' : unread}</span>` : ''}</button>`
+  return `<nav class="nav">${item('home', 'Home', ICON.home, groupUnreadTotal())}${item('map', 'Map', ICON.map)}${item('circle', 'Circle', ICON.circle)}${item('you', 'You', ICON.you, dmUnreadTotal())}</nav>`
 }
 
 // ── Map screen ───────────────────────────────────────────────────────────────
@@ -1554,10 +1736,26 @@ function wireApp(): void {
 /** The Home-screen "location detail" slider. `input` patches the labels in place
  *  (a full render mid-drag would tear the control out from under the thumb);
  *  `change` commits: persist, re-tier sampling, and re-emit promptly so the
- *  circle sees the new detail level straight away. */
+ *  circle sees the new detail level straight away.
+ *  Two guards against "it changed by itself":
+ *  - while a finger is on the thumb, background panel rebuilds are DEFERRED
+ *    (sliderDragging → homePanelDirty), so the control is never torn mid-drag;
+ *  - a `change` from a slider no longer in the DOM (a rebuild raced the release)
+ *    is ignored — a detached thumb must never commit a stale value. */
+let sliderDragging = false
+let homePanelDirty = false
 function wirePrecisionSlider(): void {
   const slider = document.getElementById('share-precision') as HTMLInputElement | null
   if (!slider) return
+  const dragEnd = (): void => {
+    if (!sliderDragging) return
+    sliderDragging = false
+    if (homePanelDirty) { homePanelDirty = false; renderHomePanel() }
+  }
+  slider.addEventListener('pointerdown', () => { sliderDragging = true })
+  slider.addEventListener('pointerup', dragEnd)
+  slider.addEventListener('pointercancel', dragEnd)
+  slider.addEventListener('blur', dragEnd)
   slider.addEventListener('input', () => {
     const p = Number(slider.value)
     const l = document.getElementById('precision-label')
@@ -1565,7 +1763,11 @@ function wirePrecisionSlider(): void {
     const n = document.getElementById('precision-note')
     if (n) n.textContent = precisionNote(p)
   })
-  slider.addEventListener('change', () => commitSharePrecision(Number(slider.value)))
+  slider.addEventListener('change', () => {
+    dragEnd()
+    if (!slider.isConnected) return // detached by a rebuild — its value is stale
+    commitSharePrecision(Number(slider.value))
+  })
 }
 
 function commitSharePrecision(value: number): void {
@@ -1624,8 +1826,8 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   if (!container) return
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
   mapView = await MapView.create(container, fix ?? undefined, { circleId: activeCircle()?.id })
-  // Tap a member's pin → message them privately (skip my own pin — that's just me).
-  mapView.onMemberClick((pk) => { if (pk && pk !== persisted.identity?.pk) openCompose(pk) })
+  // Tap a member's pin → their private thread (skip my own pin — that's just me).
+  mapView.onMemberClick((pk) => { if (pk && pk !== persisted.identity?.pk) openDmThread(pk) })
   if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
   updateMapData()
   requestAnimationFrame(() => mapView?.map.resize())
@@ -1742,16 +1944,42 @@ function refresh(): void {
   // refresh would discard a half-typed circle name (the inputs are uncontrolled).
   if (adding || !persisted.identity || !activeCircle()) return
   // Both map-bearing tabs update in place — a full render would destroy the live
-  // map canvas (and any open compose overlay) under the user on every presence tick.
-  if (tab === 'map' && mapView) { updateMapData(); renderMapPanel(); patchBuzzBanner() }
-  else if (tab === 'home' && mapView) { updateMapData(); renderHomePanel(); patchBuzzBanner() }
+  // map canvas (and any open thread sheet) under the user on every presence tick.
+  if (tab === 'map' && mapView) { updateMapData(); renderMapPanel(); patchBuzzBanner(); patchNavBadges() }
+  else if (tab === 'home' && mapView) { updateMapData(); renderHomePanel(); patchBuzzBanner(); patchNavBadges() }
   else render({ animate: false }) // a background refresh must not replay the fade-in (it reads as a flash)
 }
 
-/** Re-render Home's controls in place (share toggle, precision, messaging, invite)
+/** Keep the nav's unread badges honest during in-place refreshes (a DM landing
+ *  while the map tab is up must still light You) without a full rebuild. */
+function patchNavBadges(): void {
+  const nav = document.querySelector('.nav')
+  if (!nav) return
+  const set = (tabId: string, n: number): void => {
+    const btn = nav.querySelector(`[data-tab="${tabId}"]`)
+    if (!btn) return
+    const existing = btn.querySelector('.nav-badge')
+    if (!n) { existing?.remove(); return }
+    const label = n > 9 ? '9+' : String(n)
+    if (existing) { existing.textContent = label; return }
+    const el = document.createElement('span')
+    el.className = 'nav-badge'
+    el.textContent = label
+    btn.appendChild(el)
+  }
+  set('home', groupUnreadTotal())
+  set('you', dmUnreadTotal())
+}
+
+/** Re-render Home's controls in place (share toggle, people, chat, precision)
  *  plus the map status chip, leaving the live map canvas above untouched. Mirrors
- *  the map tab's renderMapPanel; re-binds only the panel's own actions. */
+ *  the map tab's renderMapPanel; re-binds only the panel's own actions.
+ *  Deferred while the precision slider is mid-drag — rebuilding the control
+ *  under the finger both kills the drag AND lets the detached slider commit a
+ *  stale value on release ("the slider changed by itself"). */
 function renderHomePanel(): void {
+  if (sliderDragging) { homePanelDirty = true; return }
+  const keep = captureFocusedInput() // half-typed chat must survive an incoming beacon
   const panel = document.getElementById('home-panel')
   if (panel) {
     panel.innerHTML = homePanelInner(activeCircle() as store.Circle)
@@ -1761,6 +1989,9 @@ function renderHomePanel(): void {
     })
     wirePrecisionSlider()
   }
+  restoreFocusedInput(keep)
+  if (tab === 'home' && !document.hidden && activeCircle()) markThreadRead(chatKeyOf((activeCircle() as store.Circle).id))
+  scrollChatToEnd()
   const status = document.getElementById('home-map-status')
   if (status) {
     const tmp = document.createElement('div')
@@ -2046,17 +2277,93 @@ function startMonitor(): void {
 }
 
 // ── Buzz ─────────────────────────────────────────────────────────────────────
-async function sendBuzz(reason: string, target?: string): Promise<void> {
+async function sendBuzz(reason: string, target?: string, opts?: { quiet?: boolean }): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
   const r = reason.trim()
   if (!r) { toast('Pick or type a reason'); return }
   try {
-    const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: r, ...(target ? { target } : {}) })
+    const at = nowSec()
+    const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: r, timestamp: at, ...(target ? { target } : {}) })
     await publishSignal(tmpl, c)
-    toast(target ? 'Buzzed' : 'Buzzed everyone')
-  } catch { toast('Buzz failed') }
+    // An untargeted buzz IS a circle-chat message — record my own side of the
+    // thread (recipients append on decrypt; my echo is skipped there).
+    if (!target) appendChat(c.id, { from: id.pk, text: r, at })
+    if (!opts?.quiet) toast(target ? 'Buzzed' : 'Buzzed everyone')
+  } catch { toast('Message failed — check your connection') }
+  refresh()
+}
+
+/** Send the circle-chat composer's text (or a preset chip) to everyone. */
+function chatSend(text: string): void {
+  const t = text.trim()
+  if (!t) { toast('Type a message first'); return }
+  const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
+  if (input) input.value = ''
+  void sendBuzz(t, undefined, { quiet: true }) // the message appearing in the thread IS the feedback
+}
+
+/** "Check in" — tell EVERY circle I'm OK, and ask them all to show where they
+ *  are (a roll-call). Receivers answer on their own terms: an explicit tap, at
+ *  their own detail, through the normal policy pipeline (see rollCallCard). */
+async function doCheckIn(): Promise<void> {
+  const id = persisted.identity
+  if (!id) return
+  let sent = 0
+  for (const c of persisted.circles) {
+    try {
+      const at = nowSec()
+      const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: 'Check in', ask: 'location', timestamp: at })
+      await publishSignal(tmpl, c)
+      appendChat(c.id, { from: id.pk, text: 'Check in', at })
+      sent++
+    } catch { /* keep going — other circles may still be reachable */ }
+  }
+  // My own answer to my own roll-call: freshen my pin if I'm already sharing.
+  const ac = activeCircle()
+  if (sharing && ac) { beaconCadence.delete(ac.id); void autoEmit() }
+  toast(sent === 0
+    ? "Couldn't check in — check your connection"
+    : sent === 1 ? 'Checked in — asked everyone to show where they are'
+    : `Checked in with ${sent} circles — asked everyone to show where they are`)
+  refresh()
+}
+
+/** Answer a roll-call: ONE beacon to that circle at my usual detail, through
+ *  the same disclosure pipeline as everything else (a private place still caps
+ *  or withholds it). Only ever called from an explicit tap. */
+async function doRollCallShare(): Promise<void> {
+  const ask = locAsk
+  locAsk = null
+  const c = ask ? persisted.circles.find((x) => x.id === ask.circleId) : null
+  const id = persisted.identity
+  if (!ask || !c || !id) { refresh(); return }
+  const fresh = await svc.currentPosition({ enableHighAccuracy: sharePrecisionOf(c) >= 7, maximumAge: 15_000, timeoutMs: 8000 })
+  if (fresh) fix = fresh
+  const use = fresh ?? fix
+  if (!use) { toast("Couldn't get a fix — try again by a window"); refresh(); return }
+  const plan = decideEmission({
+    mode: 'nightout',
+    position: { lat: use.lat, lon: use.lon },
+    trigger: 'none',
+    offGrid: false,
+    noReportZones: persisted.noReportZones,
+    accuracyMetres: use.accuracy,
+  }, { coarse: sharePrecisionOf(c) })
+  const type = signalTypeForReason(plan.reason)
+  if (!type || type === 'help' || plan.action === 'withhold') {
+    toast('Your spot stays private here') // a no-report place wins, quietly
+    refresh()
+    return
+  }
+  try {
+    const geohash = encode(use.lat, use.lon, plan.precision)
+    await publishSignal(await buildLocationSignal({ groupId: c.id, seedHex: c.seedHex, signalType: type, geohash, precision: plan.precision }), c)
+    saveBeacon(c.id, { member: id.pk, geohash, precision: plan.precision, timestamp: nowSec() })
+    toast(`Shared once with ${c.name} — to within ${precisionSize(plan.precision)}`)
+  } catch { toast("Couldn't send — check your connection") }
+  refresh()
 }
 
 /** Ring a lost phone: a targeted buzz the recipient plays as a loud alarm even on
@@ -2228,19 +2535,22 @@ async function sendDm(pk: string, text: string): Promise<void> {
   try {
     const wrap = await buildDmWrap(signer, pk, { circleId: c.id, text: t })
     await svc.publishSigned(persisted.relayUrls, wrap as never)
-    toast(`Sent to ${nameFor(pk)}`)
+    appendDm(pk, { from: id.pk, text: t, at: nowSec() }) // my side of the thread
   } catch { toast('Message failed — check your connection') }
 }
 
-/** Open the compose sheet, aimed at the whole group or one member (their pubkey).
- *  Mounted as an overlay so it never tears down a live map underneath. */
-function openCompose(target: 'group' | string): void {
-  compose = { target }
-  mountCompose()
+/** Open a private 1:1 thread with one member. Mounted as an overlay so it never
+ *  tears down a live map underneath. Opening it IS reading it. */
+function openDmThread(pk: string): void {
+  if (!pk || pk === persisted.identity?.pk) return
+  dmPeer = pk
+  markThreadRead(dmKeyOf(pk))
+  mountDmSheet()
 }
-function closeCompose(): void {
-  compose = null
-  document.getElementById('compose-sheet')?.remove()
+function closeDmThread(): void {
+  dmPeer = null
+  document.getElementById('dm-sheet')?.remove()
+  refresh() // the You list + nav badge may have just changed (thread read)
 }
 
 /** Long-press a circle chip → an action sheet for that circle. What it offers
@@ -2294,41 +2604,35 @@ function mountCircleMenu(): void {
   })
   el.addEventListener('click', (e) => { if (e.target === el) closeCircleMenu() }) // tap the dim backdrop to dismiss
 }
-function composeTitle(): string {
-  if (!compose) return ''
-  if (compose.target === 'group') return `Message everyone in ${esc(activeCircle()?.name ?? 'your circle')}`
-  return `🔒 Message ${esc(nameFor(compose.target))} · private`
-}
-function composeSheet(): string {
-  if (!compose) return ''
-  const presets = compose.target === 'group' ? DEFAULT_BUZZ_REASONS : QUICK_ACTIONS
-  const chips = presets
-    .filter((r) => r !== 'Come to me') // exact-spot share is a Home-only, confirmed action
-    .map((r) => `<button class="btn small ghost" data-action="compose-preset" data-reason="${esc(r)}">${esc(r)}</button>`).join('')
-  const sub = compose.target === 'group'
-    ? 'Everyone in the circle sees this.'
-    : 'Private — encrypted so only they can read it.'
-  return `<div class="compose-sheet" id="compose-sheet" role="dialog" aria-modal="true">
-    <div class="compose-card">
+/** The private-chat sheet: the whole 1:1 thread plus a composer — Signal's chat
+ *  screen in miniature. The old one-shot compose sheet grew a memory. */
+function dmSheet(): string {
+  if (!dmPeer) return ''
+  const list = persisted.dms?.[dmPeer] ?? []
+  const thread = list.slice(-CHAT_SHOWN).map((m, i, arr) => chatBubble(m, arr[i - 1])).join('')
+    || `<div class="note chat-empty">No messages yet — it's just the two of you. Encrypted so only ${esc(nameFor(dmPeer))} can read it.</div>`
+  return `<div class="compose-sheet" id="dm-sheet" role="dialog" aria-modal="true">
+    <div class="compose-card dm-card">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
-        <strong>${composeTitle()}</strong>
-        <button class="bz-x" data-action="compose-cancel" aria-label="Close">✕</button>
+        <strong>🔒 ${esc(nameFor(dmPeer))} · private</strong>
+        <button class="bz-x" data-action="dm-close" aria-label="Close">✕</button>
       </div>
-      <div class="chip-row">${chips}</div>
-      <textarea class="input" id="compose-text" rows="2" maxlength="500" placeholder="Type a message…" autocapitalize="sentences"></textarea>
-      <div class="row" style="gap:10px">
-        <button class="btn small primary" data-action="compose-send">Send</button>
-        <button class="btn small ghost" data-action="compose-cancel">Cancel</button>
+      <div class="chat-thread dm-thread" id="dm-thread">${thread}</div>
+      <div class="chat-composer">
+        <textarea class="input" id="dm-input" rows="1" maxlength="500" placeholder="Message ${esc(nameFor(dmPeer))}…" autocapitalize="sentences"></textarea>
+        <button class="btn small primary" data-action="dm-send">Send</button>
       </div>
-      <div class="note">${sub}</div>
+      <div class="note">Private — encrypted so only they can read it. It stays out of the circle chat.</div>
     </div>
   </div>`
 }
-function mountCompose(): void {
-  document.getElementById('compose-sheet')?.remove()
-  if (!compose) return
+function mountDmSheet(opts?: { keepFocus?: boolean }): void {
+  const prior = document.getElementById('dm-input') as HTMLTextAreaElement | null
+  const keep = opts?.keepFocus ? prior?.value ?? '' : ''
+  document.getElementById('dm-sheet')?.remove()
+  if (!dmPeer) return
   const tmp = document.createElement('div')
-  tmp.innerHTML = composeSheet()
+  tmp.innerHTML = dmSheet()
   const el = tmp.firstElementChild as HTMLElement | null
   if (!el) return
   root.appendChild(el)
@@ -2336,17 +2640,19 @@ function mountCompose(): void {
     const action = node.getAttribute('data-action') as string
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   })
-  ;(el.querySelector('#compose-text') as HTMLTextAreaElement | null)?.focus()
+  const input = el.querySelector('#dm-input') as HTMLTextAreaElement | null
+  if (input) { input.value = keep; input.focus() }
+  scrollChatToEnd()
 }
-/** Send whatever's in the compose box (or a tapped preset) to the current target. */
-function composeSend(text: string): void {
-  if (!compose) return
-  const t = text.trim()
+/** Send the DM composer's text to the open thread, then refresh it in place. */
+function dmSend(): void {
+  const pk = dmPeer
+  const input = document.getElementById('dm-input') as HTMLTextAreaElement | null
+  const t = (input?.value ?? '').trim()
+  if (!pk) return
   if (!t) { toast('Type a message first'); return }
-  const target = compose.target
-  closeCompose()
-  if (target === 'group') void sendBuzz(t)
-  else void sendDm(target, t)
+  if (input) input.value = ''
+  void sendDm(pk, t).then(() => { if (dmPeer === pk) mountDmSheet({ keepFocus: true }) })
 }
 
 /** A private direct message just arrived on my personal inbox. Surface it as the
@@ -2358,10 +2664,21 @@ function onIncomingDm(dm: DirectMessage): void {
   if (me && dm.from === me.pk) return // my own message echoed back — never notify myself
   const c = persisted.circles.find((x) => x.id === dm.circleId)
   if (!c || !(c.members ?? []).includes(dm.from)) return // not a fellow circle member — drop
+  const isNew = appendDm(dm.from, { from: dm.from, text: dm.text, at: dm.at })
+  // A relay replaying history (re-subscribe after a reconnect) repopulates the
+  // thread silently — only a genuinely new, recent message rings.
+  if (!isNew || nowSec() - dm.at > MSG_FRESH_SEC) { refresh(); return }
+  if (dmPeer === dm.from && !document.hidden) {
+    // Their thread is open in front of me — the message lands IN the sheet.
+    markThreadRead(dmKeyOf(dm.from))
+    mountDmSheet({ keepFocus: true })
+    refresh()
+    return
+  }
   raiseBuzz({ from: dm.from, reason: dm.text, mine: true, circle: c.name, private: true })
-  // Private 1:1 → its own channel, headed by the sender and stacked per person
-  // (Signal-style: "Alex · on my way"), distinct from a whole-circle buzz.
-  notifyIfHidden(dm.text, { kind: 'dm', title: nameFor(dm.from), group: `dm:${dm.from}` })
+  // Private 1:1 → its own conversation notification, headed by the sender and
+  // updated in place per person (Signal-style), distinct from a circle thread.
+  notifyIfHidden(dm.text, { kind: 'dm', title: nameFor(dm.from), group: `dm:${dm.from}`, sender: nameFor(dm.from) })
   try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ }
   refresh()
 }
@@ -2428,14 +2745,24 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'toggle-invite': showInvite = !showInvite; spokenCode = null; render(); break
     case 'toggle-share': sharing ? stopSharing() : startSharing(); break
     case 'geo-retry': geoIssue = null; sharing = false; startSharing(); break
-    case 'quick-buzz': void sendBuzz(node.dataset.reason ?? ''); break
     case 'festival-start': startFestival(Number(node.dataset.hours ?? '3')); break
     case 'festival-stop': stopFestival(); break
-    case 'msg-group': openCompose('group'); break
-    case 'msg-member': openCompose(node.dataset.pk ?? ''); break
-    case 'compose-preset': composeSend(node.dataset.reason ?? ''); break
-    case 'compose-send': composeSend((document.getElementById('compose-text') as HTMLTextAreaElement | null)?.value ?? ''); break
-    case 'compose-cancel': closeCompose(); break
+    case 'msg-member': openDmThread(node.dataset.pk ?? ''); break
+    case 'strip-member': {
+      const pk = node.dataset.pk ?? ''
+      if (pk === persisted.identity?.pk) { tab = 'circle'; render() } else openDmThread(pk)
+      break
+    }
+    case 'chat-send': chatSend((document.getElementById('chat-input') as HTMLTextAreaElement | null)?.value ?? ''); break
+    case 'chat-preset': chatSend(node.dataset.reason ?? ''); break
+    case 'check-in': void doCheckIn(); break
+    case 'open-dm': openDmThread(node.dataset.pk ?? ''); break
+    case 'dm-send': dmSend(); break
+    case 'dm-close': closeDmThread(); break
+    case 'battery-allow': batteryAsked = true; void import('../../native/stayReachable').then((m) => m.requestBatteryExemption()).catch(() => { /* older shell */ }); break
+    case 'rollcall-share': void doRollCallShare(); break
+    case 'rollcall-dismiss': locAsk = null; refresh(); break
+    case 'toggle-settings': showSettings = !showSettings; render(); break
     case 'see-on-map': focusMemberPk = node.dataset.pk ?? null; tab = 'map'; render(); break
     case 'ask-lost': lostConfirmPk = node.dataset.pk ?? null; render(); break
     case 'cancel-lost': lostConfirmPk = null; render(); break
@@ -2474,7 +2801,6 @@ function handleAction(action: string, node: HTMLElement): void {
       persisted.hints = { on: true, dismissed: [] }
       store.save(persisted); toast('Tips are back on'); render(); break
     case 'remove-member': removeConfirmPk = null; void reseedCircle(node.dataset.pk); break
-    case 'buzz': void sendBuzz(node.dataset.reason ?? (document.getElementById('buzz-custom') as HTMLInputElement | null)?.value ?? ''); break
     case 'dismiss-buzz': dismissBuzz(); break
     case 'edit-petname': editingPetname = node.dataset.pk ?? null; render(); break
     case 'save-petname': savePetname(node.dataset.pk as string); break
@@ -2703,6 +3029,9 @@ function startSharing(): void {
   sharing = true
   syncWatch()
   void startBgWatch()
+  // Locked-screen sharing needs the Doze exemption — ask now (once), and keep
+  // the batteryCard honest either way. See refreshBatteryExempt for why.
+  void ensureBatteryExemptForSharing()
   render()
 }
 
@@ -2779,6 +3108,47 @@ async function stopStayReachable(): Promise<void> {
   if (!isNativeShell()) return
   try { await (await import('../../native/stayReachable')).stopStayReachable() }
   catch { /* already gone */ }
+}
+
+// ── Native shell: Doze battery exemption (the locked-screen fix) ─────────────
+// Sharing from a pocket only works if Android doesn't suspend the WebView's
+// relay connection when the screen locks. The foreground service keeps FIXES
+// flowing, but without the battery exemption Doze cuts the NETWORK minutes
+// after lock — beacons build and fail, and the circle silently stops seeing
+// you. So the exemption is requested when sharing starts, and its absence is
+// surfaced as an actionable card (batteryCard) rather than a silent gap.
+async function refreshBatteryExempt(): Promise<void> {
+  if (!isNativeShell()) return
+  try {
+    const m = await import('../../native/stayReachable')
+    const v = await m.isBatteryExempt()
+    if (v !== batteryExempt) { batteryExempt = v; refresh() }
+  } catch { /* older shell — leave null, no card */ }
+}
+
+/** On starting to share (native): ask for the exemption once per session if it's
+ *  missing. The card remains as the persistent, non-nagging path afterwards. */
+async function ensureBatteryExemptForSharing(): Promise<void> {
+  if (!isNativeShell()) return
+  try {
+    const m = await import('../../native/stayReachable')
+    batteryExempt = await m.isBatteryExempt()
+    if (!batteryExempt && !batteryAsked) {
+      batteryAsked = true
+      await m.requestBatteryExemption()
+    }
+  } catch { /* older shell */ }
+  refresh()
+}
+
+/** Everything that should happen the moment flock comes to the foreground. */
+function onForeground(): void {
+  void checkForUpdate()
+  void refreshBatteryExempt()
+  void refreshDndAccess()
+  // The app being open IS the read — clear delivered message notifications,
+  // exactly as Signal does. Foreground-service notifications are immune.
+  void import('../../native/notify').then((n) => n.clearDelivered()).catch(() => { /* shell only */ })
 }
 
 /** Flip the "stay reachable when closed" toggle: persist, start/stop the
@@ -3294,6 +3664,10 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       const bz = await decryptBuzz(c.seedHex, e.content)
       if (!me || bz.from !== me.pk) {
         const mine = !!me && bz.target === me.pk
+        // An untargeted buzz IS a circle-chat message — thread it. False = a
+        // relay replay repopulating history; those must stay silent.
+        const isNew = !bz.target ? appendChat(c.id, { from: bz.from, text: bz.reason, at: bz.timestamp }) : true
+        const isFresh = nowSec() - bz.timestamp <= MSG_FRESH_SEC
         // "Make it ring": if THIS phone is flagged lost and a member buzzed it,
         // escalate to the alarm channel — loud even on silent/DND — so whoever
         // is near it (a taxi driver, a passer-by) hears it. Output only: it
@@ -3303,17 +3677,25 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
           beingRung = { circleId: c.id, by: bz.from, at: nowSec() }
           notifyIfHidden(`${nameFor(bz.from)} is ringing this phone to help find it`, { kind: 'ring', title: c.name, group: `ring:${c.id}` })
           try { navigator.vibrate?.(RING_VIBRATION) } catch { /* no haptics */ }
-        } else {
+        } else if (isNew && isFresh) {
+          // A roll-call ask riding the buzz: if I'm already sharing to THIS
+          // circle, freshen my pin (no new disclosure). Otherwise surface the
+          // explicit "share once?" card — an ask is never an automatic answer.
+          if (bz.ask === 'location' && !bz.target) {
+            if (sharing && c.id === activeCircle()?.id) {
+              beaconCadence.delete(c.id)
+              void autoEmit()
+            } else {
+              locAsk = { circleId: c.id, from: bz.from, at: nowSec() }
+            }
+          }
           raiseBuzz({ from: bz.from, reason: bz.reason, mine, circle: c.name })
           // The buzz banner is in-app only — with the screen off it must still
-          // land as a system notification, like every other incoming signal.
-          // Group channel, headed by the circle and stacked per circle (Signal
-          // group style: title = "Night out", body = "Alex: Come to me") — a
-          // whole-circle buzz, visibly distinct from a private 1:1 DM.
-          const buzzBody = bz.reason
-            ? `${nameFor(bz.from)}: ${bz.reason}`
-            : `${nameFor(bz.from)} buzzed${mine ? ' you' : ' the circle'}`
-          notifyIfHidden(buzzBody, { kind: 'group', title: c.name, group: `group:${c.id}` })
+          // land as a system notification. With a sender attached this renders
+          // as a Signal-style conversation per circle: title "Night out", lines
+          // "Alex: Come to me", one notification updated in place.
+          const buzzBody = bz.reason || `Buzzed${mine ? ' you' : ' the circle'}`
+          notifyIfHidden(buzzBody, { kind: 'group', title: c.name, group: `group:${c.id}`, sender: nameFor(bz.from), conversation: c.name })
           try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
         }
       }

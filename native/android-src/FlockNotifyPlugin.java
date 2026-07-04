@@ -33,16 +33,29 @@ import android.os.Build;
 import android.provider.Settings;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
+import androidx.core.app.Person;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @CapacitorPlugin(name = "FlockNotify")
 public class FlockNotifyPlugin extends Plugin {
   private final AtomicInteger seq = new AtomicInteger(5000);
+
+  // Signal-style conversation notifications: ONE notification per conversation
+  // (the `group` key), updated in place with a running MessagingStyle history,
+  // instead of a new banner per message. In-memory only — process death (or
+  // clearAll on app-open) starts the history afresh, which matches "unread
+  // messages since you last looked". Static: the style must survive the plugin
+  // instance, but not the process.
+  private static final Map<String, NotificationCompat.MessagingStyle> convStyles = new HashMap<>();
+  private static final Map<String, Integer> convIds = new HashMap<>();
+  private static final AtomicInteger convSeq = new AtomicInteger(6000);
 
   private static final String RING_CHANNEL_ID = "flock-ring-v1";
   // Long, insistent — mirrors app/src/ring.ts RING_VIBRATION. Leading 0 = no delay.
@@ -54,14 +67,20 @@ public class FlockNotifyPlugin extends Plugin {
     String title = call.getString("title", "flock");
     String body = call.getString("body", "");
     String group = call.getString("group", null);
+    String sender = call.getString("sender", null);
+    String conversation = call.getString("conversation", null);
     if (channelId == null) { call.reject("channelId required"); return; }
 
-    int id = call.getInt("id", seq.getAndIncrement());
+    // A message with a known sender renders as a CONVERSATION (MessagingStyle):
+    // stable id per group key, so a second message updates the same notification
+    // with a "Sender: text" history — Signal's exact shape — rather than piling
+    // up separate banners.
+    boolean isConversation = sender != null && group != null;
+    int id = isConversation ? convId(group) : call.getInt("id", seq.getAndIncrement());
 
     NotificationCompat.Builder b = new NotificationCompat.Builder(getContext(), channelId)
       .setContentTitle(title)
       .setContentText(body)
-      .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
       .setSmallIcon(getContext().getApplicationInfo().icon)
       .setAutoCancel(true)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -69,6 +88,25 @@ public class FlockNotifyPlugin extends Plugin {
       // The whole point: full content on the lock screen, above the device's
       // global "hide sensitive content" setting (Signal's default behaviour).
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+
+    if (isConversation) {
+      NotificationCompat.MessagingStyle style = convStyles.get(group);
+      if (style == null) {
+        // MessagingStyle's "user" is the device owner; the label is only shown
+        // for messages THEY send, which flock never posts notifications for.
+        style = new NotificationCompat.MessagingStyle(new Person.Builder().setName("You").build());
+        if (conversation != null) {
+          style.setConversationTitle(conversation);
+          style.setGroupConversation(true);
+        }
+        convStyles.put(group, style);
+      }
+      style.addMessage(body, System.currentTimeMillis(),
+        new Person.Builder().setName(sender).build());
+      b.setStyle(style);
+    } else {
+      b.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
+    }
 
     if (group != null) b.setGroup(group);
     b.setContentIntent(launchIntent(id));
@@ -78,6 +116,24 @@ public class FlockNotifyPlugin extends Plugin {
     } catch (SecurityException e) {
       // POST_NOTIFICATIONS not granted — nothing to show.
     }
+    call.resolve();
+  }
+
+  private int convId(String group) {
+    Integer id = convIds.get(group);
+    if (id == null) { id = convSeq.getAndIncrement(); convIds.put(group, id); }
+    return id;
+  }
+
+  // Clear every delivered notification + conversation history — called when the
+  // app comes to the foreground (the app being open IS the read, like Signal).
+  // Foreground-service notifications (the location watcher, stay-reachable) are
+  // immune to cancelAll while their services run, so this can't kill those.
+  @PluginMethod
+  public void clearAll(PluginCall call) {
+    try { NotificationManagerCompat.from(getContext()).cancelAll(); } catch (Exception ignored) { }
+    convStyles.clear();
+    convIds.clear();
     call.resolve();
   }
 

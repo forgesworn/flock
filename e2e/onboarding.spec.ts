@@ -38,7 +38,7 @@ test.describe('onboarding & circle setup', () => {
     await gotoTab(A, 'home')
     await expect(A.locator('[data-action="toggle-share"]')).toBeVisible()
     await expect(A.locator('#share-precision')).toBeVisible()
-    await expect(A.locator('[data-action="quick-buzz"][data-reason="Check in"]')).toBeVisible()
+    await expect(A.locator('[data-action="check-in"]')).toBeVisible()
     await expect(A.locator('[data-action="come-to-me"]')).toBeVisible()
   })
 })

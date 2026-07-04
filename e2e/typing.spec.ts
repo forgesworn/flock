@@ -12,19 +12,18 @@ test.describe('typing survives inbound re-renders (audit follow-up)', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // B starts typing a custom reason — with real keystrokes, focus in the field.
-    await gotoTab(B, 'circle')
-    await B.locator('#buzz-custom').pressSequentially('meet at the corner', { delay: 20 })
+    // B starts typing a chat message — with real keystrokes, focus in the field.
+    await gotoTab(B, 'home')
+    await B.locator('#chat-input').pressSequentially('meet at the corner', { delay: 20 })
 
     // A's buzz lands on B mid-thought and re-renders B's whole screen.
     await sendBuzz(A, 'where are you?')
     await expect(B.locator('.buzz-banner')).toBeVisible()
 
     // B's typing is still there — value AND focus — and sending it works.
-    await expect(B.locator('#buzz-custom')).toHaveValue('meet at the corner')
-    await B.locator('#buzz-custom').press('End')
-    await B.click('[data-action="buzz"]:not([data-reason])')
-    await gotoTab(A, 'circle')
+    await expect(B.locator('#chat-input')).toHaveValue('meet at the corner')
+    await B.locator('#chat-input').press('End')
+    await B.click('[data-action="chat-send"]')
     await expect(A.locator('.buzz-banner')).toContainText('meet at the corner')
   })
 })
