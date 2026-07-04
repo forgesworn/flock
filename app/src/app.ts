@@ -57,7 +57,7 @@ import {
 
 // ── State ──────────────────────────────────────────────────────────────────
 let persisted = store.load()
-let tab: 'home' | 'map' | 'circle' | 'you' = 'home'
+let tab: 'home' | 'chat' | 'circle' | 'you' = 'home'
 let fix: svc.Fix | null = null
 let sharing = false
 let geoIssue: 'denied' | 'nofix' | null = null // actionable location trouble shown as a card, not a toast
@@ -235,6 +235,7 @@ let resetConfirm = false // inline confirm for the destructive "sign out & reset
 let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
 let lostConfirmPk: string | null = null // member pk pending an inline "report lost" confirm
 let editingPetname: string | null = null // pubkey whose nickname is being edited inline
+let expandedMemberPk: string | null = null // Circle tab: whose routine actions (message/locate/edit/remove) are revealed
 let dmComeToMeArmed = false // PM "Come to me" inline confirm is open (it shares an exact spot, privately, to just this person)
 
 // Per-circle live state — signals are circle-scoped, so beacons from one circle
@@ -351,6 +352,7 @@ function switchCircle(id: string): void {
   resetConfirm = false
   removeConfirmPk = null
   lostConfirmPk = null
+  expandedMemberPk = null
   spokenCode = null // a code parked for the previous circle must not show for this one
   tab = 'home'
   syncWatch() // re-tier accuracy for the newly-focused circle's precision
@@ -694,7 +696,7 @@ function hint(id: string, text: string): string {
 // ── Icons ──────────────────────────────────────────────────────────────────
 const ICON = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>',
-  map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.7 6.5-11A6.5 6.5 0 0 0 5.5 10c0 5.3 6.5 11 6.5 11Z"/><circle cx="12" cy="10" r="2.3"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v10H9.5L5 19v-3.5H4z"/></svg>',
   circle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.5a3 3 0 0 1 0 5.8M16.5 20a5.5 5.5 0 0 0-3-4.9"/></svg>',
   you: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6z"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16.5a3.6 3.6 0 0 1 7 0"/></svg>',
 }
@@ -923,9 +925,9 @@ function restoreFocusedInput(keep: ReturnType<typeof captureFocusedInput>): void
  *  it on every presence tick reads as a flash on the non-map tabs (see refresh). */
 function render(opts?: { animate?: boolean }): void {
   const animate = opts?.animate ?? true
-  // The map now lives on BOTH Home (compact) and the Map tab — keep it alive for
-  // either, tear it down elsewhere. wireApp re-mounts it into the active tab's #map.
-  if (tab !== 'map' && tab !== 'home' && mapView) { mapView.destroy(); mapView = null }
+  // The map lives only on Home now (it IS Home) — tear it down everywhere else.
+  // wireApp re-mounts it when we land back on Home.
+  if (tab !== 'home' && mapView) { mapView.destroy(); mapView = null }
   if (persisted.identity) ensureInviteSub()
   const keep = captureFocusedInput()
   if (pendingJoin) {
@@ -944,15 +946,15 @@ function render(opts?: { animate?: boolean }): void {
   ensureSubscriptions()
   ensureProfiles()
   startMonitor()
-  const body = tab === 'home' ? homeView() : tab === 'map' ? mapView_screen() : tab === 'circle' ? circleView() : youView()
-  root.innerHTML = `${findPingBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${tab === 'map' ? 'map-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
+  const body = tab === 'home' ? homeView() : tab === 'chat' ? chatView() : tab === 'circle' ? circleView() : youView()
+  root.innerHTML = `${findPingBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${tab === 'home' ? 'home-screen' : ''}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   patchBuzzBanner() // the buzz banner lives in its own layer — keep it in sync after a render
   wireApp()
   if (dmPeer) mountDmSheet() // a full render drops the overlay — put it back
   if (circleMenu) mountCircleMenu() // same for the long-press action sheet
   restoreFocusedInput(keep)
-  // Being ON Home with the thread in view IS reading it (Signal-in-the-chat).
-  if (tab === 'home' && !document.hidden && activeCircle()) markThreadRead(chatKeyOf((activeCircle() as store.Circle).id))
+  // Being ON the Chat tab with the thread in view IS reading it (Signal-style).
+  if (tab === 'chat' && !document.hidden && activeCircle()) markThreadRead(chatKeyOf((activeCircle() as store.Circle).id))
   scrollChatToEnd()
 }
 
@@ -1014,7 +1016,6 @@ function homeMapStatusHtml(): string {
   return `<div class="map-status ${s.cls}" id="home-map-status">
     <span class="ms-dot"></span>
     <span class="ms-text"><strong>${esc(s.label)}</strong><span class="ms-sub">${esc(s.sub)} · ${esc(seen)}</span></span>
-    <span class="ms-open" data-action="tab" data-tab="map" aria-label="Open the full map">⤢</span>
   </div>`
 }
 
@@ -1125,66 +1126,61 @@ function dmUnreadTotal(): number {
   return Object.entries(persisted.dms ?? {}).reduce((n, [pk, list]) => n + unreadIn(list, dmKeyOf(pk)), 0)
 }
 
+/** Home IS the map now — full screen, live, the whole point of the app.
+ *  Everything else floats over it: the topbar/circle-switcher and any urgent
+ *  alerts at the top, the people and the share toggle at the bottom. Routine
+ *  settings (precision, find-each-other, invite) live on the Circle tab; the
+ *  conversation lives on the Chat tab. Tap anyone below to zoom to them; tap
+ *  their PIN on the map itself to message them privately. */
 function homeView(): string {
   const c = activeCircle() as store.Circle
   return `
-    ${topbar()}
-    ${updateAvailable ? `
-    <div class="card stack" style="margin-bottom:14px">
-      <div><strong>A newer version of flock is ready</strong></div>
-      <div class="note">Download it and install over the top — everything on this phone stays put.</div>
-      <a class="btn small primary" href="https://flock.forgesworn.dev/get.html">Get the update</a>
-    </div>` : ''}
-    <div class="home-map-shell">
-      <div id="map" class="map-canvas home-map"></div>
-      ${homeMapStatusHtml()}
-    </div>
-    <div id="home-panel">${homePanelInner(c)}</div>`
+    <div class="home-shell">
+      <div id="map" class="map-canvas home-map-full"></div>
+      <div id="offline-oob" class="offline-oob" hidden></div>
+      <div class="home-overlay home-overlay-top">
+        ${topbar()}
+        ${updateAvailable ? `
+        <div class="card stack">
+          <div><strong>A newer version of flock is ready</strong></div>
+          <div class="note">Download it and install over the top. Everything on this phone stays put.</div>
+          <a class="btn small primary" href="https://flock.forgesworn.dev/get.html">Get the update</a>
+        </div>` : ''}
+        <div id="home-alerts">${geoIssueCard()}${batteryCard()}${rollCallCard()}${lostCard(c)}</div>
+      </div>
+      <div class="home-overlay home-overlay-bottom">
+        <div id="home-strip">${memberStrip()}</div>
+        <div class="home-share-bar" id="home-share-bar">${homeShareBarInner()}</div>
+      </div>
+    </div>`
 }
 
-/** Everything below the Home map — the scrollable home: share toggle, the
- *  people, the circle chat, then the dials (precision, find-each-other).
- *  Isolated so a presence tick can re-render it in place, leaving the live map
- *  above untouched (mirrors the map tab's #map-panel pattern). */
-function homePanelInner(c: store.Circle): string {
-  return `
-    <div class="actions">
-      <button class="btn ${sharing ? 'ghost' : 'primary'}" data-action="toggle-share">
-        ${sharing ? 'Stop sharing' : 'Start sharing'}
-      </button>
-      ${hint('home-watch', 'Sharing live lets your circle see where you are — you choose how closely with the slider below. Stop any time; nothing is shared while it\'s off. Tap anyone on the map to message them privately.')}
-    </div>
-    ${geoIssueCard()}
-    ${batteryCard()}
-    ${rollCallCard()}
-    ${lostCard(c)}
-    ${memberStrip()}
-    ${inviteCta()}
-    ${chatSection(c)}
-    ${precisionCard(c)}
-    ${festivalCard(c)}`
-}
-
-/** The circle's people at a glance — avatars with a presence dot, right under
- *  the map. Tap someone to message them privately; tap yourself for your row
- *  on the Circle tab; the ＋ leads to inviting. */
+/** The circle's people at a glance, floating over the map. Tap someone to zoom
+ *  the map to them; tap yourself to jump to your Circle row; the ＋ leads to
+ *  inviting. Hold and drag an avatar to put people in the order you want —
+ *  a plain tap zooms, only a deliberate hold starts reordering (see
+ *  wireMemberStripDrag). A right-edge fade + chevron shows when there's more
+ *  to scroll to. */
 function memberStrip(): string {
   const me = persisted.identity?.pk ?? ''
+  const c = activeCircle()
+  const order = store.orderedMembers(members(), c?.memberOrder)
   const st = active()
-  const items = members().map((pk) => {
+  const items = order.map((pk) => {
     const b = st?.beacons.get(pk)
     const p = b ? classifyPresence([b], nowSec(), { staleAfterSeconds: 600 })[0] : null
     const dot = p ? (p.status === 'active' ? 'on' : 'idle') : ''
     const isMe = pk === me
     const label = isMe ? 'You' : nameFor(pk)
-    return `<button class="strip-member" data-action="strip-member" data-pk="${pk}" aria-label="${esc(isMe ? 'You' : `Message ${label} privately`)}">
+    return `<button class="strip-member" data-action="strip-member" data-pk="${pk}" aria-label="${esc(isMe ? 'You' : `Zoom to ${label}`)}">
       <span class="strip-avatar">${avatarHtml(pk, isMe)}${dot ? `<span class="presence-dot ${dot}"></span>` : ''}</span>
       <span class="strip-name">${esc(label.length > 9 ? `${label.slice(0, 8)}…` : label)}</span>
     </button>`
   }).join('')
-  return `<div class="member-strip">${items}<button class="strip-member add" data-action="go-invite" aria-label="Invite someone">
+  const overflow = order.length > 3 ? ' has-overflow' : ''
+  return `<div class="member-strip-wrap${overflow}"><div class="member-strip" id="member-strip">${items}<button class="strip-member add" data-action="go-invite" aria-label="Invite someone">
     <span class="strip-avatar plus">＋</span><span class="strip-name">Invite</span>
-  </button></div>`
+  </button></div></div>`
 }
 
 /** The circle chat — one running, Signal-style thread for everyone in the
@@ -1303,16 +1299,6 @@ function geoIssueCard(): string {
   return ''
 }
 
-/** A loud, friendly nudge to invite people while you're the only one here. */
-function inviteCta(): string {
-  if (members().length > 1) return ''
-  return `<div class="card invite-cta" data-action="go-invite" role="button" tabindex="0">
-    <div class="cta-emoji">👋</div>
-    <div class="cta-text"><strong>It's just you so far</strong><span>Add the people you want to stay close to.</span></div>
-    <span class="cta-go">Invite →</span>
-  </div>`
-}
-
 function circleMemberRow(pk: string, mePk: string): string {
   const st = active()
   const cid = activeCircle()?.id ?? ''
@@ -1363,37 +1349,42 @@ function circleMemberRow(pk: string, mePk: string): string {
   // is what you tell the taxi firm, "2h ago" isn't.
   const seenAt = beacon ? new Date(beacon.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
   const sub = beacon
-    ? `${isMe ? 'you · ' : ''}on the map · within ${precisionSize(beacon.precision).replace('~', '')} · last seen ${seenAt}`
+    ? `${isMe ? 'you · ' : ''}within ${precisionSize(beacon.precision).replace('~', '')} · last seen ${seenAt}`
     : isMe ? 'you' : 'in this circle'
-  const locate = beacon ? `<button class="icon-btn" data-action="see-on-map" data-pk="${pk}" aria-label="See on the map">📍</button>` : ''
-  // Lost phone: anyone can flag a member's phone, anyone can clear it — a
-  // coordination flag, deliberately not gated on the owner (they don't have
-  // their phone; that's the point).
-  // A flagged-lost phone can be RUNG — a targeted buzz it plays as a loud alarm
-  // even on silent, so it's findable by sound (the back-of-a-taxi minutes problem).
+  const isNew = (activeCircle()?.unseenMembers ?? []).includes(pk)
+
+  // Lost phone is urgent, rare, and needs to stay immediately actionable — it
+  // never hides behind the expand toggle, unlike the routine actions below.
   const ringBtn = lost && !isMe
     ? `<button class="btn small" data-action="make-it-ring" data-pk="${pk}" title="Ring it — sounds even on silent">🔔 Ring</button>`
     : ''
-  // ...and asked for a ONE-SHOT exact fix, but only if its owner pre-authorised
-  // this circle and it's flagged lost (it decides on-device; this is just the ask).
   const findBtn = lost && !isMe
     ? `<button class="btn small" data-action="find-exact" data-pk="${pk}" title="Ask for an exact location (only if its owner allowed it)">📍 Find</button>`
     : ''
-  const lostBtn = lost
-    ? `${ringBtn}${findBtn}<button class="btn small" data-action="found-phone" data-pk="${pk}">Found it</button>`
-    : isMe ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`
-  const edit = isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`
-  // Private message — works whether or not they're on the map right now (a pin tap
-  // is the map-side equivalent). Not for my own row.
-  const msg = isMe ? '' : `<button class="icon-btn" data-action="msg-member" data-pk="${pk}" aria-label="Message ${esc(nameFor(pk))} privately">✉️</button>`
-  // Remove — right here where you're looking at the roster, not buried three
-  // taps deep in Advanced settings. Reuses the same confirm + reseed as before.
-  const remove = isMe ? '' : `<button class="icon-btn" data-action="ask-remove" data-pk="${pk}" aria-label="Remove ${esc(nameFor(pk))} from this circle">🚪</button>`
-  const isNew = (activeCircle()?.unseenMembers ?? []).includes(pk)
+  const lostRow = lost
+    ? `<div class="member-actions">${ringBtn}${findBtn}<button class="btn small" data-action="found-phone" data-pk="${pk}">Found it</button></div>`
+    : ''
+
+  // Everything else (message/locate/petname/report-lost/remove) is routine
+  // chrome, tucked behind a tap-to-expand — the row itself stays readable
+  // (avatar, name, one pill) instead of five icon buttons crammed alongside.
+  const expanded = !isMe && expandedMemberPk === pk
+  const chevron = isMe ? '' : `<button class="icon-btn chevron${expanded ? ' open' : ''}" data-action="toggle-member-actions" data-pk="${pk}" aria-label="${expanded ? 'Hide actions' : 'More actions'}" aria-expanded="${expanded}">⌄</button>`
+  const actions = expanded ? `<div class="member-actions">
+    <button class="icon-btn" data-action="msg-member" data-pk="${pk}" aria-label="Message ${esc(nameFor(pk))} privately">✉️</button>
+    ${beacon ? `<button class="icon-btn" data-action="see-on-map" data-pk="${pk}" aria-label="See on the map">📍</button>` : ''}
+    ${lost ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`}
+    <button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>
+    <button class="icon-btn" data-action="ask-remove" data-pk="${pk}" aria-label="Remove ${esc(nameFor(pk))} from this circle">🚪</button>
+  </div>` : ''
+
   return `<div class="member${isNew ? ' unseen' : ''}">
-    ${avatarHtml(pk, isMe)}
-    <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}${isNew ? ' <span class="pill new">new</span>' : ''}</div><div class="when">${sub}</div></div>
-    ${pill}${msg}${locate}${lostBtn}${edit}${remove}
+    <div class="member-row">
+      ${avatarHtml(pk, isMe)}
+      <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}${isNew ? ' <span class="pill new">new</span>' : ''}</div><div class="when">${sub}</div></div>
+      ${pill}${chevron}
+    </div>
+    ${lostRow}${actions}
   </div>`
 }
 
@@ -1465,6 +1456,9 @@ function circleView(): string {
     ${invitePanel}
     <div class="section-title"${inviteOpen ? ' style="margin-top:22px"' : ''}>Members</div>
     <div class="list">${rows}</div>
+
+    ${precisionCard(c)}
+    ${festivalCard(c)}
 
     <div class="section-title" style="margin-top:22px">If your phone gets lost</div>
     <div class="card stack">
@@ -1685,31 +1679,18 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
 function navView(): string {
   const item = (id: string, label: string, icon: string, unread = 0): string =>
     `<button data-action="tab" data-tab="${id}" aria-current="${tab === id}">${icon}<span>${label}</span>${unread ? `<span class="nav-badge">${unread > 9 ? '9+' : unread}</span>` : ''}</button>`
-  return `<nav class="nav">${item('home', 'Home', ICON.home, groupUnreadTotal())}${item('map', 'Map', ICON.map)}${item('circle', 'Circle', ICON.circle)}${item('you', 'You', ICON.you, dmUnreadTotal())}</nav>`
+  return `<nav class="nav">${item('home', 'Home', ICON.home)}${item('chat', 'Chat', ICON.chat, groupUnreadTotal())}${item('circle', 'Circle', ICON.circle)}${item('you', 'You', ICON.you, dmUnreadTotal())}</nav>`
 }
 
 // ── Map screen ───────────────────────────────────────────────────────────────
-function mapView_screen(): string {
+/** The circle chat, full screen — one running Signal-style thread. Was the
+ *  Map tab's nav slot; the map moved to Home (it IS Home now), so this became
+ *  free for the conversation instead of living squeezed under the map. */
+function chatView(): string {
+  const c = activeCircle() as store.Circle
   return `
     ${topbar()}
-    <div class="map-shell">
-      <div class="map-stage">
-        <div id="map" class="map-canvas"></div>
-        <div id="offline-oob" class="offline-oob" hidden></div>
-      </div>
-      <div class="map-panel" id="map-panel">${mapPanelInner()}</div>
-    </div>`
-}
-
-function mapPanelInner(): string {
-  const c = activeCircle()
-  const mine = sharing
-    ? `<div class="note">You're sharing at ${esc(precisionLabel(sharePrecisionOf(c)).toLowerCase())} — your own pin and square are exactly what everyone else sees of you. Change the detail on Home.</div>`
-    : `<div class="note">You're not sharing — nothing of yours is on anyone's map. ${fix ? 'The dashed square shows what your circle <em>would</em> see at your current detail setting.' : ''}</div>`
-  return `
-    <div class="row" style="justify-content:space-between"><strong>${esc(c?.name ?? 'Your circle')}</strong></div>
-    <div class="note">Everyone sharing appears here — each somewhere inside their square, at the detail its owner chose; an exact share is a bare pin.</div>
-    ${mine}`
+    ${chatSection(c)}`
 }
 
 // ── Views: onboarding ────────────────────────────────────────────────────────
@@ -1879,33 +1860,36 @@ function wireApp(): void {
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   })
   wirePrecisionSlider()
+  const strip = document.getElementById('home-strip')
+  if (strip) wireMemberStrip(strip)
   const brand = root.querySelector<HTMLElement>('.topbar .brand')
   if (brand) wireHideHold(brand)
   root.querySelectorAll<HTMLElement>('.circle-chip:not(.add)').forEach((chip) => {
     const id = chip.getAttribute('data-id')
     if (id) wireChipHold(chip, id)
   })
-  if (tab === 'map' || tab === 'home') void initMap()
+  if (tab === 'home') void initMap()
 }
 
-/** The Home-screen "location detail" slider. `input` patches the labels in place
- *  (a full render mid-drag would tear the control out from under the thumb);
- *  `change` commits: persist, re-tier sampling, and re-emit promptly so the
- *  circle sees the new detail level straight away.
+/** The "location detail" slider (lives on Circle). `input` patches the labels
+ *  in place (a full render mid-drag would tear the control out from under the
+ *  thumb); `change` commits: persist, re-tier sampling, and re-emit promptly
+ *  so the circle sees the new detail level straight away.
  *  Two guards against "it changed by itself":
- *  - while a finger is on the thumb, background panel rebuilds are DEFERRED
- *    (sliderDragging → homePanelDirty), so the control is never torn mid-drag;
+ *  - while a finger is on the thumb, background refreshes are DEFERRED
+ *    (sliderDragging → refreshDeferred), so the control is never torn mid-drag,
+ *    wherever it currently lives;
  *  - a `change` from a slider no longer in the DOM (a rebuild raced the release)
  *    is ignored — a detached thumb must never commit a stale value. */
 let sliderDragging = false
-let homePanelDirty = false
+let refreshDeferred = false
 function wirePrecisionSlider(): void {
   const slider = document.getElementById('share-precision') as HTMLInputElement | null
   if (!slider) return
   const dragEnd = (): void => {
     if (!sliderDragging) return
     sliderDragging = false
-    if (homePanelDirty) { homePanelDirty = false; renderHomePanel() }
+    if (refreshDeferred) { refreshDeferred = false; refresh() }
   }
   slider.addEventListener('pointerdown', () => { sliderDragging = true })
   slider.addEventListener('pointerup', dragEnd)
@@ -1975,6 +1959,26 @@ function stopFestival(): void {
 }
 
 // ── Map controller ───────────────────────────────────────────────────────────
+/** Frame a geohash cell (its whole disclosed square, not a point — a Region
+ *  cell needs a very different zoom from a street one) and hand the camera
+ *  over to the user. Shared by "see on map", the member strip's zoom-on-tap,
+ *  and a PM location share's "See on map" jump. */
+function frameCell(geohash: string): void {
+  if (!mapView) return
+  const bb = bounds(geohash)
+  mapView.autoFit([{ lat: bb.minLat, lon: bb.minLon }, { lat: bb.maxLat, lon: bb.maxLon }])
+  mapView.suppressAutoFit()
+}
+
+/** Zoom the (already-mounted) map to one member's cell — the strip's tap
+ *  target. A no-op if they have no live beacon yet (nothing to frame) or the
+ *  map isn't mounted (e.g. called while switching tabs — initMap's own
+ *  focusMemberPk handles that mount-time case instead). */
+function focusOnMember(pk: string): void {
+  const b = active()?.beacons.get(pk)
+  if (b) frameCell(b.geohash)
+}
+
 async function initMap(camera?: { lng: number; lat: number; zoom: number }): Promise<void> {
   mapView?.destroy()
   const container = document.getElementById('map')
@@ -1989,24 +1993,11 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   if (camera) { mapView.map.jumpTo({ center: [camera.lng, camera.lat], zoom: camera.zoom }); mapView.suppressAutoFit() } // a re-init keeps the person's view
   // "See on map": frame the chosen member's whole disclosed cell (a Region cell
   // needs a very different zoom from a street one), then hand the camera over.
-  if (focusMemberPk) {
-    const b = active()?.beacons.get(focusMemberPk)
-    focusMemberPk = null
-    if (b) {
-      const bb = bounds(b.geohash)
-      mapView.autoFit([{ lat: bb.minLat, lon: bb.minLon }, { lat: bb.maxLat, lon: bb.maxLon }])
-      mapView.suppressAutoFit()
-    }
-  }
+  if (focusMemberPk) { focusOnMember(focusMemberPk); focusMemberPk = null }
   // A PM "Come to me" location share, tapped from the DM thread — frame its
   // cell the same way, but it's a one-off (not a live circle beacon), so
   // there's nothing to look up beyond the geohash itself.
-  if (focusGeohash) {
-    const bb = bounds(focusGeohash)
-    focusGeohash = null
-    mapView.autoFit([{ lat: bb.minLat, lon: bb.minLon }, { lat: bb.maxLat, lon: bb.maxLon }])
-    mapView.suppressAutoFit()
-  }
+  if (focusGeohash) { frameCell(focusGeohash); focusGeohash = null }
   if (offlineMapEnabled()) void refreshOfflineState()
   if (!fix && !camera) void centreOnCurrentPosition() // no live share yet → actively locate for the map
 }
@@ -2020,7 +2011,6 @@ async function centreOnCurrentPosition(): Promise<void> {
   fix = f // remembered locally so the "what they'd see" preview can draw pre-share
   if (mapView && memberPoints().length === 0) mapView.flyTo({ lat: f.lat, lon: f.lon }, { instant: true })
   updateMapData() // the preview ring can draw now a fix exists
-  renderMapPanel()
 }
 
 // ── Offline map ("save this area") ───────────────────────────────────────────
@@ -2039,11 +2029,6 @@ async function refreshOfflineState(): Promise<void> {
   const oa = await import('./offlineArea')
   offlineBBox = id ? await oa.savedAreaBBox(id) : null
   updateMapData() // re-evaluate the out-of-area chip against the loaded bounds
-}
-
-function renderMapPanel(): void {
-  const panel = document.getElementById('map-panel')
-  if (panel) panel.innerHTML = mapPanelInner()
 }
 
 function memberPoints(): MapPoint[] {
@@ -2114,15 +2099,15 @@ function refresh(): void {
   // alive until a tab switch or restart forced a full render. Idempotent diff
   // against the current subs Map, so calling it every tick is cheap.
   ensureSubscriptions()
-  // Both map-bearing tabs update in place — a full render would destroy the live
-  // map canvas (and any open thread sheet) under the user on every presence tick.
-  if (tab === 'map' && mapView) { updateMapData(); renderMapPanel(); patchBuzzBanner(); patchNavBadges() }
-  else if (tab === 'home' && mapView) { updateMapData(); renderHomePanel(); patchBuzzBanner(); patchNavBadges() }
+  // Home's live map must never be torn down on a background tick — patch its
+  // data and floating overlays in place instead. Every other tab is cheap
+  // enough (and has no live map/canvas) to just fully re-render.
+  if (tab === 'home' && mapView) { updateMapData(); refreshHomeOverlays(); patchBuzzBanner(); patchNavBadges() }
   else render({ animate: false }) // a background refresh must not replay the fade-in (it reads as a flash)
 }
 
 /** Keep the nav's unread badges honest during in-place refreshes (a DM landing
- *  while the map tab is up must still light You) without a full rebuild. */
+ *  while the map is up must still light You) without a full rebuild. */
 function patchNavBadges(): void {
   const nav = document.querySelector('.nav')
   if (!nav) return
@@ -2138,44 +2123,34 @@ function patchNavBadges(): void {
     el.textContent = label
     btn.appendChild(el)
   }
-  set('home', groupUnreadTotal())
+  set('chat', groupUnreadTotal())
   set('you', dmUnreadTotal())
 }
 
-/** Re-render Home's controls in place (share toggle, people, chat, precision)
- *  plus the map status chip, leaving the live map canvas above untouched. Mirrors
- *  the map tab's renderMapPanel; re-binds only the panel's own actions.
- *  Deferred while the precision slider is mid-drag — rebuilding the control
- *  under the finger both kills the drag AND lets the detached slider commit a
- *  stale value on release ("the slider changed by itself"). */
-function renderHomePanel(): void {
-  if (sliderDragging) { homePanelDirty = true; return }
-  const keep = captureFocusedInput() // half-typed chat must survive an incoming beacon
-  const panel = document.getElementById('home-panel')
-  if (panel) {
-    panel.innerHTML = homePanelInner(activeCircle() as store.Circle)
-    panel.querySelectorAll('[data-action]').forEach((node) => {
-      const action = node.getAttribute('data-action') as string
-      node.addEventListener('click', () => handleAction(action, node as HTMLElement))
-    })
-    wirePrecisionSlider()
-  }
-  restoreFocusedInput(keep)
-  if (tab === 'home' && !document.hidden && activeCircle()) markThreadRead(chatKeyOf((activeCircle() as store.Circle).id))
-  scrollChatToEnd()
-  const status = document.getElementById('home-map-status')
-  if (status) {
-    const tmp = document.createElement('div')
-    tmp.innerHTML = homeMapStatusHtml()
-    const fresh = tmp.firstElementChild as HTMLElement | null
-    if (fresh) {
-      status.replaceWith(fresh)
-      fresh.querySelectorAll('[data-action]').forEach((node) => {
-        const action = node.getAttribute('data-action') as string
-        node.addEventListener('click', () => handleAction(action, node as HTMLElement))
-      })
-    }
-  }
+/** The share toggle + status chip — its own function so both the initial
+ *  render and the in-place refresh build identical markup. */
+function homeShareBarInner(): string {
+  return `${homeMapStatusHtml()}
+    <button class="btn ${sharing ? 'ghost' : 'primary'}" data-action="toggle-share">${sharing ? 'Stop sharing' : 'Start sharing'}</button>
+    ${hint('home-watch', "Sharing live lets your circle see where you are, you choose how closely under Circle. Stop any time; nothing is shared while it's off. Tap anyone below to zoom to them, or their pin to message them privately.")}`
+}
+
+/** Patch Home's floating overlays in place (alerts, member strip, share bar),
+ *  leaving the live map canvas untouched. Home has no text input any more (the
+ *  precision slider and chat composer both moved off it), so unlike the old
+ *  panel there's no focus/half-typed-value to preserve here. */
+function refreshHomeOverlays(): void {
+  const c = activeCircle() as store.Circle
+  const alerts = document.getElementById('home-alerts')
+  if (alerts) alerts.innerHTML = `${geoIssueCard()}${batteryCard()}${rollCallCard()}${lostCard(c)}`
+  const strip = document.getElementById('home-strip')
+  if (strip) { strip.innerHTML = memberStrip(); wireMemberStrip(strip) }
+  const shareBar = document.getElementById('home-share-bar')
+  if (shareBar) shareBar.innerHTML = homeShareBarInner()
+  ;[alerts, shareBar].forEach((el) => el?.querySelectorAll('[data-action]').forEach((node) => {
+    const action = node.getAttribute('data-action') as string
+    node.addEventListener('click', () => handleAction(action, node as HTMLElement))
+  }))
 }
 
 /** Sync the buzz banner to `activeBuzz` in its own layer, idempotently. If the
@@ -3004,8 +2979,9 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'festival-stop': stopFestival(); break
     case 'msg-member': openDmThread(node.dataset.pk ?? ''); break
     case 'strip-member': {
+      if (stripDragGuard) { stripDragGuard = false; break } // just finished a reorder drag — not a tap
       const pk = node.dataset.pk ?? ''
-      if (pk === persisted.identity?.pk) { tab = 'circle'; render() } else openDmThread(pk)
+      if (pk === persisted.identity?.pk) { tab = 'circle'; render() } else focusOnMember(pk)
       break
     }
     case 'chat-send': chatSend((document.getElementById('chat-input') as HTMLTextAreaElement | null)?.value ?? ''); break
@@ -3018,12 +2994,12 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'rollcall-share': void doRollCallShare(); break
     case 'rollcall-dismiss': locAsk = null; refresh(); break
     case 'toggle-settings': showSettings = !showSettings; render(); break
-    case 'see-on-map': focusMemberPk = node.dataset.pk ?? null; tab = 'map'; render(); break
+    case 'see-on-map': focusMemberPk = node.dataset.pk ?? null; tab = 'home'; render(); break
     case 'see-shared-location':
       focusGeohash = node.dataset.geohash ?? null
       dmPeer = null
       document.getElementById('dm-sheet')?.remove()
-      tab = 'map'
+      tab = 'home'
       render()
       break
     case 'ask-lost': lostConfirmPk = node.dataset.pk ?? null; render(); break
@@ -3070,6 +3046,12 @@ function handleAction(action: string, node: HTMLElement): void {
       store.save(persisted); toast('Tips are back on'); render(); break
     case 'remove-member': removeConfirmPk = null; void reseedCircle(node.dataset.pk); break
     case 'dismiss-buzz': dismissBuzz(); break
+    case 'toggle-member-actions': {
+      const pk = node.dataset.pk ?? null
+      expandedMemberPk = expandedMemberPk === pk ? null : pk
+      render()
+      break
+    }
     case 'edit-petname': editingPetname = node.dataset.pk ?? null; render(); break
     case 'save-petname': savePetname(node.dataset.pk as string); break
     case 'cancel-petname': editingPetname = null; render(); break
@@ -3901,6 +3883,67 @@ function wireChipHold(node: HTMLElement, id: string): void {
   node.addEventListener('contextmenu', (e) => { e.preventDefault(); openCircleMenu(id) })
 }
 
+// Set the instant a reorder drag ends, so the click that trails the release
+// doesn't ALSO fire the tap-to-zoom action. Mirrors chipHeldGuard.
+let stripDragGuard = false
+const STRIP_HOLD_MS = 450
+
+/** Press-and-hold a member avatar to reorder the strip (a plain tap zooms to
+ *  them instead — see the 'strip-member' action). Same disambiguation as
+ *  wireChipHold: cancel on early movement so a normal swipe-to-scroll still
+ *  works, and only a deliberate hold arms the drag. Once armed, dragging
+ *  swaps the held avatar past whichever neighbour it's crossed; releasing
+ *  persists the new order as this device's own display preference — it never
+ *  touches the wire. */
+function wireMemberStrip(wrap: HTMLElement): void {
+  const strip = wrap.querySelector<HTMLElement>('#member-strip') ?? wrap.querySelector<HTMLElement>('.member-strip')
+  if (!strip) return
+  let timer = 0
+  let sx = 0
+  let sy = 0
+  let dragEl: HTMLElement | null = null
+  const cancelTimer = (): void => { if (timer) { clearTimeout(timer); timer = 0 } }
+  const end = (): void => {
+    cancelTimer()
+    if (!dragEl) return
+    dragEl.classList.remove('dragging')
+    const order = [...strip.querySelectorAll<HTMLElement>('.strip-member[data-pk]')].map((n) => n.dataset.pk as string)
+    dragEl = null
+    stripDragGuard = true
+    window.setTimeout(() => { stripDragGuard = false }, 400) // belt-and-braces if the click never lands
+    patchActive({ memberOrder: order })
+  }
+  strip.querySelectorAll<HTMLElement>('.strip-member[data-pk]').forEach((node) => {
+    node.addEventListener('pointerdown', (e) => {
+      sx = e.clientX; sy = e.clientY
+      timer = window.setTimeout(() => {
+        dragEl = node
+        node.classList.add('dragging')
+        try { node.setPointerCapture(e.pointerId) } catch { /* unsupported */ }
+      }, STRIP_HOLD_MS)
+    })
+    node.addEventListener('pointermove', (e) => {
+      if (!dragEl) {
+        if (timer && (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8)) cancelTimer()
+        return
+      }
+      // Swap past whichever sibling the pointer has crossed the midpoint of.
+      const siblings = [...strip.querySelectorAll<HTMLElement>('.strip-member[data-pk]')].filter((n) => n !== dragEl)
+      for (const sib of siblings) {
+        const r = sib.getBoundingClientRect()
+        const mid = r.left + r.width / 2
+        const dragBefore = dragEl.compareDocumentPosition(sib) & Node.DOCUMENT_POSITION_FOLLOWING
+        if ((e.clientX > mid && dragBefore) || (e.clientX < mid && !dragBefore)) {
+          strip.insertBefore(dragEl, dragBefore ? sib.nextSibling : sib)
+          break
+        }
+      }
+    })
+    node.addEventListener('pointerup', end)
+    node.addEventListener('pointercancel', end)
+  })
+}
+
 /** Full reset: sign out, wipe local state and every circle on this device. */
 function resetDevice(): void {
   if (persisted.authMethod === 'signet') { try { void signetLogout() } catch { /* ignore */ } }
@@ -3923,6 +3966,7 @@ function resetDevice(): void {
   resetConfirm = false
   removeConfirmPk = null
   lostConfirmPk = null
+  expandedMemberPk = null
   dmComeToMeArmed = false
   dmPeer = null
   document.getElementById('dm-sheet')?.remove()
