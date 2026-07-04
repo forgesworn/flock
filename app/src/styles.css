@@ -440,7 +440,11 @@ a.btn { text-decoration: none; }
 .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 4px 0; }
 .kv .k { color: var(--muted); }
 .qr { display: grid; place-items: center; padding: 16px; background: #fff; border-radius: 16px; width: fit-content; margin: 4px auto; }
-.qr svg, .qr img { display: block; width: 188px; height: 188px; }
+/* Bigger is easier to scan phone-to-phone: physical module size on the shown
+   screen is what a camera resolves. Fill the card (capped) rather than a fixed
+   small square. The SVG carries its own 4-module quiet zone (see createSvgTag),
+   so height follows width to stay perfectly square. */
+.qr svg, .qr img { display: block; width: min(78vw, 320px); height: auto; image-rendering: pixelated; }
 .toast {
   position: fixed; left: 50%; bottom: calc(var(--nav-h) + 22px + env(safe-area-inset-bottom));
   transform: translateX(-50%) translateY(12px);
