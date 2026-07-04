@@ -9,6 +9,7 @@ night-out sharing over Nostr.
 
 ## Read first
 
+- `docs/VISION.md` — the goal: why this exists, who it's for, the non-negotiable design principles, and what "done" looks like.
 - `README.md` — overview, module status, the make-or-break platform constraint.
 - `docs/ARCHITECTURE.md` — the full stack and the rationale for each choice.
 - `docs/FORGESWORN-TOOLKIT.md` — how flock maps onto the ForgeSworn freedom-tech toolset (the real focus).

@@ -16,6 +16,8 @@ spoken verification) is **parked post-MVP**: it lives on fully tested in the
 `@forgesworn/flock` library (see the table below) but is no longer wired into
 the app UI. **Not yet:** delivery with the app fully closed — that needs the
 native shell, gated on the Phase 0 GrapheneOS spike. Start with
+[`docs/VISION.md`](docs/VISION.md) (the goal — why this exists, who it's for,
+the design principles that aren't up for negotiation),
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the stack & why),
 [`docs/FORGESWORN-TOOLKIT.md`](docs/FORGESWORN-TOOLKIT.md) (how flock uses the
 ForgeSworn freedom-tech toolset), [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md),
