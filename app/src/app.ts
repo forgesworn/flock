@@ -92,16 +92,24 @@ let pendingJoin: store.Circle | null = null // a link/QR join awaiting the guest
 
 /** Compare this build's stamp against the hosted deploy's /version.json.
  *  Only the download-page nudge on Home hangs off it — never an auto-update. */
+let lastUpdateCheck = 0
 async function checkForUpdate(): Promise<void> {
+  if (updateAvailable) return // found once — stop asking
+  // A backgrounded WebView suspends timers, so the 6-hour interval is unreliable;
+  // the resume/visibility hooks below drive most real checks. Throttle so rapid
+  // foreground/background toggles don't hammer the deploy.
+  const now = Date.now()
+  if (now - lastUpdateCheck < 20_000) return
+  lastUpdateCheck = now
   try {
     const res = await fetch(`${shareOrigin()}/version.json`, { cache: 'no-store' })
     if (!res.ok) return
     const v = (await res.json()) as { build?: string }
-    if (v.build && v.build !== __FLOCK_BUILD__ && !updateAvailable) {
+    if (v.build && v.build !== __FLOCK_BUILD__) {
       updateAvailable = true
       render()
     }
-  } catch { /* offline — checked again on the next boot or 6-hour tick */ }
+  } catch { /* offline — checked again on the next boot, resume, or 6-hour tick */ }
 }
 let showAdvanced = false // You-tab advanced settings fold (session-only)
 let awaitSince = 0 // when the remote-invite wait began — drives the 'still waiting' guidance
@@ -590,6 +598,15 @@ function bootUnlocked(): void {
     void syncBle()
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
+    // The interval above is unreliable while backgrounded, so also re-check the
+    // moment the user brings flock forward — a fresh deploy then shows within
+    // seconds of reopening, not up to 6 hours later. Capacitor resume is the
+    // robust signal; visibilitychange is the WebView-level fallback. Both are
+    // throttled inside checkForUpdate.
+    void import('../../native/lifecycle').then((l) => l.onResume(() => { void checkForUpdate() }))
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void checkForUpdate()
+    })
   }
   void restoreSignet()
 }
