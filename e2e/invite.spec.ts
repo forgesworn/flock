@@ -44,7 +44,17 @@ test.describe('invites — both ways', () => {
 
     await B.click('[data-action="join"]')
     for (const word of words) {
-      await B.locator('#jwords').pressSequentially(word.slice(0, 4))
+      // An unambiguous word completes itself the instant it's determined — no
+      // tap needed. A genuine collision (two-plus words share this prefix)
+      // leaves a chip to pick. A word no longer than 4 letters is already
+      // fully typed at that point — nothing to complete or pick, so type the
+      // separator ourselves, same as a real person finishing a short word.
+      const prefix = word.slice(0, 4)
+      await B.locator('#jwords').pressSequentially(prefix)
+      await B.waitForTimeout(100) // let the synchronous auto-complete/chip render settle
+      const value = await B.inputValue('#jwords')
+      if (value.endsWith(`${word} `)) continue
+      if (prefix === word) { await B.locator('#jwords').pressSequentially(' '); continue }
       await B.locator('.suggest-chip', { hasText: new RegExp(`^${word}$`) }).click()
     }
     await expect(B.locator('#jwords')).toHaveValue(`${words.join(' ')} `)

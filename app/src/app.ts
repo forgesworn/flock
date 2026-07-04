@@ -1826,8 +1826,32 @@ function wireWordSuggest(): void {
   const render = (): void => {
     const value = input.value
     const current = value.split(/\s+/).pop() ?? ''
+    // Wait for at least 4 letters before ever completing or suggesting: every
+    // collision in this wordlist shares exactly a 4-letter prefix (never
+    // fewer), so completing any earlier — e.g. "err" is already unique to
+    // "error" — would fill in the rest before someone who types a consistent
+    // 4 letters out of habit reaches their 4th keystroke, landing it after
+    // the auto-inserted space and corrupting the field.
+    if (current.length < 4) { box.innerHTML = ''; return }
     const matches = suggestWords(current)
-    box.innerHTML = matches.map((w) => `<button type="button" class="suggest-chip" data-word="${esc(w)}">${esc(w)}</button>`).join('')
+    // Unambiguous (exactly one word starts with this, and there's more of it
+    // left to type) — complete it the instant it's determined, no tap needed.
+    // Fewer taps means fewer chances to grab the wrong one. A word that's
+    // ALSO a prefix of another (e.g. "code"/"codex") still matches >1 here,
+    // so it's never silently auto-picked.
+    if (matches.length === 1 && matches[0].length > current.length) {
+      const prefix = value.slice(0, value.length - current.length)
+      input.value = `${prefix}${matches[0]} `
+      box.innerHTML = ''
+      return
+    }
+    // Chips only ever appear now for a genuine collision (two-plus words
+    // share this prefix) — this wordlist isn't fully BIP39-unique at 4
+    // letters, so that does happen. Flagged, not just listed, since picking
+    // wrong here silently derives the wrong code with no other symptom.
+    box.innerHTML = matches.length > 1
+      ? `<div class="suggest-pick-note">Which one?</div><div class="suggest-chips">${matches.map((w) => `<button type="button" class="suggest-chip" data-word="${esc(w)}">${esc(w)}</button>`).join('')}</div>`
+      : ''
     box.querySelectorAll<HTMLElement>('.suggest-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
         const word = chip.dataset.word ?? ''
@@ -1929,6 +1953,16 @@ function wireApp(): void {
  *    is ignored — a detached thumb must never commit a stale value. */
 let sliderDragging = false
 let refreshDeferred = false
+// An IME composition in progress anywhere (predictive text on a real Android
+// keyboard) — deferred in refresh() alongside sliderDragging; see there for
+// why. Attached once, globally: composition events bubble, so every text
+// field (chat/dm/jwords/handle/…) is covered without per-field wiring.
+let composing = false
+document.addEventListener('compositionstart', () => { composing = true })
+document.addEventListener('compositionend', () => {
+  composing = false
+  if (refreshDeferred) { refreshDeferred = false; refresh() }
+})
 function wirePrecisionSlider(): void {
   const slider = document.getElementById('share-precision') as HTMLInputElement | null
   if (!slider) return
@@ -2138,6 +2172,16 @@ function refresh(): void {
   // Never rebuild while an onboarding / add-circle form is on screen — a background
   // refresh would discard a half-typed circle name (the inputs are uncontrolled).
   if (adding || !persisted.identity || !activeCircle()) return
+  // Deferred while a finger is on the precision slider (a rebuild mid-drag
+  // tears the control out from under the thumb) OR the keyboard has an active
+  // IME composition (predictive text/autocomplete) — replacing the focused
+  // textarea's DOM node out from under a real Android keyboard mid-composition
+  // is what produced "on" + space → "onon": the IME's pending composition gets
+  // committed a second time into the freshly-restored field on top of the
+  // value captureFocusedInput/restoreFocusedInput already put back. Both
+  // resolve via dragEnd/compositionend re-running the deferred refresh once
+  // the interaction actually finishes.
+  if (sliderDragging || composing) { refreshDeferred = true; return }
   // A reseed (security reset, member removal, monthly rotation) changes which
   // inbox each circle listens on. The full render() path always re-syncs
   // subscriptions, but the in-place branches below did NOT — so sitting on
@@ -3497,6 +3541,17 @@ function onForeground(): void {
   // "messages just don't arrive" until the next full app restart.
   stopAllSubs()
   ensureSubscriptions()
+  // A WebGL context is a prime target for the OS to reclaim GPU memory from a
+  // backgrounded WebView — reported live as "the map is black" after locking
+  // the phone for a few minutes then waking it, fixed only by switching tabs
+  // away from Home and back (which tears the map down and remounts it fresh).
+  // Do that automatically on resume instead of leaving it on the user to
+  // rediscover — same destroy+reinit, camera preserved.
+  if (tab === 'home' && mapView) {
+    const c = mapView.map.getCenter()
+    const camera = { lng: c.lng, lat: c.lat, zoom: mapView.map.getZoom() }
+    void initMap(camera)
+  }
   // The app being open IS the read — clear delivered message notifications,
   // exactly as Signal does. Foreground-service notifications are immune.
   void import('../../native/notify').then((n) => n.clearDelivered()).catch(() => { /* shell only */ })

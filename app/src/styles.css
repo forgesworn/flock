@@ -29,7 +29,7 @@
   --radius: 18px;
   --radius-lg: 26px;
   --shadow: 0 18px 50px -20px rgba(0, 0, 0, 0.7);
-  --nav-h: 72px;
+  --nav-h: 80px;
 
   color-scheme: dark;
 }
@@ -406,8 +406,11 @@ a.btn { text-decoration: none; }
   left: 50%; transform: translateX(-50%);
   bottom: 0;
   width: min(480px, 100%);
-  height: calc(var(--nav-h) + env(safe-area-inset-bottom));
-  padding-bottom: env(safe-area-inset-bottom);
+  /* A little more than the reported safe area — a gesture nav's actual
+     handle can sit taller than what env() reports, reading as "too close to
+     the bottom" even when the inset is technically accounted for. */
+  height: calc(var(--nav-h) + max(env(safe-area-inset-bottom), 10px));
+  padding-bottom: max(env(safe-area-inset-bottom), 10px);
   display: flex;
   background: rgba(14, 17, 22, 0.82);
   backdrop-filter: blur(18px);
@@ -418,11 +421,11 @@ a.btn { text-decoration: none; }
   flex: 1;
   border: 0; background: transparent;
   color: var(--faint);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
   transition: color 0.2s;
 }
-.nav button svg { width: 23px; height: 23px; }
+.nav button svg { width: 26px; height: 26px; }
 .nav button[aria-current='true'] { color: var(--text); }
 
 /* ── Onboarding ────────────────────────────────────────────── */
@@ -490,6 +493,17 @@ a.btn { text-decoration: none; }
    thicker divider makes "which button did I just hit" unambiguous too. */
 .map-canvas .maplibregl-ctrl-group button { width: 44px; height: 44px; }
 .map-canvas .maplibregl-ctrl-group button + button { border-top: 2px solid var(--line-strong); }
+/* The icons themselves are baked SVGs that follow the OS's OWN light/dark
+   preference (#333 on a light OS, #fff on a dark one) — independent of our
+   theme, which is always dark. On a phone with the OS set to light mode this
+   put dark-grey icons on our dark button background: invisible. Force light
+   regardless of what the icon happened to render as. */
+.map-canvas .maplibregl-ctrl-icon { filter: invert(1) brightness(1.4); }
+/* Home is full-screen now, so 'top-right' sits at the literal top edge of the
+   phone — behind the status bar/notch on some devices, and too high to
+   reach comfortably. Push it down clear of both the safe area and Home's own
+   floating topbar. */
+.home-shell .maplibregl-ctrl-top-right { top: max(calc(env(safe-area-inset-top) + 64px), 74px); }
 .map-canvas .maplibregl-ctrl-attrib { background: rgba(14,17,22,0.7); color: var(--faint); }
 .map-canvas .maplibregl-ctrl-attrib a { color: var(--muted); }
 
@@ -591,11 +605,16 @@ a.btn { text-decoration: none; }
 .wordcode { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 4px 0 10px; }
 .wc-word { font-size: 20px; font-weight: 700; letter-spacing: 0.01em; padding: 8px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line-strong); color: var(--text); }
 
-/* Join-by-words type-ahead: tap a match instead of spelling the whole word. */
-.word-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 14px; min-height: 0; }
+/* Join-by-words type-ahead: an unambiguous word completes itself, no tap
+   needed. Chips only ever appear for a genuine collision (two-plus words
+   share these letters) — flagged with a note, since picking wrong here
+   silently derives the wrong code with no other symptom. */
+.word-suggest { margin: 6px 0 14px; min-height: 0; }
+.suggest-pick-note { font-size: 12px; font-weight: 600; color: var(--warn); margin-bottom: 6px; }
+.suggest-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .suggest-chip {
   font-size: 13px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
-  background: var(--surface-2); border: 1px solid var(--line-strong); color: var(--text); cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--warn-dim); color: var(--text); cursor: pointer;
 }
 .suggest-chip:active { transform: scale(0.96); }
 
@@ -817,9 +836,15 @@ a.btn { text-decoration: none; }
 .chat-card { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
 .chat-thread {
   display: flex; flex-direction: column; gap: 4px;
-  flex: 1; min-height: 120px; overflow-y: auto; overscroll-behavior: contain;
+  /* min-height: 0 (not a fixed floor) — on a short screen with the keyboard
+     up, the composer (what you're actively typing into) must never be the
+     thing that gets squeezed or clipped; the thread just shows less and
+     scrolls within itself instead. Reported as "cuts off half the text
+     input box" on a real device before this. */
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   padding: 2px;
 }
+.chat-card .chip-row, .chat-composer { flex-shrink: 0; }
 .dm-thread { max-height: 38vh; min-height: 120px; }
 .chat-empty { padding: 10px 4px; }
 .msg {

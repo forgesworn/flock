@@ -53,7 +53,11 @@ export function startBackgroundWatch(
       backgroundMessage: 'Sharing your location with your circle while this is on.',
       requestPermissions: true,
       stale: false,
-      distanceFilter: 25, // metres — battery-friendly; only fires on real movement
+      // metres — battery-friendly, but 25 read as "stuck" for someone moving
+      // within a crowd/stage area without covering much net distance (a
+      // festival, not a walk across town). 10 trades a little more GPS
+      // sampling for noticeably more responsive movement in a dense crowd.
+      distanceFilter: 10,
     },
     (location, error) => {
       if (error) {
