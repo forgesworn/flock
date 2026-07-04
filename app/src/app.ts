@@ -1312,6 +1312,15 @@ function circleMemberRow(pk: string, mePk: string): string {
     </div>`
   }
 
+  if (!isMe && removeConfirmPk === pk) {
+    return `<div class="member editing">
+      ${avatarHtml(pk, isMe)}
+      <div class="meta"><div class="who">${esc(nameFor(pk))}</div><div class="when">Remove them? This resets the circle's security and cuts them off straight away — everyone else gets a fresh key.</div></div>
+      <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="remove-member" data-pk="${pk}">Remove</button>
+      <button class="btn small ghost" data-action="cancel-remove" aria-label="Cancel">✕</button>
+    </div>`
+  }
+
   const lost = !!cid && !!memberLost(cid, pk)
   const beacon = st?.beacons.get(pk)
   const presence = beacon ? classifyPresence([beacon], nowSec(), { staleAfterSeconds: 600 })[0] : null
@@ -1352,11 +1361,14 @@ function circleMemberRow(pk: string, mePk: string): string {
   // Private message — works whether or not they're on the map right now (a pin tap
   // is the map-side equivalent). Not for my own row.
   const msg = isMe ? '' : `<button class="icon-btn" data-action="msg-member" data-pk="${pk}" aria-label="Message ${esc(nameFor(pk))} privately">✉️</button>`
+  // Remove — right here where you're looking at the roster, not buried three
+  // taps deep in Advanced settings. Reuses the same confirm + reseed as before.
+  const remove = isMe ? '' : `<button class="icon-btn" data-action="ask-remove" data-pk="${pk}" aria-label="Remove ${esc(nameFor(pk))} from this circle">🚪</button>`
   const isNew = (activeCircle()?.unseenMembers ?? []).includes(pk)
   return `<div class="member${isNew ? ' unseen' : ''}">
     ${avatarHtml(pk, isMe)}
     <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}${isNew ? ' <span class="pill new">new</span>' : ''}</div><div class="when">${sub}</div></div>
-    ${pill}${msg}${locate}${lostBtn}${edit}
+    ${pill}${msg}${locate}${lostBtn}${edit}${remove}
   </div>`
 }
 
@@ -2061,6 +2073,13 @@ function refresh(): void {
   // Never rebuild while an onboarding / add-circle form is on screen — a background
   // refresh would discard a half-typed circle name (the inputs are uncontrolled).
   if (adding || !persisted.identity || !activeCircle()) return
+  // A reseed (security reset, member removal, monthly rotation) changes which
+  // inbox each circle listens on. The full render() path always re-syncs
+  // subscriptions, but the in-place branches below did NOT — so sitting on
+  // Home (the default, most-common tab) silently kept the OLD subscription
+  // alive until a tab switch or restart forced a full render. Idempotent diff
+  // against the current subs Map, so calling it every tick is cheap.
+  ensureSubscriptions()
   // Both map-bearing tabs update in place — a full render would destroy the live
   // map canvas (and any open thread sheet) under the user on every presence tick.
   if (tab === 'map' && mapView) { updateMapData(); renderMapPanel(); patchBuzzBanner(); patchNavBadges() }
