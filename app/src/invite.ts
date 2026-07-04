@@ -101,6 +101,40 @@ export async function readDmWrap(signer: FlockSigner, wrap: { pubkey: string; co
   }
 }
 
+// A private "Come to me" from a PM: a ONE-SHOT exact location, gift-wrapped to
+// ONE recipient's personal inbox — never the shared circle inbox, so nobody
+// else in the circle ever sees it. Same rumour kind and personal-inbox channel
+// as a DM; distinguished by payload `t`. Encoding stays at the edge (the geohash
+// arrives already encoded), same discipline as every other flock beacon.
+interface LocationSharePayload { t: 'loc'; geohash: string; precision: number }
+
+/** A decrypted private location share: who sent it, their encoded cell, its
+ *  precision, and when (the rumor's own created_at). */
+export interface PrivateLocationShare { from: string; geohash: string; precision: number; at: number }
+
+/** Gift-wrap a one-shot exact location to one recipient. Encrypted to their real
+ *  key; filed under `personalInboxTag` so the npub stays off the wire. Only they
+ *  can read it — it never rides the circle's shared inbox. */
+export function buildPrivateLocationWrap(signer: FlockSigner, recipientPk: string, share: { geohash: string; precision: number }): Promise<SignedEvent> {
+  const payload: LocationSharePayload = { t: 'loc', geohash: share.geohash, precision: share.precision }
+  return giftWrap(signer, recipientPk, { kind: RUMOR_KIND, content: JSON.stringify(payload), tags: [] }, personalInboxTag(recipientPk))
+}
+
+/** Unwrap a personal-inbox wrap as a private location share; null if it isn't
+ *  one (or isn't addressed to us, or is malformed). The sender is the seal's
+ *  real pubkey. */
+export async function readPrivateLocationWrap(signer: FlockSigner, wrap: { pubkey: string; content: string }): Promise<PrivateLocationShare | null> {
+  const rumor = await giftUnwrap((pk, ct) => signer.nip44Decrypt(pk, ct), wrap)
+  if (!rumor) return null
+  try {
+    const o = JSON.parse(rumor.content) as Record<string, unknown>
+    if (o.t !== 'loc' || typeof o.geohash !== 'string' || typeof o.precision !== 'number') return null
+    return { from: rumor.pubkey, geohash: o.geohash, precision: o.precision, at: rumor.created_at }
+  } catch {
+    return null
+  }
+}
+
 /** Shared parser for both unwrap paths below — the payload shape is identical
  *  either way; only the decryption key differs. */
 function parseInvitePayload(rumor: { pubkey: string; content: string } | null): (InvitePayload & { from: string }) | null {

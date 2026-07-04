@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { makeLocalSigner } from './signer'
-import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildMeetingExactWrap, readMeetingExactWrap, buildDmWrap, readDmWrap, type InvitePayload } from './invite'
+import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildMeetingExactWrap, readMeetingExactWrap, buildDmWrap, readDmWrap, buildPrivateLocationWrap, readPrivateLocationWrap, type InvitePayload } from './invite'
 import { personalInboxTag } from './keys'
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
@@ -141,5 +141,39 @@ describe('private direct message (personal-inbox gift-wrap)', () => {
     expect(await readMeetingExactWrap(bob, dm)).toBeNull()
     const inviteWrap = await buildInviteWrap(alice, bob.pubkey, payload)
     expect(await readDmWrap(bob, inviteWrap)).toBeNull()
+  })
+})
+
+describe('private location share (PM "Come to me", personal-inbox gift-wrap)', () => {
+  it('round-trips to the one recipient, filed under their personal-inbox tag, sender attributed', async () => {
+    const alice = signer()
+    const bob = signer()
+    const wrap = await buildPrivateLocationWrap(alice, bob.pubkey, { geohash: 'gcpvj0e', precision: 9 })
+    expect(wrap.kind).toBe(1059)
+    const pTag = wrap.tags.find((t) => t[0] === 'p')?.[1]
+    expect(pTag).toBe(personalInboxTag(bob.pubkey))
+    expect(pTag).not.toBe(bob.pubkey)
+    const share = await readPrivateLocationWrap(bob, wrap)
+    expect(share).toMatchObject({ from: alice.pubkey, geohash: 'gcpvj0e', precision: 9 })
+    expect(share?.at).toBeTypeOf('number')
+  })
+
+  it('is readable ONLY by the named recipient — nobody else in the circle can decrypt it', async () => {
+    const alice = signer()
+    const bob = signer()
+    const eve = signer()
+    const wrap = await buildPrivateLocationWrap(alice, bob.pubkey, { geohash: 'gcpvj0e', precision: 9 })
+    expect(await readPrivateLocationWrap(eve, wrap)).toBeNull()
+  })
+
+  it('is never mistaken for a DM, an invite, or an exact meeting share (fall-through dispatch)', async () => {
+    const alice = signer()
+    const bob = signer()
+    const loc = await buildPrivateLocationWrap(alice, bob.pubkey, { geohash: 'gcpvj0e', precision: 9 })
+    expect(await readDmWrap(bob, loc)).toBeNull()
+    expect(await readInvite(bob, loc)).toBeNull()
+    expect(await readMeetingExactWrap(bob, loc)).toBeNull()
+    const dm = await buildDmWrap(alice, bob.pubkey, { circleId: 'c', text: 'hi' })
+    expect(await readPrivateLocationWrap(bob, dm)).toBeNull()
   })
 })

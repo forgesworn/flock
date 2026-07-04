@@ -159,8 +159,11 @@ export interface Hints { on: boolean; dismissed: string[] }
 
 // ── Chat history (circle chat + private 1:1 threads) ─────────────────────────
 /** One message in a thread. `from` is the sender's pubkey; `at` unix seconds
- *  (the rumor's own timestamp, so a relay replay carries the identical triple). */
-export interface ChatMessage { from: string; text: string; at: number }
+ *  (the rumor's own timestamp, so a relay replay carries the identical triple).
+ *  `geohash`/`precision` are present only for a private "Come to me" location
+ *  share (PM-only — see FLOCK §6: this rides the SAME dedupe-by-triple as any
+ *  other message, `text` staying a fixed human-readable marker). */
+export interface ChatMessage { from: string; text: string; at: number; geohash?: string; precision?: number }
 
 /** Cap per thread — a safety app's chat is a running conversation, not an archive. */
 export const CHAT_MAX_PER_THREAD = 200
