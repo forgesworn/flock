@@ -55,11 +55,11 @@ night-out sharing over Nostr.
 Background geofencing on Android/GrapheneOS (no Google APIs). `npm run apk` /
 `npm run apk:release` build a sideloadable APK (`native/build-apk.sh`); the
 generated `android/` project is gitignored — all native config lives in the
-committed scripts (`patch-android.mjs`, `native/assets/`). Background fixes
-flow through the SAME `onFix → autoEmit` policy pipeline as foreground; the
-watcher is tied to the sharing toggle and torn down on reset/hide. Reliability
-measurement on real hardware is still gated by the Phase 0 spike
-(`docs/plans/2026-06-30-phase0-graphene-spike.md`).
+committed scripts (`patch-android.mjs`, `native/assets/`). The background
+watcher (fix capture) is tied to the sharing toggle and torn down on
+reset/hide — see below for how a backgrounded fix is actually turned into a
+publish. Reliability measurement on real hardware is still gated by the
+Phase 0 spike (`docs/plans/2026-06-30-phase0-graphene-spike.md`).
 
 Background publish is native (Kotlin, `native/android-src/kotlin*`): while the
 app is backgrounded the fix→policy→gift-wrap→relay pipeline runs without the
