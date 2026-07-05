@@ -33,6 +33,37 @@ class FlockFixReceiver : BroadcastReceiver() {
                     { ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) },
                 ).also { publisher = it }
             }
+
+        /** Shared fix intake for every native source (this receiver's bg-geo FIX
+         *  broadcast AND FlockLocationService's direct-GPS fixes). Offloads the
+         *  whole pipeline — keystore init, crypto, relay I/O — to the single
+         *  publish thread, so all publishes serialise (no cadence read/write race
+         *  between two sources) and never run on a caller's callback thread.
+         *  onFix's own ProcessLifecycleOwner guard drops foreground fixes, so JS's
+         *  navigator.geolocation and this can't double-publish. Never throws.
+         *  @param onComplete runs after the attempt — the BroadcastReceiver passes
+         *  its goAsync finish(); the FGS passes the default no-op. */
+        fun submitFix(
+            context: Context,
+            lat: Double,
+            lon: Double,
+            accuracy: Double,
+            time: Long,
+            onComplete: () -> Unit = {},
+        ) {
+            executor.execute {
+                try {
+                    // Keystore init (EncryptedSharedPreferences.create) runs in
+                    // publisher(context) — off the main thread here — and a broken
+                    // store (GeneralSecurityException, IOException) must never crash
+                    // the app; swallow it. Best-effort background publish.
+                    publisher(context).onFix(lat, lon, accuracy, time)
+                } catch (_: Exception) {
+                } finally {
+                    onComplete()
+                }
+            }
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -42,23 +73,10 @@ class FlockFixReceiver : BroadcastReceiver() {
         if (lat.isNaN() || lon.isNaN()) return
         val accuracy = intent.getDoubleExtra("accuracy", 0.0)
         val time = intent.getLongExtra("time", System.currentTimeMillis())
-        // Foreground check must happen on the main thread (we're on it here);
-        // the pipeline itself (crypto + network) runs off it.
-        val fg = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-        if (fg) return
+        // Cheap main-thread early-out so a foreground fix never spins up the
+        // executor / keystore; onFix re-checks the same guard authoritatively.
+        if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
         val pending = goAsync()
-        executor.execute {
-            // Keystore init (EncryptedSharedPreferences.create) happens in publisher(context),
-            // so it must not run on the main thread; and a broken store (GeneralSecurityException,
-            // IOException) must never crash the app from inside onReceive — swallow it.
-            try {
-                val p = publisher(context)
-                p.onFix(lat, lon, accuracy, time)
-            } catch (_: Exception) {
-                // Best-effort background publish; nothing to do if the store/keystore is broken.
-            } finally {
-                pending.finish()
-            }
-        }
+        submitFix(context, lat, lon, accuracy, time) { pending.finish() }
     }
 }

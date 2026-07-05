@@ -18,12 +18,16 @@ class FlockPublishPlugin : Plugin() {
         val json = call.getString("json")
         if (json == null) { call.reject("missing json"); return }
         store.setConfigJson(json)
+        // Called only while sharing + unlocked + foregrounded — a legal FGS start.
+        // The native GPS source is alive exactly as long as the config mirror is.
+        FlockLocationService.start(context)
         call.resolve()
     }
 
     @PluginMethod
     fun clearConfig(call: PluginCall) {
         store.clearConfig()
+        FlockLocationService.stop(context)
         call.resolve()
     }
 
@@ -31,6 +35,7 @@ class FlockPublishPlugin : Plugin() {
     @PluginMethod
     fun wipeAll(call: PluginCall) {
         store.clearAll()
+        FlockLocationService.stop(context)
         call.resolve()
     }
 

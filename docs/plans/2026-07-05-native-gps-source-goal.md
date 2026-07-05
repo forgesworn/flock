@@ -1,7 +1,16 @@
 # Goal — a native GPS fix source for background publish
 
-**Date:** 2026-07-05 · **Status:** goal / next step after the native-background-publish
-PR merges. **Owner:** flock native.
+**Date:** 2026-07-05 · **Status:** IMPLEMENTED (compiles into the APK) — on-hardware
+verification pending (the locked-walk pass criterion below). **Owner:** flock native.
+
+> **Update 2026-07-05:** the plan below is now built —
+> `native/android-src/kotlin-android/cc/trotters/flock/FlockLocationService.kt`
+> (direct `GPS_PROVIDER`), its lifecycle wired through `FlockPublishPlugin`
+> (`setConfig`→start, `clearConfig`/`wipeAll`→stop), the shared `submitFix`
+> intake on `FlockFixReceiver`, and the `location`-typed manifest entry in
+> `patch-android.mjs`. A full `npm run apk` compiles it and the merged manifest
+> carries `android:foregroundServiceType="location"`. What remains is the
+> on-hardware **locked-walk** measurement (see "How to verify").
 
 ## The one-sentence goal
 
@@ -78,8 +87,12 @@ A `location`-typed foreground service mirroring `ProbeService`:
   still drop (JS `navigator.geolocation` owns the foreground — no double-publish).
 - `START_STICKY`; tear down GPS updates + HandlerThread in `onDestroy`.
 
-Draft written and validated by inspection during the session (not committed —
-recreate from this spec). ~110 lines.
+**Done** — `FlockLocationService.kt` (~150 lines incl. doc comment). A shared
+`FlockFixReceiver.submitFix(...)` intake serialises both sources (bg-geo
+broadcast + native GPS) onto the one publish thread, so there is no cadence
+read/write race and no double-publish (onFix's foreground guard still drops
+foreground fixes). `startForeground` is wrapped so a missing FGS-location grant
+or type mismatch stops the service instead of crashing the process.
 
 ### 2. Lifecycle — follow the config mirror
 
