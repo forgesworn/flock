@@ -59,8 +59,14 @@ export function buildNativePublishConfig(
 const RETRY = Symbol('retry')
 let lastSent: string | null | typeof RETRY = RETRY
 
+/** Mirrors store.lockSaves() — once hiding starts, nothing may re-arm the
+ *  native mirror. There is no unlock: module state only resets on reload. */
+let publishLocked = false
+export function lockNativePublish(): void { publishLocked = true }
+
 /** Diffed sync — only crosses the bridge when the config actually changed. */
 export async function syncNativePublishConfig(cfg: NativePublishConfig | null): Promise<void> {
+  if (publishLocked) return
   const json = cfg === null ? null : JSON.stringify(cfg)
   if (json === lastSent) return
   lastSent = json

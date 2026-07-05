@@ -3631,26 +3631,35 @@ async function toggleBle(): Promise<void> {
     : 'Bluetooth nearby off')
 }
 
+// onResume and visibilitychange can both fire onForeground for one real resume
+// (the documented double-fire near checkForUpdate) — guard against two
+// overlapping drains positionally ack'ing entries appended between them,
+// which would silently drop a journal entry.
+let drainingJournal = false
+
 /** Drain the native publish journal: adopt background beacons into my own pin
  *  history and cadence so reopening the app never double-sends or lies about
  *  "last shared". The fix-log entries are the split measurement (design doc
  *  verification §3) — surfaced via console for field debugging. */
 async function drainNativeJournal(): Promise<void> {
-  if (!isNativeShell()) return
+  if (drainingJournal) return
+  drainingJournal = true
   try {
+    if (!isNativeShell()) return
     const m = await import('../../native/publishMirror')
     const entries = await m.readNativeJournal()
     if (!entries.length) return
     const id = persisted.identity
     for (const e of entries) {
       if (e.t !== 'pub' || !id || !e.c || !e.g || e.p === undefined) continue
-      saveBeacon(e.c, { member: id.pk, geohash: e.g, precision: e.p, timestamp: e.at })
+      const cached = cstate(e.c).beacons.get(id.pk)
+      if (!cached || e.at > cached.timestamp) saveBeacon(e.c, { member: id.pk, geohash: e.g, precision: e.p, timestamp: e.at })
       const prev = beaconCadence.get(e.c)
       if (!prev || e.at > prev.lastSentAt) beaconCadence.set(e.c, { lastGeohash: e.g, lastSentAt: e.at })
     }
     await m.ackNativeJournal(entries.length)
     refresh()
-  } catch { /* plugin unavailable */ }
+  } catch { /* plugin unavailable */ } finally { drainingJournal = false }
 }
 
 function onFix(f: svc.Fix): void {
@@ -3904,6 +3913,9 @@ async function hideNow(): Promise<void> {
   const cfg = persisted.decoy
   if (!cfg) return
   if (localStorage.getItem(DECOY_CACHE_KEY)) { toast("Couldn't hide — free up some storage and try again"); return }
+  // Nothing may re-arm the native mirror once hiding starts (mirrors lockSaves) —
+  // an incoming signal can still render() until the reload lands.
+  try { (await import('../../native/publishMirror')).lockNativePublish() } catch { /* plugin-less shell */ }
   // Native shell: any persistent foreground-service notification (the location
   // watcher, the stay-reachable service) would be a tell on a "fresh install" —
   // await their teardown BEFORE sealing and reloading.

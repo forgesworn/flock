@@ -56,4 +56,21 @@ describe('clear/sync sentinel behaviour', () => {
     expect(clearConfig).toHaveBeenCalledTimes(2)
     vi.doUnmock('@capacitor/core')
   })
+
+  it('lockNativePublish makes sync a permanent no-op but clear still tears down', async () => {
+    vi.resetModules()
+    const setConfig = vi.fn().mockResolvedValue(undefined)
+    const clearConfig = vi.fn().mockResolvedValue(undefined)
+    vi.doMock('@capacitor/core', () => ({ registerPlugin: () => ({ clearConfig, setConfig, getJournal: vi.fn(), ackJournal: vi.fn() }) }))
+    const m = await import('./publishMirror')
+    m.lockNativePublish()
+    await m.syncNativePublishConfig({
+      v: 1, skHex: 'aa'.repeat(32), circleId: 'c1', seedHex: 'cc'.repeat(32),
+      precision: 7, festivalUntil: 0, relayUrls: ['wss://r1'], noReportZones: [], offGridUntil: 0,
+    })
+    expect(setConfig).not.toHaveBeenCalled()
+    await m.clearNativePublish()
+    expect(clearConfig).toHaveBeenCalledTimes(1)
+    vi.doUnmock('@capacitor/core')
+  })
 })
