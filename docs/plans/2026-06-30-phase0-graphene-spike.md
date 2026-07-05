@@ -1,6 +1,6 @@
 # Phase 0 — GrapheneOS background-location spike
 
-**Date:** 2026-06-30 · **Owner:** TBD · **Status:** Layer-B native probe built + installed (`native/gps-probe/`); full Capacitor harness scaffolded (`native/spike/`) — ready to run on a GrapheneOS Pixel
+**Date:** 2026-06-30 · **Owner:** TBD · **Status:** Layer-B GPS delivery **MEASURED GREEN** on a GrapheneOS Pixel 10 Pro (API 37), 2026-07-05 (`native/gps-probe/`) — locked + walking; deep-Doze stationary run still pending. Full Capacitor harness scaffolded (`native/spike/`).
 
 ## Why this exists
 
@@ -54,6 +54,17 @@ tri-state. Build/run:
 Run this on the **GrapheneOS Pixel before building anything native** — it converts
 "the native pipeline probably fixes locked sharing" into a yes/no. The stock-Android
 A32 is only a baseline; a green there with a red on GrapheneOS *is* the finding.
+
+**Result — GREEN (2026-07-05, GrapheneOS Pixel 10 Pro, API 37).** Screen locked +
+walking: **46 fixes at ~10 s cadence, longest gap 10 s**, foreground service alive
+8+ min (never killed), background-location + battery-exemption on. GrapheneOS
+delivers GPS to a locked, backgrounded FGS reliably — **Layer B is fine.** So
+flock's locked-phone failure is the Layer-A WebView-JS suspend seam, not the
+platform, and moving the pipeline native (`canary-native`) will *fix* locked
+background sharing rather than gamble on it. Comfortably beats test #1's ≤60 s
+cadence bar. Not yet run: deep-Doze stationary (walking keeps the device out of
+deep Doze). Note: adb can't pull the log on GrapheneOS (blocks `Android/data`) —
+the probe's on-screen stats are the source of truth (`screencap`).
 
 ## Devices
 
