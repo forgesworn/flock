@@ -42,3 +42,4 @@ native/keystore.properties
 # Claude Code / MCP / tooling artefacts
 .claude/
 CLAUDE.local.md
+.superpowers/
