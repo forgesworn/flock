@@ -1,8 +1,9 @@
 # Native background publish — the outbound half
 
-**Date:** 2026-07-05 · **Owner:** TBD · **Status:** design approved — open questions
-resolved in [`2026-07-05-native-background-publish-design.md`](2026-07-05-native-background-publish-design.md);
-root cause confirmed via live field testing
+**Date:** 2026-07-05 · **Owner:** TBD · **Status:** built (outbound) — golden-vector
+verified both directions; awaiting hardware round-trip
+([runbook](../runbooks/native-background-publish-test.md)); design + decisions in
+[`2026-07-05-native-background-publish-design.md`](2026-07-05-native-background-publish-design.md)
 
 ## Why this exists
 

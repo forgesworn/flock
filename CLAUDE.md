@@ -29,6 +29,8 @@ night-out sharing over Nostr.
 - `npm run dev` — Vite dev server for the PWA (`app/`)
 - `npm run build:app` — build the PWA → `dist-app/`
 - `npm run preview:app` — preview the built PWA
+- `npm run test:native` — Kotlin JVM tests for the native publish pipeline (JDK 21)
+- `npm run gen:vectors` — regenerate the native golden vectors (only on deliberate wire-format change)
 
 ## Structure
 
@@ -58,6 +60,14 @@ flow through the SAME `onFix → autoEmit` policy pipeline as foreground; the
 watcher is tied to the sharing toggle and torn down on reset/hide. Reliability
 measurement on real hardware is still gated by the Phase 0 spike
 (`docs/plans/2026-06-30-phase0-graphene-spike.md`).
+
+Background publish is native (Kotlin, `native/android-src/kotlin*`): while the
+app is backgrounded the fix→policy→gift-wrap→relay pipeline runs without the
+WebView (which Android suspends — see docs/plans/2026-07-05-native-background-publish-design.md).
+Wire-format parity is enforced by golden vectors (`native/vectors/`,
+`npm run gen:vectors`) and JVM tests (`npm run test:native`, JDK 21, no Android
+SDK needed). The pure core under `native/android-src/kotlin/` must never import
+`android.*`.
 
 ## Security-critical paths
 
