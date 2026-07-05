@@ -1250,7 +1250,7 @@ function chatBubble(m: store.ChatMessage, prev?: store.ChatMessage): string {
   // A private "Come to me" location share — the marker text plus its precision,
   // and (received side only) a jump to see it on the map.
   const view = !mine && m.geohash
-    ? `<button class="btn small ghost" data-action="see-shared-location" data-geohash="${esc(m.geohash)}">See on map</button>`
+    ? `<button class="btn small ghost" data-action="see-shared-location" data-geohash="${esc(m.geohash)}" data-pk="${esc(m.from)}">See on map</button>`
     : ''
   const size = m.precision !== undefined ? ` · ${esc(precisionSize(m.precision))}` : ''
   return `<div class="msg${mine ? ' mine' : ''}">${who}<span class="msg-text">${esc(m.text)}${size}</span>${view}<span class="msg-when">${esc(fmtChatTime(m.at))}</span></div>`
@@ -3021,6 +3021,13 @@ function onIncomingLocationShare(loc: PrivateLocationShare): void {
   if (me && loc.from === me.pk) return
   const c = persisted.circles.find((x) => (x.members ?? []).includes(loc.from))
   if (!c) return // not a fellow circle member — drop (stranger spam / scraped npub)
+  // Put it on the map. A private exact share is a location I now hold for them, so
+  // render it as their pin — exactly as the circle-wide come-to-me answer does
+  // (sendExactBeacon → saveBeacon). Without this the "See on map" jump lands on
+  // empty terrain: the whole point of sharing an exact spot is that it's visible.
+  // On-device only (the wrap was addressed to me alone); their own next ambient
+  // beacon supersedes it by recency, so it can't outlive their real position.
+  saveBeacon(c.id, { member: loc.from, geohash: loc.geohash, precision: loc.precision, timestamp: loc.at })
   const text = '📍 Shared their exact location'
   const isNew = appendDm(loc.from, { from: loc.from, text, at: loc.at, geohash: loc.geohash, precision: loc.precision })
   if (!isNew || nowSec() - loc.at > MSG_FRESH_SEC) { refresh(); return }
@@ -3140,13 +3147,20 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'rollcall-dismiss': locAsk = null; refresh(); break
     case 'toggle-settings': showSettings = !showSettings; render(); break
     case 'see-on-map': focusMemberPk = node.dataset.pk ?? null; tab = 'home'; render(); break
-    case 'see-shared-location':
+    case 'see-shared-location': {
       focusGeohash = node.dataset.geohash ?? null
       dmPeer = null
       document.getElementById('dm-sheet')?.remove()
+      // Jump to the circle this person is in so their saved exact pin is on the
+      // active map (switchCircle renders + goes Home; initMap then frames the
+      // cell via focusGeohash). Same circle → just re-render Home.
+      const pk = node.dataset.pk ?? ''
+      const sc = persisted.circles.find((x) => (x.members ?? []).includes(pk))
+      if (sc && sc.id !== persisted.activeCircleId) { switchCircle(sc.id); break }
       tab = 'home'
       render()
       break
+    }
     case 'ask-lost': lostConfirmPk = node.dataset.pk ?? null; render(); break
     case 'cancel-lost': lostConfirmPk = null; render(); break
     case 'report-lost': {

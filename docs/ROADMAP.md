@@ -187,6 +187,20 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
 
 ## Messaging & map-led Home (2026-07-03)
 
+- [x] **Bugfix — a 1:1 "Come to me" exact share now actually shows on the map
+  (2026-07-05).** The private exact share (`doDmComeToMe` → gift-wrapped to the
+  recipient's personal inbox) arrived as a chat bubble with a "See on map" button,
+  but `onIncomingLocationShare` **never recorded the location** — so the jump only
+  panned the camera to **empty terrain** (no pin). Sharing your exact spot with one
+  person genuinely didn't work for the person receiving it. Fixed by having the
+  received share call `saveBeacon` (rendering it as the sender's pin, exactly as the
+  circle-wide `sendExactBeacon` answer already did — the 1:1 path had simply omitted
+  it), the bubble carry the sender's `data-pk`, and "See on map" switch to the
+  sender's circle so their now-recorded pin is on the active map. On-device only;
+  the sender's own later beacon supersedes it by recency. New deterministic e2e
+  (`quick-action.spec.ts`) where **neither** person ambient-shares (remote gift-wrap
+  invite bootstraps both rosters), so the pin exists **only** because the exact share
+  was recorded — proven green over the live relay.
 - [x] **Map-led Home.** The Home tab now opens onto a **live members map** (the old
   "Private" status orb is gone; its Private/Sharing copy survives as a glass chip
   over the map, plus a "N people on the map" count). Controls (share toggle,
