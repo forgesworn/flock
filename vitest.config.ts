@@ -7,7 +7,7 @@ export default defineConfig({
     alias: { '@forgesworn/flock': resolve(__dirname, 'src/index.ts') },
   },
   test: {
-    include: ['src/**/*.test.ts', 'app/**/*.test.ts', 'server/**/*.test.mjs'],
+    include: ['src/**/*.test.ts', 'app/**/*.test.ts', 'server/**/*.test.mjs', 'native/**/*.test.ts'],
     passWithNoTests: true,
     coverage: {
       provider: 'v8',
