@@ -46,10 +46,19 @@ class FlockFixReceiver : BroadcastReceiver() {
         // the pipeline itself (crypto + network) runs off it.
         val fg = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         if (fg) return
-        val p = publisher(context)
         val pending = goAsync()
         executor.execute {
-            try { p.onFix(lat, lon, accuracy, time) } finally { pending.finish() }
+            // Keystore init (EncryptedSharedPreferences.create) happens in publisher(context),
+            // so it must not run on the main thread; and a broken store (GeneralSecurityException,
+            // IOException) must never crash the app from inside onReceive — swallow it.
+            try {
+                val p = publisher(context)
+                p.onFix(lat, lon, accuracy, time)
+            } catch (_: Exception) {
+                // Best-effort background publish; nothing to do if the store/keystore is broken.
+            } finally {
+                pending.finish()
+            }
         }
     }
 }

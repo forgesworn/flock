@@ -23,12 +23,19 @@ class EncryptedConfigStore(context: Context) : ConfigStore {
 
     override fun getConfigJson(): String? = prefs.getString("config", null)
 
+    // Two threads touch this store — FlockFixReceiver's executor (appendJournal,
+    // via publish) and Capacitor's plugin HandlerThread (everything else) — so
+    // read-modify-write bodies are synchronised on the shared instance to stop
+    // a concurrent append/ack from clobbering the other's update.
+
     fun setConfigJson(json: String?) {
-        prefs.edit().apply { if (json == null) remove("config") else putString("config", json) }.apply()
+        synchronized(this) {
+            prefs.edit().apply { if (json == null) remove("config") else putString("config", json) }.apply()
+        }
     }
 
     /** Full teardown: config, cadence state and journal all go together. */
-    fun clearAll() { prefs.edit().clear().apply() }
+    fun clearAll() { synchronized(this) { prefs.edit().clear().apply() } }
 
     override fun getCadence(circleId: String): BeaconCadence {
         val g = prefs.getString("cadence.$circleId.g", null)
@@ -37,31 +44,41 @@ class EncryptedConfigStore(context: Context) : ConfigStore {
     }
 
     override fun setCadence(circleId: String, cadence: BeaconCadence) {
-        prefs.edit()
-            .putString("cadence.$circleId.g", cadence.lastGeohash)
-            .putLong("cadence.$circleId.at", cadence.lastSentAt)
-            .apply()
+        synchronized(this) {
+            prefs.edit()
+                .putString("cadence.$circleId.g", cadence.lastGeohash)
+                .putLong("cadence.$circleId.at", cadence.lastSentAt)
+                .apply()
+        }
     }
 
     override fun appendJournal(entryJson: String) {
-        val arr = JSONArray(prefs.getString("journal", "[]"))
-        arr.put(entryJson)
-        // Cap: keep the newest 300 entries.
-        val start = maxOf(0, arr.length() - 300)
-        val trimmed = JSONArray()
-        for (i in start until arr.length()) trimmed.put(arr.get(i))
-        prefs.edit().putString("journal", trimmed.toString()).apply()
+        synchronized(this) {
+            val arr = JSONArray(prefs.getString("journal", "[]"))
+            arr.put(entryJson)
+            // Cap: keep the newest 300 entries.
+            val start = maxOf(0, arr.length() - 300)
+            val trimmed = JSONArray()
+            for (i in start until arr.length()) trimmed.put(arr.get(i))
+            prefs.edit().putString("journal", trimmed.toString()).apply()
+        }
     }
 
     fun getJournal(): List<String> {
-        val arr = JSONArray(prefs.getString("journal", "[]"))
-        return (0 until arr.length()).map { arr.getString(it) }
+        synchronized(this) {
+            val arr = JSONArray(prefs.getString("journal", "[]"))
+            return (0 until arr.length()).map { arr.getString(it) }
+        }
     }
 
     fun ackJournal(count: Int) {
-        val arr = JSONArray(prefs.getString("journal", "[]"))
-        val remaining = JSONArray()
-        for (i in count until arr.length()) remaining.put(arr.get(i))
-        prefs.edit().putString("journal", remaining.toString()).apply()
+        synchronized(this) {
+            val arr = JSONArray(prefs.getString("journal", "[]"))
+            val remaining = JSONArray()
+            // Defence-in-depth: clamp a negative count rather than trust the caller.
+            val n = count.coerceAtLeast(0)
+            for (i in n until arr.length()) remaining.put(arr.get(i))
+            prefs.edit().putString("journal", remaining.toString()).apply()
+        }
     }
 }
