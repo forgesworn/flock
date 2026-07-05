@@ -18,7 +18,7 @@
 //    in the browser. autoVerify checks the site's /.well-known/assetlinks.json
 //    (shipped in app/public, so every deploy serves it) against the APK's
 //    signing cert; native/deeplink.ts feeds the arriving URL to the app.
-import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync, cpSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -36,6 +36,12 @@ for (const f of ['StayReachableService.java', 'StayReachablePlugin.java', 'Flock
   copyFileSync(resolve(JAVA_SRC, f), resolve(JAVA_DEST, f))
 }
 console.error('copied stay-reachable native sources into android/')
+
+// Kotlin sources: the pure publish core (shared with native/crypto-tests) and
+// the Android glue. cpSync replaces per-file copies — the trees are nested.
+cpSync(resolve(here, 'android-src/kotlin/cc'), resolve(here, '../android/app/src/main/java/cc'), { recursive: true })
+cpSync(resolve(here, 'android-src/kotlin-android/cc'), resolve(here, '../android/app/src/main/java/cc'), { recursive: true })
+console.error('copied Kotlin publish pipeline into android/')
 
 const PERMISSIONS = [
   'android.permission.ACCESS_COARSE_LOCATION',
@@ -165,9 +171,105 @@ if (!existingStay) {
   console.error('corrected StayReachableService foregroundServiceType → specialUse (was stale)')
 }
 
+// FlockFixReceiver — explicit-component broadcasts only, never exported.
+const FIX_RECEIVER = `        <receiver
+            android:name=".FlockFixReceiver"
+            android:exported="false" />`
+if (!xml.includes('android:name=".FlockFixReceiver"')) {
+  xml = xml.replace('</application>', `${FIX_RECEIVER}\n    </application>`)
+  changed = true
+  console.error('added FlockFixReceiver to manifest')
+}
+
 if (changed) {
   writeFileSync(manifestPath, xml)
   console.error('patched android/app/src/main/AndroidManifest.xml')
 } else {
   console.error('AndroidManifest.xml already patched')
+}
+
+// ── Kotlin + publish-pipeline dependencies ──────────────────────────────────
+const rootGradlePath = resolve(here, '../android/build.gradle')
+let rootGradle = readFileSync(rootGradlePath, 'utf8')
+const AGP_ANCHOR = "classpath 'com.android.tools.build:gradle"
+if (!rootGradle.includes(AGP_ANCHOR)) {
+  throw new Error('patch-android: AGP classpath anchor not found — Capacitor template changed, update the patch')
+}
+if (!rootGradle.includes('kotlin-gradle-plugin')) {
+  rootGradle = rootGradle.replace(
+    new RegExp(`(\\s*)(${AGP_ANCHOR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\n]*)`),
+    `$1$2$1classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0'`,
+  )
+  writeFileSync(rootGradlePath, rootGradle)
+  console.error('added Kotlin Gradle plugin to root build.gradle')
+}
+
+const appGradlePath = resolve(here, '../android/app/build.gradle')
+let appGradle = readFileSync(appGradlePath, 'utf8')
+const appGradleBefore = appGradle
+const APPLY_ANCHOR = "apply plugin: 'com.android.application'"
+if (!appGradle.includes(APPLY_ANCHOR)) {
+  throw new Error('patch-android: application plugin anchor not found — update the patch')
+}
+if (!appGradle.includes('kotlin-android')) {
+  appGradle = appGradle.replace(APPLY_ANCHOR, `${APPLY_ANCHOR}\napply plugin: 'kotlin-android'`)
+}
+const PUBLISH_DEPS = `    // Native background publish (docs/plans/2026-07-05-native-background-publish-design.md)
+    implementation "org.rust-nostr:nostr-sdk:0.44.2"
+    implementation "androidx.security:security-crypto:1.1.0-alpha06"
+    implementation "androidx.lifecycle:lifecycle-process:2.8.7"
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"`
+if (!appGradle.includes('org.rust-nostr:nostr-sdk')) {
+  const DEPS_ANCHOR = 'dependencies {'
+  if (!appGradle.includes(DEPS_ANCHOR)) throw new Error('patch-android: dependencies block not found — update the patch')
+  appGradle = appGradle.replace(DEPS_ANCHOR, `${DEPS_ANCHOR}\n${PUBLISH_DEPS}`)
+}
+
+// Kotlin must match capacitor.build.gradle's Java 21 compileOptions — an
+// unset jvmTarget defaults to 1.8 and hard-fails the mixed-source module.
+if (!appGradle.includes('jvmToolchain')) {
+  appGradle += `\nkotlin {\n    jvmToolchain(21)\n}\n`
+}
+
+if (appGradle !== appGradleBefore) {
+  writeFileSync(appGradlePath, appGradle)
+  console.error('patched app/build.gradle (kotlin plugin + publish deps)')
+}
+
+// ── Fix broadcast out of @capacitor-community/background-geolocation ───────
+// The plugin delivers each fix to JS via the Capacitor bridge, which a
+// backgrounded WebView suspends (the confirmed root cause — see the design
+// doc). This patch ALSO hands every fix to FlockFixReceiver as an
+// explicit-component broadcast, so the native pipeline sees fixes the JS
+// can't. Applied to node_modules (regenerated on every build); the anchor
+// assert makes a plugin update fail the build loudly, never silently.
+const bgPluginPath = resolve(here,
+  '../node_modules/@capacitor-community/background-geolocation/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocation.java')
+let bgPlugin = readFileSync(bgPluginPath, 'utf8')
+const FIX_HOOK_MARK = 'cc.trotters.flock.FIX'
+if (!bgPlugin.includes(FIX_HOOK_MARK)) {
+  const RECEIVE_ANCHOR = 'public void onReceive(Context context, Intent intent) {\n            String id = intent.getStringExtra("id");'
+  if (!bgPlugin.includes(RECEIVE_ANCHOR)) {
+    throw new Error('patch-android: background-geolocation ServiceReceiver anchor not found — plugin updated, revalidate the fix hook')
+  }
+  bgPlugin = bgPlugin.replace(RECEIVE_ANCHOR,
+    `public void onReceive(Context context, Intent intent) {
+            // flock: hand every fix to the native publish pipeline as well —
+            // injected by native/patch-android.mjs, see docs/plans/
+            // 2026-07-05-native-background-publish-design.md.
+            Location flockFix = intent.getParcelableExtra("location");
+            if (flockFix != null) {
+                Intent fwd = new Intent("${FIX_HOOK_MARK}");
+                fwd.setClassName(context.getPackageName(), "cc.trotters.flock.FlockFixReceiver");
+                fwd.putExtra("lat", flockFix.getLatitude());
+                fwd.putExtra("lon", flockFix.getLongitude());
+                fwd.putExtra("accuracy", (double) flockFix.getAccuracy());
+                fwd.putExtra("time", flockFix.getTime());
+                context.sendBroadcast(fwd);
+            }
+            String id = intent.getStringExtra("id");`)
+  writeFileSync(bgPluginPath, bgPlugin)
+  console.error('patched background-geolocation: fix broadcast → FlockFixReceiver')
+} else {
+  console.error('background-geolocation fix broadcast already patched')
 }

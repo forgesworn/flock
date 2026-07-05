@@ -736,6 +736,9 @@ async function bootLocked(): Promise<void> {
       return
     } catch { /* a grace secret that no longer decrypts falls through to the PIN */ }
   }
+  // Locked at rest with no live session ⇒ background publish must be off — the
+  // design doc's degrade-to-foreground-only rule. Cleared before the PIN screen.
+  void import('../../native/publishMirror').then((m) => m.clearNativePublish()).catch(() => { /* plugin unavailable */ })
   renderLockScreen()
 }
 
@@ -752,6 +755,13 @@ function bootUnlocked(): void {
   window.setTimeout(() => { void maybeRotateSeeds() }, 20_000)
   window.setInterval(() => { void maybeRotateSeeds() }, 3_600_000)
   store.save(persisted) // persist any legacy→multi-circle migration / pruning straight away
+  // Mount is effectively "resuming" from whatever the native watcher did since
+  // the app last ran (including a cold start after being fully killed, which
+  // onForeground's resume hook never sees) — drain it here too, and queue it
+  // BEFORE the first render() below: render's end-of-cycle config sync can
+  // clear the native config, and the drain must be queued first so it isn't
+  // racing a clear it hasn't read yet.
+  void drainNativeJournal()
   // A join link (scanned QR / tapped in a chat) arrives as a #join= fragment —
   // never sent to any server. Scrub it from the address bar BEFORE anything else
   // runs: it carries the seed.
@@ -977,6 +987,13 @@ function render(opts?: { animate?: boolean }): void {
   // Being ON the Chat tab with the thread in view IS reading it (Signal-style).
   if (tab === 'chat' && !document.hidden && activeCircle()) markThreadRead(chatKeyOf((activeCircle() as store.Circle).id))
   scrollChatToEnd()
+  // Native shell: keep the background-publish mirror in step with state. Diffed
+  // inside the module — this is a cheap no-op unless something changed.
+  if (isNativeShell()) {
+    void import('../../native/publishMirror').then((m) =>
+      m.syncNativePublishConfig(m.buildNativePublishConfig(persisted, sharing, baseSharePrecision(activeCircle()))),
+    ).catch(() => { /* plugin unavailable */ })
+  }
 }
 
 /** Pin the visible thread(s) to their newest message after a (re)render. */
@@ -1025,7 +1042,14 @@ function circleSwitcher(): string {
  *  the hero, but "am I sharing, and how closely?" must still read at a glance. */
 function homeMapStatus(): { cls: string; label: string; sub: string } {
   const c = activeCircle() as store.Circle
-  if (sharing && fix) return { cls: 'state-share', label: 'Sharing live', sub: `${precisionLabel(sharePrecisionOf(c))} · your circle can see you` }
+  if (sharing && fix) {
+    // Signet has no local key to hand the native watcher, and Tor routing has
+    // no native Orbot/SOCKS path yet — either way sharing pauses the moment
+    // flock is closed, so say so rather than silently degrading.
+    const bgReason = persisted.authMethod === 'signet' ? 'Signet sign-in' : persisted.torRelay ? 'Tor routing' : null
+    const bgNote = isNativeShell() && bgReason ? ` · pauses while flock is closed (${bgReason})` : ''
+    return { cls: 'state-share', label: 'Sharing live', sub: `${precisionLabel(sharePrecisionOf(c))} · your circle can see you${bgNote}` }
+  }
   if (sharing && !fix) return { cls: 'state-share', label: 'Locating…', sub: 'Getting a fix' }
   return { cls: 'state-safe', label: 'Private', sub: 'Location hidden until you share it' }
 }
@@ -3548,6 +3572,7 @@ async function ensureBatteryExemptForSharing(): Promise<void> {
 
 /** Everything that should happen the moment flock comes to the foreground. */
 function onForeground(): void {
+  void drainNativeJournal() // adopt any beacons the native watcher sent while backgrounded
   void checkForUpdate()
   void refreshBatteryExempt()
   void refreshDndAccess()
@@ -3609,6 +3634,37 @@ async function toggleBle(): Promise<void> {
   toast(persisted.bleNearby
     ? 'Bluetooth nearby on — finding co-located circle members off-relay'
     : 'Bluetooth nearby off')
+}
+
+// onResume and visibilitychange can both fire onForeground for one real resume
+// (the documented double-fire near checkForUpdate) — guard against two
+// overlapping drains positionally ack'ing entries appended between them,
+// which would silently drop a journal entry.
+let drainingJournal = false
+
+/** Drain the native publish journal: adopt background beacons into my own pin
+ *  history and cadence so reopening the app never double-sends or lies about
+ *  "last shared". The fix-log entries are the split measurement (design doc
+ *  verification §3) — surfaced via console for field debugging. */
+async function drainNativeJournal(): Promise<void> {
+  if (drainingJournal) return
+  drainingJournal = true
+  try {
+    if (!isNativeShell()) return
+    const m = await import('../../native/publishMirror')
+    const entries = await m.readNativeJournal()
+    if (!entries.length) return
+    const id = persisted.identity
+    for (const e of entries) {
+      if (e.t !== 'pub' || !id || !e.c || !e.g || e.p === undefined) continue
+      const cached = cstate(e.c).beacons.get(id.pk)
+      if (!cached || e.at > cached.timestamp) saveBeacon(e.c, { member: id.pk, geohash: e.g, precision: e.p, timestamp: e.at })
+      const prev = beaconCadence.get(e.c)
+      if (!prev || e.at > prev.lastSentAt) beaconCadence.set(e.c, { lastGeohash: e.g, lastSentAt: e.at })
+    }
+    await m.ackNativeJournal(entries.length)
+    refresh()
+  } catch { /* plugin unavailable */ } finally { drainingJournal = false }
 }
 
 function onFix(f: svc.Fix): void {
@@ -3862,11 +3918,17 @@ async function hideNow(): Promise<void> {
   const cfg = persisted.decoy
   if (!cfg) return
   if (localStorage.getItem(DECOY_CACHE_KEY)) { toast("Couldn't hide — free up some storage and try again"); return }
+  // Nothing may re-arm the native mirror once hiding starts (mirrors lockSaves) —
+  // an incoming signal can still render() until the reload lands.
+  try { (await import('../../native/publishMirror')).lockNativePublish() } catch { /* plugin-less shell */ }
   // Native shell: any persistent foreground-service notification (the location
   // watcher, the stay-reachable service) would be a tell on a "fresh install" —
   // await their teardown BEFORE sealing and reloading.
   await stopBgWatch()
   await stopStayReachable()
+  // Decoy hide must leave nothing behind, including the journal — a fresh
+  // install has none, so the mirror must be fully wiped, not just config-cleared.
+  try { await (await import('../../native/publishMirror')).wipeNativePublish() } catch { /* not running */ }
   try { await (await import('../../native/ble')).stopBle() } catch { /* not running */ }
   bleActive = false // a decoy must be radio-inert — no BLE advertising/scanning
   const sealed = await sealState(JSON.stringify(persisted), cfg.salt, cfg.key)
@@ -4096,6 +4158,8 @@ function resetDevice(): void {
   stopWatch?.(); stopWatch = null
   void stopBgWatch() // native shell: the foreground service (and its notification) must not outlive the reset
   void stopStayReachable() // and the stay-reachable service likewise
+  // A device reset must leave nothing behind, including the journal.
+  void import('../../native/publishMirror').then((m) => m.wipeNativePublish()).catch(() => { /* not running */ })
   void import('../../native/ble').then((b) => b.stopBle()).catch(() => { /* not running */ }); bleActive = false // BLE radio must not outlive the reset
   stopAllSubs()
   stopInviteSub?.(); stopInviteSub = null

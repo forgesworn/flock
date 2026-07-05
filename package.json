@@ -109,6 +109,8 @@
     "preview:app": "vite preview",
     "rooms": "node server/rooms.mjs",
     "rooms:mock": "FLOCK_ROOM_RUNNER=mock node server/rooms.mjs",
+    "gen:vectors": "FLOCK_GEN_VECTORS=1 vitest run native/vectors/generate.test.ts",
+    "test:native": "cd native/crypto-tests && ./gradlew --console=plain test",
     "deploy": "sh deploy/deploy.sh"
   },
   "keywords": [

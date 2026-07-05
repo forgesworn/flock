@@ -1,0 +1,108 @@
+{
+  "identitySkHex": "0101010101010101010101010101010101010101010101010101010101010101",
+  "identityPkHex": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+  "seedHex": "0202020202020202020202020202020202020202020202020202020202020202",
+  "circleId": "a1b2c3d4",
+  "inbox": {
+    "skHex": "f2fa767ee1d4e96677073c6925140843e14c8067458e1a92ab3c0dc4a9f97c0b",
+    "pkHex": "387e64581357c04a868f5292f7aee91ad753dbf2b97f9a21b2f9ab108c307dc4"
+  },
+  "beaconKeyHex": "b01870d5423fdabda9f519ab1f12baf33c13123260277174c421606cd3bc7fc5",
+  "groupIdHash": "7dcf407fa84a0e0519c7991154c4148de0244d7589020c0d9842db9efad82094",
+  "geohash": [
+    {
+      "lat": 51.5007,
+      "lon": -0.1246,
+      "precision": 6,
+      "expected": "gcpuvp"
+    },
+    {
+      "lat": 51.5007,
+      "lon": -0.1246,
+      "precision": 9,
+      "expected": "gcpuvpmm2"
+    },
+    {
+      "lat": -33.8568,
+      "lon": 151.2153,
+      "precision": 7,
+      "expected": "r3gx2ux"
+    },
+    {
+      "lat": 0,
+      "lon": 0,
+      "precision": 3,
+      "expected": "s00"
+    },
+    {
+      "lat": 89.999,
+      "lon": 179.999,
+      "precision": 8,
+      "expected": "zzzzzzz6"
+    }
+  ],
+  "derive": [
+    {
+      "purpose": "flock:inbox",
+      "index": 0,
+      "skHex": "f2fa767ee1d4e96677073c6925140843e14c8067458e1a92ab3c0dc4a9f97c0b",
+      "pkHex": "387e64581357c04a868f5292f7aee91ad753dbf2b97f9a21b2f9ab108c307dc4"
+    },
+    {
+      "purpose": "flock:circle:a1b2c3d4",
+      "index": 0,
+      "skHex": "ab89002ef58b0ac7e1b3fe91ce56d5f4efef6570db373036fbdf5590e2a03357",
+      "pkHex": "e87e0f052ab6eaa8916745334cd7faf8e6accc52661f2f9456f35ee0a23e65cb"
+    },
+    {
+      "purpose": "flock:circle:a1b2c3d4",
+      "index": 3,
+      "skHex": "34a44c5815619f7c520fe7947648cd1e08bb49652ea3300be0d437c2f44567be",
+      "pkHex": "338b0717ef6c48497e85ef15a33402de87cda2be9b121c5af55f1bd2463c23b9"
+    }
+  ],
+  "beaconCiphertexts": [
+    {
+      "geohash": "gcpuvp",
+      "precision": 6,
+      "timestamp": 1783243477,
+      "ciphertextB64": "rmQpdV8dYrc16lw06VfyQsyb8K5zM3XioqQYi5js/JeDTDOeKvTGng0EBtZGeNU1+Z3FV2znWj3ffPRthxgBAZv/fNCo6gZILKPKyvWdqYG4L2GsIg=="
+    }
+  ],
+  "nip44": [
+    {
+      "senderSkHex": "0101010101010101010101010101010101010101010101010101010101010101",
+      "recipientPkHex": "387e64581357c04a868f5292f7aee91ad753dbf2b97f9a21b2f9ab108c307dc4",
+      "plaintext": "flock vector",
+      "ciphertext": "AmK1egkoNUGX0/Hb3WxCdOHnwfYdctum73BKsVewEcbO/D8qetsz4jQheF4DGgrLgB5AE+/LWXZuAQ1ud6EfJ2cd++MMc1tVfCm5MuaLm2qjpeBVfsDrI1T2BmLFNlflrgbI"
+    }
+  ],
+  "wraps": [
+    {
+      "wrapJson": {
+        "kind": 1059,
+        "content": "AjQh8TSROoCfGGtef3JsVOo18vaPcJb/0OilZNtjypU04OXhPWOlJCs9CkanXxMIwAyTEqEiBVzlsU4ZevHQjsIjZoftn/ved1VV7wq9jkddNeOagj2GPVvLCLhqtWZhBQfp9nHtvYvjA7ifBKc2pmjuafwtovnFq7k4C5phUqquSOxVO7h/dgc3NLuLXRB/2I/NxG1wXFbC+vYCQOfsdnIkqzpp8dpqimCtNnFE1COAcOWT1nFp7qHHwIFG+1NcAL/uoh1Hnb05+yM4hOi6cZ8NsPrs1g6aaiEpBzQ8dNr8maKSfF+aObX56+RH2bhe6uwWWtVtceH9B3duzpgKk5IQmrRtLFvFo8anQbvPGV+wT/DT3/SU9TaYuyv12iYP9hPXWTuLQgRdqfvldwcnyIny7jmLrKZE1T/8aFbIE4GvFPhK2l6iAM1FTnX3eAMKiXP8lSGDz6aCd2+HUOCGXIWGHBYmK7FgBDT68tS5tA9Yp45jCkY8frhkiybHIqTRFcGo9lrQAE1g73gEXyY8Os0coOZ5y7cudB5ZYEsAs/xw80Z08n3VoKjKr+3rsVmSsQClU7YgKROll0hsZup8GHUB961YLXdjtMUtBo/YOx5bcq7kYbdFJPdGEQVIoAK4f4T9pRu6zVLnvmWQD4D1ddhR/oEBkcWn+Ju7OlmXjrDsnE0/bYVWIDWRUeAwqLB3mh+P46hzf8PeTZLbnr1K8OjeyWDtGDTrNzzi3WxPYJ7SXGwXuUWCpXEJBFB+zHG7VF9AQvxPLbhdSDlI7vWd82t6JS2eyxtFmDLyV6mzsZdT7O/wKc0tffhhv4Yzg6NQZSESTT2EaWM8ZBXrmPhjy97Z8bXgURm++Or5sf1k1vx5Xz4hZTGBorqBrmWUvCE3A6Nd/cT+DPM/4u2g4PF1eTCIWZjg/y/g1bjoorpN+MoJfUjEZ/ZMad1RhZmBjfWfFOnGbGebXVEh/oytK6q5JVaucXV1FBZphpv+1mvmWEWfleyeQtkJuwzHjoRQpCW1brGQsYK48R/6YSawxky0aAn99RsJAdl49u/qIfpe1PrdlYc7KXkP9lFJntdwWw1Oa1yw/1h9Srl4mVkPYtoWb8uewoKW1GRZv1KFtgB73dcXQLErR+2JyKmOqA/xlmCi1Dy0r95Iu8CaSaZ/MqV/5WMF9NRztoZxGYmS2WR5uhaV86IIrdQZuFe+KWoJRAicyunY7i0I1ws30OdjmBQo0Of/PMAFKvpA3/8vQ72+V9HawxyBEMKraL9+9TzZRHdMvLrgrAMrSXiSd+1FdIfNgLRclcsPuStes1V3FuXhfrgLWyttVVJara38PkMn9qT9w/D/jLvn1B+LNDKrWn4WP2zibCmLqSY483bdBAGOGGgiXcJ4ZAfGuJRC6uWeLf81qIgGsp/UagelKg9mz4Rcte6Uik9iQxaPc0RZFkl+19nvAlFbdcvVhPy/9ILpZf7kAh8bxMugPn0qWbpG35AUjv/VUWLhIzY3Xewpw1Q457KVjdA25UYGN5ESFUCaVlQ6K05G6EpFaIV5IK4Pgd532evXmVZ5+B8qs6J3ZrSeyEn4g7DtcOeNz/WGy+rJLc406w/69yGHSWWzQUVFFPG2BNYnNso2fTN9pwOotI1PzW75LjRzhkhfUZeuPzCf4SjNBP0bbHcChPLwpZU190TJnhLzPf9gVGEpjmgDSM53NLOHCCSfUtedFl8W0TjFgHRxhRu077YFZqBhKNt/Va1jAPFAY0c6msi6ugX1Z9F2JxaZbvIFFo2YuqvHIew6PRK/dGQx",
+        "tags": [
+          [
+            "p",
+            "387e64581357c04a868f5292f7aee91ad753dbf2b97f9a21b2f9ab108c307dc4"
+          ],
+          [
+            "expiration",
+            "1784537397"
+          ]
+        ],
+        "created_at": 1783154997,
+        "pubkey": "ef7c0e687217ded934ad0457ba6888b840c76e8a9a9727759b6f98007f752366",
+        "id": "c2c357b24663c0251c9a040cf0ced615040ca0cb770b30634700662ebf6997d7",
+        "sig": "47c786d9e54b5f648987620bd87d191482a0eab789b49ccd834a80b7bec8bd96881a000935a4b2fb93d48dfd2bf72ca344f426a3061a1fa1b9bcc65bfae3ffc1"
+      },
+      "expect": {
+        "rumorKind": 20078,
+        "rumorPubkey": "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+        "geohash": "gcpuvp",
+        "precision": 6
+      }
+    }
+  ]
+}
