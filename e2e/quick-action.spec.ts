@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, setSharePrecision, quickAction, dmComeToMe, openDmWith, myPubkey, settle, gotoTab } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, setSharePrecision, quickAction, dmComeToMe, openDmWith, myPubkey, settle, gotoTab, joinRemoteAwait, sendRemoteInvite } from './fixtures'
 
 // Quick actions are split: group-appropriate ones (Check in, On my way) live as
 // preset chips in the circle chat; person-to-person asks (Come to me, Where are
@@ -87,5 +87,39 @@ test.describe('quick actions', () => {
     await A.click('[data-action="dm-close"]') // close the sheet — its overlay covers the nav bar
     await gotoTab(A, 'circle')
     await expect(A.locator('#share-precision')).toHaveValue('4')
+  })
+
+  // The point of sharing an exact spot is that the recipient can SEE it. Before
+  // the fix the share arrived as a chat bubble whose "See on map" only panned the
+  // camera to empty terrain — the location was never recorded, so no pin was
+  // drawn. Here NEITHER person ambient-shares (a remote gift-wrap invite seeds
+  // each into the other's roster, so no beacon is needed to be known), which
+  // means the only thing that can put A on B's map is the one-shot exact share
+  // itself — an unambiguous regression guard.
+  test('PM "Come to me" — B can actually SEE A\'s exact spot on the map', async ({ browser }) => {
+    const A = await newPerson(browser)
+    const B = await newPerson(browser)
+    await createCircle(A, { name: 'Mallorca trip' })
+
+    const npub = await joinRemoteAwait(B)
+    await sendRemoteInvite(A, npub)
+    await settle(B) // B unwraps the invite and seeds A into its roster
+
+    const bPk = await myPubkey(B)
+    await openDmWith(A, bPk)
+    await expect(A.locator('#dm-sheet')).toBeVisible()
+    await dmComeToMe(A) // A shares its exact spot with B alone (never ambient-shared)
+
+    const aPk = await myPubkey(A)
+    await openDmWith(B, aPk)
+    await expect(B.locator('#dm-thread [data-action="see-shared-location"]')).toBeVisible()
+
+    // Tapping "See on map" lands on A's pin — not empty terrain. Neither person
+    // ever streamed a beacon, so a pin here exists ONLY because the exact share
+    // was recorded as a location.
+    await B.click('#dm-thread [data-action="see-shared-location"]')
+    await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
+    await expect(B.locator('.map-pin')).toHaveCount(1)
+    await expect(B.locator('.map-pin .tag')).not.toHaveText('You') // it's A, not me
   })
 })
