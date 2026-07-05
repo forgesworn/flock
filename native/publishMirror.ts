@@ -2,8 +2,10 @@
 // config (identity sk, active circle seed + precision, relays, no-report
 // zones, off-grid) into the Keystore-backed native store, and reads back the
 // publish journal on resume. Design: docs/plans/
-// 2026-07-05-native-background-publish-design.md. The mirror must be cleared
-// on lock engage, decoy hide, reset and stop-sharing — app.ts owns calling us.
+// 2026-07-05-native-background-publish-design.md. The mirror's config must be
+// cleared on lock engage and stop-sharing (journal preserved for a later
+// drain); decoy hide and reset go further and wipe the journal too —
+// app.ts owns calling us.
 
 import { registerPlugin } from '@capacitor/core'
 import type { Persisted } from '../app/src/store'
@@ -12,6 +14,7 @@ import type { NoReportZone } from '@forgesworn/flock'
 interface FlockPublishPlugin {
   setConfig(options: { json: string }): Promise<void>
   clearConfig(): Promise<void>
+  wipeAll(): Promise<void>
   getJournal(): Promise<{ entries: string[] }>
   ackJournal(options: { count: number }): Promise<void>
 }
@@ -40,6 +43,10 @@ export function buildNativePublishConfig(
   if (!sharing) return null
   const skHex = persisted.identity?.skHex
   if (!skHex || persisted.authMethod === 'signet') return null
+  // No native Orbot/SOCKS route yet — OkHttp would go clearnet, leaking the IP
+  // to the relay. Degrade to foreground-only (JS pipeline stays fail-closed)
+  // rather than silently bypass Tor. Follow-up: route OkHttp via Orbot SOCKS.
+  if (persisted.torRelay) return null
   const circle = persisted.circles.find((c) => c.id === persisted.activeCircleId)
   if (!circle) return null
   return {
@@ -76,10 +83,19 @@ export async function syncNativePublishConfig(cfg: NativePublishConfig | null): 
   } catch { lastSent = RETRY /* plugin missing (old shell/web) — retry next sync */ }
 }
 
-/** Unconditional teardown (hide / reset / lock) — never leaves seeds behind. */
+/** Config-level teardown (lock engage, stop-sharing) — clears config + cadence
+ *  but preserves the journal, so a cold-start/app-lock boot that calls this
+ *  before drainNativeJournal() ever runs doesn't destroy unsent beacons. */
 export async function clearNativePublish(): Promise<void> {
   lastSent = null
   try { await FlockPublish.clearConfig() } catch { lastSent = RETRY /* clear didn't land — force the next sync to retry */ }
+}
+
+/** Full wipe (decoy hide / reset) — config, cadence AND journal all go, so a
+ *  decoy or a reset device leaves nothing behind for a later drain to adopt. */
+export async function wipeNativePublish(): Promise<void> {
+  lastSent = null
+  try { await FlockPublish.wipeAll() } catch { lastSent = RETRY /* wipe didn't land — force the next sync to retry */ }
 }
 
 export interface NativeJournalEntry {

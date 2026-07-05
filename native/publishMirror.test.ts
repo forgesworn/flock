@@ -30,6 +30,11 @@ describe('buildNativePublishConfig', () => {
     expect(buildNativePublishConfig(p, true, 7)).toBeNull()
   })
 
+  it('is null when Tor routing is on (no native Orbot/SOCKS route — must not leak clearnet)', () => {
+    const p = base(); p.torRelay = true
+    expect(buildNativePublishConfig(p, true, 7)).toBeNull()
+  })
+
   it('is null with no active circle', () => {
     const p = base(); p.activeCircleId = null
     expect(buildNativePublishConfig(p, true, 7)).toBeNull()
@@ -54,6 +59,36 @@ describe('clear/sync sentinel behaviour', () => {
     await m.clearNativePublish()            // fails — sentinel must become RETRY
     await m.syncNativePublishConfig(null)   // must retry the clear, not no-op
     expect(clearConfig).toHaveBeenCalledTimes(2)
+    vi.doUnmock('@capacitor/core')
+  })
+
+  it('wipeNativePublish calls wipeAll — the full teardown, not the config-only clear', async () => {
+    vi.resetModules()
+    const clearConfig = vi.fn().mockResolvedValue(undefined)
+    const wipeAll = vi.fn().mockResolvedValue(undefined)
+    vi.doMock('@capacitor/core', () => ({ registerPlugin: () => ({ clearConfig, wipeAll, setConfig: vi.fn(), getJournal: vi.fn(), ackJournal: vi.fn() }) }))
+    const m = await import('./publishMirror')
+    await m.wipeNativePublish()
+    expect(wipeAll).toHaveBeenCalledTimes(1)
+    expect(clearConfig).not.toHaveBeenCalled()
+    vi.doUnmock('@capacitor/core')
+  })
+
+  it('a failed wipe forces the next null sync to retry — via clearConfig, not wipeAll', async () => {
+    vi.resetModules()
+    const clearConfig = vi.fn().mockResolvedValue(undefined)
+    const wipeAll = vi.fn().mockRejectedValueOnce(new Error('ipc down'))
+    vi.doMock('@capacitor/core', () => ({ registerPlugin: () => ({ clearConfig, wipeAll, setConfig: vi.fn(), getJournal: vi.fn(), ackJournal: vi.fn() }) }))
+    const m = await import('./publishMirror')
+    await m.wipeNativePublish()            // fails — sentinel must become RETRY
+    // syncNativePublishConfig only ever knows how to clear via clearConfig — it
+    // has no wipe path — so the retry that lands is the coarser config-only
+    // clear, not a repeat of the wipe. That's acceptable: the sentinel's job is
+    // only to stop the module wedging silently, not to guarantee which native
+    // call retries.
+    await m.syncNativePublishConfig(null)
+    expect(wipeAll).toHaveBeenCalledTimes(1)
+    expect(clearConfig).toHaveBeenCalledTimes(1)
     vi.doUnmock('@capacitor/core')
   })
 

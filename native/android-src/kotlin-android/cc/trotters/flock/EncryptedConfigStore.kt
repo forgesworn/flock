@@ -1,7 +1,8 @@
 // Keystore-backed mirror of the minimal publish config + the publish journal.
-// The design doc's data-access decision: written by JS while unlocked, cleared
-// on lock/hide/reset/stop-sharing; a native task can read it without the
-// WebView. Journal capped so it can never grow unbounded.
+// The design doc's data-access decision: written by JS while unlocked; config
+// cleared on lock/stop-sharing (journal kept for the next drain), fully wiped
+// on decoy hide/reset; a native task can read it without the WebView. Journal
+// capped so it can never grow unbounded.
 package cc.trotters.flock
 
 import android.content.Context
@@ -34,7 +35,21 @@ class EncryptedConfigStore(context: Context) : ConfigStore {
         }
     }
 
-    /** Full teardown: config, cadence state and journal all go together. */
+    /** Ordinary teardown (lock engage / stop-sharing): config + cadence only.
+     *  The journal survives — drainNativeJournal() on the next open still
+     *  needs it, and cold start / app-lock boot both clear config before that
+     *  drain ever runs, so wiping the journal here would silently drop
+     *  beacons sent while backgrounded. */
+    fun clearConfig() {
+        synchronized(this) {
+            val editor = prefs.edit().remove("config")
+            for (key in prefs.all.keys) if (key.startsWith("cadence.")) editor.remove(key)
+            editor.apply()
+        }
+    }
+
+    /** Full teardown (decoy hide / reset): config, cadence state AND journal
+     *  all go together — a decoy or reset device must leave nothing behind. */
     fun clearAll() { synchronized(this) { prefs.edit().clear().apply() } }
 
     override fun getCadence(circleId: String): BeaconCadence {

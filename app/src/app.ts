@@ -755,6 +755,13 @@ function bootUnlocked(): void {
   window.setTimeout(() => { void maybeRotateSeeds() }, 20_000)
   window.setInterval(() => { void maybeRotateSeeds() }, 3_600_000)
   store.save(persisted) // persist any legacy→multi-circle migration / pruning straight away
+  // Mount is effectively "resuming" from whatever the native watcher did since
+  // the app last ran (including a cold start after being fully killed, which
+  // onForeground's resume hook never sees) — drain it here too, and queue it
+  // BEFORE the first render() below: render's end-of-cycle config sync can
+  // clear the native config, and the drain must be queued first so it isn't
+  // racing a clear it hasn't read yet.
+  void drainNativeJournal()
   // A join link (scanned QR / tapped in a chat) arrives as a #join= fragment —
   // never sent to any server. Scrub it from the address bar BEFORE anything else
   // runs: it carries the seed.
@@ -806,10 +813,6 @@ function bootUnlocked(): void {
     // exemption (the user may just have granted it in system settings) and
     // clears delivered message notifications — the app being open IS the read.
     void import('../../native/lifecycle').then((l) => l.onResume(() => { onForeground() }))
-    // Mount is effectively "resuming" from whatever the native watcher did
-    // since the app last ran (including a cold start after being fully killed,
-    // which onForeground's resume hook never sees) — drain it here too.
-    void drainNativeJournal()
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') onForeground()
     })
@@ -1040,9 +1043,11 @@ function circleSwitcher(): string {
 function homeMapStatus(): { cls: string; label: string; sub: string } {
   const c = activeCircle() as store.Circle
   if (sharing && fix) {
-    // Signet has no local key to hand the native watcher, so sharing pauses the
-    // moment flock is closed — say so rather than silently degrading.
-    const bgNote = isNativeShell() && persisted.authMethod === 'signet' ? ' · pauses while flock is closed (Signet sign-in)' : ''
+    // Signet has no local key to hand the native watcher, and Tor routing has
+    // no native Orbot/SOCKS path yet — either way sharing pauses the moment
+    // flock is closed, so say so rather than silently degrading.
+    const bgReason = persisted.authMethod === 'signet' ? 'Signet sign-in' : persisted.torRelay ? 'Tor routing' : null
+    const bgNote = isNativeShell() && bgReason ? ` · pauses while flock is closed (${bgReason})` : ''
     return { cls: 'state-share', label: 'Sharing live', sub: `${precisionLabel(sharePrecisionOf(c))} · your circle can see you${bgNote}` }
   }
   if (sharing && !fix) return { cls: 'state-share', label: 'Locating…', sub: 'Getting a fix' }
@@ -3921,7 +3926,9 @@ async function hideNow(): Promise<void> {
   // await their teardown BEFORE sealing and reloading.
   await stopBgWatch()
   await stopStayReachable()
-  try { await (await import('../../native/publishMirror')).clearNativePublish() } catch { /* not running */ }
+  // Decoy hide must leave nothing behind, including the journal — a fresh
+  // install has none, so the mirror must be fully wiped, not just config-cleared.
+  try { await (await import('../../native/publishMirror')).wipeNativePublish() } catch { /* not running */ }
   try { await (await import('../../native/ble')).stopBle() } catch { /* not running */ }
   bleActive = false // a decoy must be radio-inert — no BLE advertising/scanning
   const sealed = await sealState(JSON.stringify(persisted), cfg.salt, cfg.key)
@@ -4151,7 +4158,8 @@ function resetDevice(): void {
   stopWatch?.(); stopWatch = null
   void stopBgWatch() // native shell: the foreground service (and its notification) must not outlive the reset
   void stopStayReachable() // and the stay-reachable service likewise
-  void import('../../native/publishMirror').then((m) => m.clearNativePublish()).catch(() => { /* not running */ })
+  // A device reset must leave nothing behind, including the journal.
+  void import('../../native/publishMirror').then((m) => m.wipeNativePublish()).catch(() => { /* not running */ })
   void import('../../native/ble').then((b) => b.stopBle()).catch(() => { /* not running */ }); bleActive = false // BLE radio must not outlive the reset
   stopAllSubs()
   stopInviteSub?.(); stopInviteSub = null

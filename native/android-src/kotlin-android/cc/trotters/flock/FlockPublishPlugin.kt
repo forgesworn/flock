@@ -23,6 +23,13 @@ class FlockPublishPlugin : Plugin() {
 
     @PluginMethod
     fun clearConfig(call: PluginCall) {
+        store.clearConfig()
+        call.resolve()
+    }
+
+    /** Full wipe (decoy hide / reset) — config, cadence and journal together. */
+    @PluginMethod
+    fun wipeAll(call: PluginCall) {
         store.clearAll()
         call.resolve()
     }
