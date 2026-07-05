@@ -1,0 +1,31 @@
+plugins {
+  id 'com.android.application'
+}
+
+android {
+  namespace 'cc.trotters.gpsprobe'
+  compileSdk 36
+
+  defaultConfig {
+    applicationId 'cc.trotters.gpsprobe'
+    minSdk 29
+    targetSdk 36
+    versionCode 1
+    versionName '1.0'
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+    }
+  }
+}
+
+// Framework-only: no androidx / external dependencies, to keep the build trivial.
+dependencies {
+}

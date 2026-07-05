@@ -1,0 +1,6 @@
+// Standalone Layer-B GPS-delivery probe (not part of the flock Capacitor app).
+// Versions mirror flock/android (AGP 8.13.0 / Gradle 8.14.3) so the same
+// toolchain + wrapper cache is reused.
+plugins {
+  id 'com.android.application' version '8.13.0' apply false
+}
