@@ -3,14 +3,14 @@
 Single source of truth so we ship **full features with no bugs**. Live preview:
 **https://flock.forgesworn.dev/**. The privacy-by-architecture foundation (Phase A;
 see `PRIVACY.md`) is in place, the coercion-resistance set (Phase J + the decoy
-view + the App lock) is **complete**, and the foreground go-live hardening list
-(Phase G) is done bar two items that need things code can't provide: **relay #2**
-(runbook ready — `docs/runbooks/second-relay.md`, blocked only on a host) and the
-**native background-geofencing gate** (Phase 0 spike — **Layer B now measured
-GREEN on a GrapheneOS Pixel 10 Pro, 2026-07-05**: the OS feeds a locked
-background service fine, so the locked-phone failure is the WebView-JS seam and
-the remaining work is a build — the native publish pipeline, see Phase G). Relay
-#2, plus publishing `keystore-kit` to npm, are the standing Darren-side actions.
+view + the App lock) is **complete**, and the **native background-publish gate is
+now closed** — background beacons keep flowing while the phone is locked on
+GrapheneOS (built, hardware-measured GREEN, and shipped 2026-07-05 as release
+`0294b8c`; see "Native background publish" below and Phase G). The only standing
+items that need things code can't provide are Darren-side: **relay #2** (runbook
+ready — `docs/runbooks/second-relay.md`, blocked only on a host) and **publishing
+`keystore-kit` to npm**. Remaining native work is validation — the outdoor walk +
+a stationary deep-Doze pass — not a build.
 
 ## MVP scope (2026-07)
 
@@ -41,6 +41,40 @@ Coarse disclosures render as the **true geohash cell square** (2026-07-03) —
 the member is guaranteed inside the square, whose centre is the grid's, never
 their position; the old circular halo only approximated it (a member near a
 cell corner sat outside the inscribed circle).
+
+## Native background publish — locked sharing works (2026-07-05)
+
+**The make-or-break gate is closed.** Background beacons now keep flowing while
+the phone is locked on GrapheneOS — the whole point of the app, and the last open
+platform blocker. Built, hardware-proved on the GrapheneOS Pixel 10 Pro, merged,
+and shipped (release `0294b8c` live on flock.forgesworn.dev).
+
+- [x] **Native background-publish pipeline** (PR #1, merged) — while the app is
+  backgrounded the fix→policy→gift-wrap→relay pipeline runs **natively in Kotlin**
+  (`native/android-src/kotlin*`), bypassing the WebView JS that Android suspends.
+  Wire-format parity with the JS path is held by golden vectors (`native/vectors/`)
+  + a JVM test suite in CI (JDK 21, no Android SDK). The pure core
+  (`native/android-src/kotlin/`) never imports `android.*`. Design:
+  `docs/plans/2026-07-05-native-background-publish-design.md`.
+- [x] **Native GPS fix source** (PR #2, merged — `FlockLocationService`) — the
+  community background-geolocation plugin's **fused provider delivers no fixes to a
+  locked FGS on GrapheneOS**; replaced with flock's own `location`-typed foreground
+  service requesting `GPS_PROVIDER` **directly @5 s** (the mechanism the Phase-0
+  gps-probe measured GREEN), feeding the verified `FlockPublisher` via a shared
+  `FlockFixReceiver.submitFix` (one publish thread, no double-publish — `onFix`'s
+  foreground guard still drops foreground fixes to JS). Started/stopped by the config
+  mirror (setConfig→start, clearConfig/wipeAll→stop). Goal + measurements:
+  `docs/plans/2026-07-05-native-gps-source-goal.md`.
+- **MEASURED GREEN on the GrapheneOS Pixel 10 Pro (2026-07-05):** `dumpsys location`
+  shows a **direct** `gps provider … 10213/cc.trotters.flock … @+5s HIGH_ACCURACY`
+  (not the fused overlay); with the screen **locked (Dozing)** the relay watcher
+  decrypted native beacons at +7 s (first background fix) and every ~50 s after,
+  geohashes changing — a suspended WebView can't publish. Signed release APK
+  `0294b8c` built (same key → installs over the top) and deployed.
+- **Remaining (validation, not build):** the outdoor **walk** (sustained movement,
+  out of deep Doze) and the stationary deep-Doze pass. Follow-ups in the goal doc:
+  run the native GPS service only while backgrounded; drop the bg-geo dependency
+  once battle-tested.
 
 ## Chat-led Home & reliability (2026-07-04 pm)
 
@@ -452,7 +486,11 @@ Two halves that compose into one feature:
 
 ## Phase G — Platform & release
 
-- [ ] **Capacitor native shell** — background geofencing.
+- [~] **Capacitor native shell** — background location. Shell ships and
+  **background *publish* is done and measured GREEN** (2026-07-05 — beacons flow
+  while locked, see above). Background **geofence-*breach*** alerting is not yet
+  wired into the native pipeline (the MVP parks breach; add it — and validate with
+  the outdoor walk — when breach returns to the app).
   - [x] **Android APK ships (2026-07-03)** — `npm run apk` / `npm run apk:release`
     (`native/build-apk.sh`: generate → native-mode web build → manifest patch →
     icons → Gradle → zipalign/apksigner). The shell is a thin layer: the background
@@ -471,15 +509,17 @@ Two halves that compose into one feature:
     safety watch → **foreground service + "keeping watch" notification while
     backgrounded** (OS location indicator on) → stop-sharing tears both down.
     The whole native loop works on real hardware.
-  - [~] **Reliability gate — Layer B PASSED (2026-07-05)** — a standalone native
-    probe (`native/gps-probe/`) on a **GrapheneOS Pixel 10 Pro (API 37)** logged
-    **46 fixes @ ~10 s cadence, longest gap 10 s**, screen locked + walking, the
-    foreground service never killed → the OS delivers GPS to a locked background
-    service. The platform half is proven; the locked-phone failure is the
-    WebView-JS seam, and the fix is the native publish pipeline
-    (`docs/plans/2026-07-05-native-background-publish.md`). **Still open:** the
-    stationary deep-Doze pass, and the full split-instrumentation spike
-    (`native/spike/`) once the native pipeline exists.
+  - [x] **Reliability gate — CLOSED (2026-07-05).** Layer B first: a standalone
+    native probe (`native/gps-probe/`) on a **GrapheneOS Pixel 10 Pro (API 37)**
+    logged **46 fixes @ ~10 s cadence, longest gap 10 s**, screen locked + walking,
+    the foreground service never killed → the OS delivers GPS to a locked background
+    service. Then the fix itself: the **native publish pipeline + `FlockLocationService`
+    GPS source** (see "Native background publish — locked sharing works" above) turn
+    those locked fixes into published beacons, **measured GREEN end-to-end** on the
+    same Pixel — native beacons decrypting on the relay with the screen locked
+    (Dozing), at +7 s then ~50 s cadence, geohashes changing. Shipped as release
+    `0294b8c`. **Still open (validation, not build):** the stationary deep-Doze pass
+    and the outdoor walk.
 - [x] **Inbound alerts (app closed) — SHIPPED via Option A, validated on the A32
   (2026-07-04).** Signal-parity notifications: a message/buzz/alert lands on a
   **locked screen while flock is fully closed**. Implemented as a **location-free
