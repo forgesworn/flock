@@ -40,4 +40,19 @@ class RelayPublisherTest {
             .publish(listOf("ws://127.0.0.1:1/"), """{"id":"abc123"}""")
         assertEquals(0, n)
     }
+
+    @Test
+    fun `unparseable event json returns zero`() {
+        val n = OkHttpRelayPublisher(timeoutMs = 1_000)
+            .publish(listOf("ws://127.0.0.1:1/"), "{not json")
+        assertEquals(0, n)
+    }
+
+    @Test
+    fun `malformed relay url counts zero without throwing`() {
+        val validEventJson = """{"id":"abc123","kind":1059,"content":"x","tags":[],"pubkey":"p","sig":"s","created_at":1}"""
+        val n = OkHttpRelayPublisher(timeoutMs = 1_000)
+            .publish(listOf("not a url"), validEventJson)
+        assertEquals(0, n)
+    }
 }
