@@ -1,6 +1,6 @@
 # Phase 0 — GrapheneOS background-location spike
 
-**Date:** 2026-06-30 · **Owner:** TBD · **Status:** harness scaffolded — ready to run on a device (`native/spike/`)
+**Date:** 2026-06-30 · **Owner:** TBD · **Status:** Layer-B native probe built + installed (`native/gps-probe/`); full Capacitor harness scaffolded (`native/spike/`) — ready to run on a GrapheneOS Pixel
 
 ## Why this exists
 
@@ -17,6 +17,43 @@ foreground service with a persistent notification — no Google APIs) delivers
 location updates reliably while the app is backgrounded / the screen is locked on
 GrapheneOS, at a cadence good enough for geofence-breach detection, at acceptable
 battery cost.
+
+## Two layers — isolate them (run the native probe first)
+
+Since this doc was written, live field testing
+([`2026-07-05-native-background-publish.md`](2026-07-05-native-background-publish.md))
+split the background-reliability question into two independent layers:
+
+- **Layer A — does the *pipeline* run while backgrounded?** Confirmed broken and
+  understood: fixes reach native code, then stall at the Capacitor WebView-JS
+  bridge, which Android suspends. A code problem (move the pipeline native), not a
+  platform one.
+- **Layer B — does the OS *deliver GPS* to a locked, backgrounded foreground
+  service at all?** On GrapheneOS (no Play Services) this is the original,
+  still-unmeasured question — and no amount of native-pipeline work fixes it if
+  the OS stops feeding location.
+
+The `native/spike/` harness below can only observe what reaches JS, so it can't
+tell these apart (the blind spot flagged in the 2026-07-05 doc). A dedicated
+pure-native probe now isolates Layer B.
+
+### `native/gps-probe/` — the Layer-B probe (cheapest decisive test)
+
+A standalone app (appId `cc.trotters.gpsprobe`, installs alongside flock): a
+`location`-typed foreground service on raw `LocationManager` — no WebView, no JS,
+no crypto, no relay. It logs every fix plus a 30 s **heartbeat**, so the result is
+tri-state. Build/run:
+[`native/gps-probe/README.md`](../../native/gps-probe/README.md).
+
+| Log after locking | Meaning | Verdict |
+|---|---|---|
+| `FIX` lines keep coming | GPS delivered to a locked FGS works | **Green** — Layer B is fine; the WebView-JS seam was the whole problem → moving the pipeline native fixes locked sharing |
+| `BEAT` heartbeats continue, `FIX` lines stop | process alive, OS stopped feeding GPS | **Red (delivery)** — a native pipeline alone won't help; fix location delivery first |
+| `BEAT` heartbeats also stop | Doze/battery killed the service | **Red (process)** — keep-alive / battery-exemption problem |
+
+Run this on the **GrapheneOS Pixel before building anything native** — it converts
+"the native pipeline probably fixes locked sharing" into a yes/no. The stock-Android
+A32 is only a baseline; a green there with a red on GrapheneOS *is* the finding.
 
 ## Devices
 
@@ -89,6 +126,10 @@ below). In short:
   guarantees and make them explicit in the UI.
 - **Battery (6) unacceptable** → motion-detection duty-cycling (transistorsoft) or
   a coarser cadence.
+- **Layer-B probe (`native/gps-probe/`) red** → the platform isn't delivering
+  locked GPS; a native pipeline (`canary-native`) won't fix sharing-when-locked on
+  its own. Resolve location delivery (FGS type / "Allow all the time" / battery
+  exemption — or accept degraded guarantees and state them in-app) *before* Phase 2.
 
 ## Notes
 
