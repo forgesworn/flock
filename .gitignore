@@ -25,6 +25,9 @@ ios/
 .gradle/
 *.keystore
 native/keystore.properties
+native/crypto-tests/.gradle/
+native/crypto-tests/build/
+native/vectors/kotlin-wraps.json
 
 # Env & secrets
 .env
