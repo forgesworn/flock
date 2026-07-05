@@ -1,7 +1,11 @@
 # flock CI — the same gates a local batch runs before every deploy:
 # lint → typecheck → build (lib + PWA) → unit tests, then the full two-person
 # Playwright e2e suite over the live relay (one worker; CI retries absorb the
-# occasional live-relay flake). Action refs pinned by SHA, as across ForgeSworn.
+# occasional live-relay flake). A separate `native` job runs the Kotlin publish
+# pipeline's JVM suite (JDK 21, no Android SDK) — it holds the JS↔Kotlin
+# wire-format parity, incl. the reverse gift-wrap check that proves Kotlin-built
+# wraps decrypt through the untouched JS path. Action refs pinned by SHA, as
+# across ForgeSworn.
 #
 # Publishing (anvil) is deliberately absent: @forgesworn/flock is private and
 # unpublished — wire forgesworn/anvil here if the library ever ships to npm.
@@ -28,6 +32,24 @@ jobs:
       - run: npm run build
       - run: npm run build:app
       - run: npm test
+
+  # Kotlin native publish pipeline — golden-vector parity against the JS impl,
+  # incl. the reverse stage (native/vectors/verify-kotlin.test.ts consumes the
+  # kotlin-wraps.json this emits). JDK 21 only; no Android SDK. Mirrors the
+  # `npm run test:native` script (gradlew invoked directly to stay Node-free).
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: native/crypto-tests/**/*.gradle*
+      - run: ./gradlew --console=plain test
+        working-directory: native/crypto-tests
 
   e2e:
     needs: gates
