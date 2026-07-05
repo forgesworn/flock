@@ -181,6 +181,30 @@ if (!xml.includes('android:name=".FlockFixReceiver"')) {
   console.error('added FlockFixReceiver to manifest')
 }
 
+// FlockLocationService — the native GPS fix source (a location-typed FGS). Same
+// self-heal discipline as StayReachableService above: CORRECT a stale
+// foregroundServiceType, don't merely add-once, because the generated android/
+// project is cached (gitignored) — an "add if absent" guard would let an old
+// type survive every rebuild and then crash startForeground on API 34+.
+const FLOCK_LOCATION_SERVICE = `        <service
+            android:name=".FlockLocationService"
+            android:exported="false"
+            android:foregroundServiceType="location" />`
+// Matches an existing element in either form (block or self-closing); the block
+// alternative is tempered with `(?!<service\b)` so it can't swallow a following
+// <service>.
+const flockLocServiceRe = /<service\b[^>]*android:name="\.FlockLocationService"(?:(?!<service\b)[\s\S])*?<\/service>|<service\b[^>]*android:name="\.FlockLocationService"[^>]*\/>/
+const existingFlockLoc = xml.match(flockLocServiceRe)?.[0]
+if (!existingFlockLoc) {
+  xml = xml.replace('</application>', `${FLOCK_LOCATION_SERVICE}\n    </application>`)
+  changed = true
+  console.error('added FlockLocationService (location) to manifest')
+} else if (!existingFlockLoc.includes('android:foregroundServiceType="location"')) {
+  xml = xml.replace(flockLocServiceRe, FLOCK_LOCATION_SERVICE)
+  changed = true
+  console.error('corrected FlockLocationService foregroundServiceType → location (was stale)')
+}
+
 if (changed) {
   writeFileSync(manifestPath, xml)
   console.error('patched android/app/src/main/AndroidManifest.xml')

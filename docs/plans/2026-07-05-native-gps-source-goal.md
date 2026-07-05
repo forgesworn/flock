@@ -1,7 +1,36 @@
 # Goal — a native GPS fix source for background publish
 
-**Date:** 2026-07-05 · **Status:** goal / next step after the native-background-publish
-PR merges. **Owner:** flock native.
+**Date:** 2026-07-05 · **Status:** IMPLEMENTED + on-hardware **MEASURED GREEN** —
+locked beacons flow on GrapheneOS (stationary). Full **walk** (changing geohashes
+under movement) still to run. **Owner:** flock native.
+
+> **Update 2026-07-05 (built):** the plan below is built —
+> `native/android-src/kotlin-android/cc/trotters/flock/FlockLocationService.kt`
+> (direct `GPS_PROVIDER`), its lifecycle wired through `FlockPublishPlugin`
+> (`setConfig`→start, `clearConfig`/`wipeAll`→stop), the shared `submitFix`
+> intake on `FlockFixReceiver`, and the `location`-typed manifest entry in
+> `patch-android.mjs`. A full `npm run apk` compiles it and the merged manifest
+> carries `android:foregroundServiceType="location"`.
+>
+> **Update 2026-07-05 (measured GREEN on the GrapheneOS Pixel):**
+> - Start sharing → `dumpsys activity services` shows `.FlockLocationService`
+>   running, `isForeground=true`, `types=0x00000008` (LOCATION) — no crash.
+> - `dumpsys location` shows the decisive fix: a **direct** GPS registration from
+>   flock's own uid —
+>   `gps provider +registration 10213/cc.trotters.flock/… -> Request[@+5s0ms
+>   HIGH_ACCURACY, WorkSource{10213 cc.trotters.flock}]` — i.e. `GPS_PROVIDER`
+>   @5s, NOT the `1000/…FusedOverlayService` indirection the bg-geo plugin used.
+>   Root cause fixed at the source.
+> - **End-to-end while LOCKED (stationary):** locked the screen (`mWakefulness=
+>   Dozing`) at 21:02:00 BST; the relay watcher decrypted two live beacons —
+>   `geohash=gcrmymup9 prec=9` at **+7 s** (first background fix) and **+4½ min**
+>   (the ~300 s heartbeat), both with the screen off. A suspended WebView cannot
+>   publish, so this is unambiguously the native path. (The Pixel dropped off USB
+>   during the wait; the beacons arrived over WiFi/relay, independent of adb —
+>   which also shows publishing survives losing the debug connection.)
+>
+> Remaining: the **walk** (below) to confirm geohashes *change* under movement —
+> the native path is proven live; movement tracking is the last box to tick.
 
 ## The one-sentence goal
 
@@ -78,8 +107,12 @@ A `location`-typed foreground service mirroring `ProbeService`:
   still drop (JS `navigator.geolocation` owns the foreground — no double-publish).
 - `START_STICKY`; tear down GPS updates + HandlerThread in `onDestroy`.
 
-Draft written and validated by inspection during the session (not committed —
-recreate from this spec). ~110 lines.
+**Done** — `FlockLocationService.kt` (~150 lines incl. doc comment). A shared
+`FlockFixReceiver.submitFix(...)` intake serialises both sources (bg-geo
+broadcast + native GPS) onto the one publish thread, so there is no cadence
+read/write race and no double-publish (onFix's foreground guard still drops
+foreground fixes). `startForeground` is wrapped so a missing FGS-location grant
+or type mismatch stops the service instead of crashing the process.
 
 ### 2. Lifecycle — follow the config mirror
 
