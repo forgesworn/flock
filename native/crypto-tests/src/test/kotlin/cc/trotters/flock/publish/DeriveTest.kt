@@ -2,6 +2,7 @@ package cc.trotters.flock.publish
 
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class DeriveTest {
     private val v = loadVectors()
@@ -24,5 +25,11 @@ class DeriveTest {
             assertEquals(c.getString("skHex"), bytesToHex(sk))
             assertEquals(c.getString("pkHex"), rust.nostr.sdk.Keys(rust.nostr.sdk.SecretKey.parse(bytesToHex(sk))).publicKey().toHex())
         }
+    }
+
+    @Test
+    fun `negative index throws IllegalArgumentException`() {
+        val root = ByteArray(32)
+        assertFailsWith<IllegalArgumentException> { deriveChildSk(root, "flock:inbox", -1) }
     }
 }

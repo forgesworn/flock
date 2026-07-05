@@ -16,11 +16,13 @@ private const val MAX_INDEX = 0x7FFFFFFF
 fun treeRootFromSeed(seed: ByteArray): ByteArray = hmacSha256(seed, NSEC_ROOT_LABEL)
 
 fun deriveChildSk(root: ByteArray, purpose: String, index: Int): ByteArray {
-    var i = index
+    require(index in 0..MAX_INDEX) { "index must be in 0..$MAX_INDEX, got $index" }
+    val purposeBytes = purpose.toByteArray(Charsets.UTF_8)
+    var i = index.toLong()
     while (i <= MAX_INDEX) {
-        val purposeBytes = purpose.toByteArray(Charsets.UTF_8)
+        val ii = i.toInt()
         val msg = DOMAIN_PREFIX + purposeBytes + byteArrayOf(0) +
-            byteArrayOf((i ushr 24).toByte(), (i ushr 16).toByte(), (i ushr 8).toByte(), i.toByte())
+            byteArrayOf((ii ushr 24).toByte(), (ii ushr 16).toByte(), (ii ushr 8).toByte(), ii.toByte())
         val candidate = hmacSha256(root, msg)
         try {
             SecretKey.parse(bytesToHex(candidate)) // validity check — throws on invalid scalar
