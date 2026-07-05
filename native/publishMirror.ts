@@ -73,7 +73,7 @@ export async function syncNativePublishConfig(cfg: NativePublishConfig | null): 
 /** Unconditional teardown (hide / reset / lock) — never leaves seeds behind. */
 export async function clearNativePublish(): Promise<void> {
   lastSent = null
-  try { await FlockPublish.clearConfig() } catch { /* plugin unavailable */ }
+  try { await FlockPublish.clearConfig() } catch { lastSent = RETRY /* clear didn't land — force the next sync to retry */ }
 }
 
 export interface NativeJournalEntry {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { buildNativePublishConfig } from './publishMirror'
 import type { Persisted } from '../app/src/store'
 
@@ -42,5 +42,18 @@ describe('buildNativePublishConfig', () => {
     const cfg = buildNativePublishConfig(p, true, 7)
     expect(cfg?.festivalUntil).toBe(123)
     expect(cfg?.offGridUntil).toBe(456)
+  })
+})
+
+describe('clear/sync sentinel behaviour', () => {
+  it('a failed clear forces the next null sync to retry', async () => {
+    vi.resetModules()
+    const clearConfig = vi.fn().mockRejectedValueOnce(new Error('ipc down')).mockResolvedValue(undefined)
+    vi.doMock('@capacitor/core', () => ({ registerPlugin: () => ({ clearConfig, setConfig: vi.fn(), getJournal: vi.fn(), ackJournal: vi.fn() }) }))
+    const m = await import('./publishMirror')
+    await m.clearNativePublish()            // fails — sentinel must become RETRY
+    await m.syncNativePublishConfig(null)   // must retry the clear, not no-op
+    expect(clearConfig).toHaveBeenCalledTimes(2)
+    vi.doUnmock('@capacitor/core')
   })
 })
