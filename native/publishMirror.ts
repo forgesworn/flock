@@ -2,10 +2,11 @@
 // config (identity sk, active circle seed + precision, relays, no-report
 // zones, off-grid) into the Keystore-backed native store, and reads back the
 // publish journal on resume. Design: docs/plans/
-// 2026-07-05-native-background-publish-design.md. The mirror's config must be
-// cleared on lock engage and stop-sharing (journal preserved for a later
-// drain); decoy hide and reset go further and wipe the journal too —
-// app.ts owns calling us.
+// 2026-07-05-native-background-publish-design.md. The mirror is persistent (a
+// killed process's native task reads it without the WebView); its config is
+// cleared on stop-sharing and on reopen into the app-lock screen (journal
+// preserved for a later drain); decoy hide and reset go further and wipe the
+// journal too — app.ts owns calling us.
 
 import { registerPlugin } from '@capacitor/core'
 import type { Persisted } from '../app/src/store'
@@ -83,9 +84,9 @@ export async function syncNativePublishConfig(cfg: NativePublishConfig | null): 
   } catch { lastSent = RETRY /* plugin missing (old shell/web) — retry next sync */ }
 }
 
-/** Config-level teardown (lock engage, stop-sharing) — clears config + cadence
- *  but preserves the journal, so a cold-start/app-lock boot that calls this
- *  before drainNativeJournal() ever runs doesn't destroy unsent beacons. */
+/** Config-level teardown (stop-sharing, app-lock reopen) — clears config +
+ *  cadence but preserves the journal, so a cold-start/app-lock boot that calls
+ *  this before drainNativeJournal() ever runs doesn't destroy unsent beacons. */
 export async function clearNativePublish(): Promise<void> {
   lastSent = null
   try { await FlockPublish.clearConfig() } catch { lastSent = RETRY /* clear didn't land — force the next sync to retry */ }

@@ -21,10 +21,13 @@
 2. **Data access: Keystore-backed EncryptedSharedPreferences mirror.**
    JS mirrors the *minimum* config into `androidx.security`
    EncryptedSharedPreferences (hardware-backed Keystore on most devices)
-   whenever it changes while unlocked; cleared on lock-engage, decoy hide,
-   reset, stop-sharing, and switch to a Signet identity. Locked at rest ⇒ the
-   mirror is gone ⇒ background publish is simply unavailable — sharing degrades
-   to foreground-only, and the app says so rather than silently failing.
+   whenever it changes while unlocked. The mirror is **persistent** — that is
+   the point: a killed process's native task must read it without the WebView.
+   It is cleared on stop-sharing, decoy hide, reset, switch to a Signet
+   identity, and on the next open into the app-lock screen (see App Lock
+   interaction). Signet and Tor identities never populate it (no local seal key /
+   no native Orbot route), so they degrade to foreground-only — the app says so
+   rather than silently failing.
 
 3. **Policy parity in v1: no-report zones + cadence gate.**
    Both pure gates are ported natively: **no-report zones** (security-critical —
@@ -138,17 +141,33 @@ sent. Mirrored fields (nothing more):
 - active circle: `id`, `seedHex`, `sharePrecision`, `festivalUntil`,
 - `relayUrls`, `noReportZones`, `offGridUntil`, the sharing flag.
 
-**Cleared on**: lock engage, decoy hide, reset, stop sharing, switch to Signet.
-A cleared config idles the publisher immediately (prefs change listener).
+**Cleared on**: stop sharing, decoy hide, reset, switch to Signet, and the next
+open into the app-lock screen. A cleared config idles the publisher immediately.
 Reseed/epoch change re-mirrors the new seed — stale-seed wraps to a rotated-out
 inbox are bounded by the next `syncNativePublish()`.
 
-**App Lock interaction** (the doc's hard question): while the app is unlocked
-and sharing, the seeds exist in the Keystore-backed mirror — the same threat
-model as holding them in the WebView heap, arguably stronger (hardware Keystore
-vs a JS heap). When the lock *engages*, the mirror is cleared and background
-publish stops until the next unlock — the doc's "degrade to foreground-only
-while locked at rest", made visible in the sharing UI rather than silent.
+**App Lock interaction** (the doc's hard question): while the app is unlocked and
+sharing, the seeds exist in the Keystore-backed mirror — the same threat model as
+holding them in the WebView heap, arguably stronger (hardware Keystore vs a JS
+heap). The app lock is a *key-at-rest* lock: nothing runs at the instant it
+"engages" (the process simply dies losing the in-memory key), so the mirror is
+**not** wiped at that moment. It is cleared the next time the app is opened, in
+`bootLocked`, before the PIN screen renders. That means the honest behaviour is:
+
+- **While flock is closed/killed and locked at rest, background publish keeps
+  running** from the persisted mirror — the OS can restart the fix broadcast into
+  a fresh process and `FlockFixReceiver` publishes without the WebView. This is
+  intended: beacons go only to the circle's inbox (encrypted), so a locked phone
+  that keeps your circle informed is the feature, not a leak — and it is exactly
+  the field failure (locked phone → no beacons) this whole change fixes.
+- **The instant the user reopens** and is met with the PIN screen, the mirror is
+  cleared and background publish is foreground-only until they unlock — reopening
+  is the signal that defers to an explicit unlock.
+
+The genuine coercion case is not the app lock but the **decoy/hide** path, which
+`await`s a full wipe (config, cadence, journal) before sealing — leaving nothing
+for a restarted native task to adopt. So "locked at rest" does not mean "dark";
+"hidden" does.
 
 ### Reconciliation on resume
 
