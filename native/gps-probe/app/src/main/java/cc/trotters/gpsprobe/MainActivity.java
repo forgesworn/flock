@@ -40,10 +40,16 @@ public class MainActivity extends Activity {
   @Override
   protected void onCreate(Bundle b) {
     super.onCreate(b);
+    // API 35+ draws edge-to-edge: hide the action bar and pad past the status
+    // bar, otherwise the top Start/Stop buttons render under the system chrome.
+    if (getActionBar() != null) getActionBar().hide();
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     int pad = (int) (16 * getResources().getDisplayMetrics().density);
-    root.setPadding(pad, pad, pad, pad);
+    int statusBar = 0;
+    int rid = getResources().getIdentifier("status_bar_height", "dimen", "android");
+    if (rid > 0) statusBar = getResources().getDimensionPixelSize(rid);
+    root.setPadding(pad, pad + statusBar, pad, pad);
 
     Button start = new Button(this);
     start.setText("Start probe");
