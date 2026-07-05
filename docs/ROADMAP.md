@@ -6,10 +6,11 @@ see `PRIVACY.md`) is in place, the coercion-resistance set (Phase J + the decoy
 view + the App lock) is **complete**, and the foreground go-live hardening list
 (Phase G) is done bar two items that need things code can't provide: **relay #2**
 (runbook ready — `docs/runbooks/second-relay.md`, blocked only on a host) and the
-**native background-geofencing gate** (Phase 0 spike, blocked on real GrapheneOS
-hardware — the **Android APK now ships** (`npm run apk:release`) and is ready to
-sideload the moment hardware lands). Those two, plus publishing `keystore-kit` to
-npm, are the standing Darren-side actions.
+**native background-geofencing gate** (Phase 0 spike — **Layer B now measured
+GREEN on a GrapheneOS Pixel 10 Pro, 2026-07-05**: the OS feeds a locked
+background service fine, so the locked-phone failure is the WebView-JS seam and
+the remaining work is a build — the native publish pipeline, see Phase G). Relay
+#2, plus publishing `keystore-kit` to npm, are the standing Darren-side actions.
 
 ## MVP scope (2026-07)
 
@@ -470,12 +471,15 @@ Two halves that compose into one feature:
     safety watch → **foreground service + "keeping watch" notification while
     backgrounded** (OS location indicator on) → stop-sharing tears both down.
     The whole native loop works on real hardware.
-  - [ ] **Reliability gate stays OPEN** — Phase 0 spike harness ready
-    (`native/spike/`, `docs/plans/2026-06-30-phase0-graphene-spike.md`). The
-    Tier 1 handset (stock Android) now enables the real-world spike runs —
-    walking breach detection, Doze survival, battery %/h — a strong *proxy* for
-    GrapheneOS. The de-Googled question itself (Tier 2) still needs a
-    **GrapheneOS Pixel**.
+  - [~] **Reliability gate — Layer B PASSED (2026-07-05)** — a standalone native
+    probe (`native/gps-probe/`) on a **GrapheneOS Pixel 10 Pro (API 37)** logged
+    **46 fixes @ ~10 s cadence, longest gap 10 s**, screen locked + walking, the
+    foreground service never killed → the OS delivers GPS to a locked background
+    service. The platform half is proven; the locked-phone failure is the
+    WebView-JS seam, and the fix is the native publish pipeline
+    (`docs/plans/2026-07-05-native-background-publish.md`). **Still open:** the
+    stationary deep-Doze pass, and the full split-instrumentation spike
+    (`native/spike/`) once the native pipeline exists.
 - [x] **Inbound alerts (app closed) — SHIPPED via Option A, validated on the A32
   (2026-07-04).** Signal-parity notifications: a message/buzz/alert lands on a
   **locked screen while flock is fully closed**. Implemented as a **location-free

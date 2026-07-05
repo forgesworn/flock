@@ -154,14 +154,24 @@ reopened the app, never as a background notification — even with every
 relevant permission and battery setting confirmed correct.
 
 The root cause is now understood precisely (see the plan doc linked above):
-native GPS sampling likely keeps working via the foreground service, but
-delivering that fix into JavaScript — and everything downstream of it
-(cadence gating, encryption, gift-wrap, publish) — depends on the WebView
-actually executing JS, which Android throttles or suspends while
-backgrounded. The fix isn't a setting; it's moving that pipeline into native
-code, sharing infrastructure with the existing (also not-yet-built) plan for
-receiving alerts in the background
+native GPS sampling keeps working via the foreground service — **now measured,
+not assumed (see below)** — but delivering that fix into JavaScript, and
+everything downstream of it (cadence gating, encryption, gift-wrap, publish),
+depends on the WebView actually executing JS, which Android throttles or
+suspends while backgrounded. The fix isn't a setting; it's moving that pipeline
+into native code, sharing infrastructure with the existing (also not-yet-built)
+plan for receiving alerts in the background
 ([`docs/plans/2026-06-30-background-inbound.md`](plans/2026-06-30-background-inbound.md)).
+
+**Confirmed by measurement (2026-07-05).** A standalone native probe
+(`native/gps-probe/` — a `location` foreground service on the raw
+`LocationManager`, no WebView, no JS) on a **GrapheneOS Pixel 10 Pro** (API 37)
+logged **46 fixes at ~10 s cadence, longest gap 10 s**, screen locked and
+carried on a walk, the foreground service never killed. So the platform half is
+proven: GrapheneOS *does* deliver GPS to a locked background service. The
+remaining failure is entirely the WebView-JS seam — so moving the pipeline
+native **will** close THE GOAL's gap, not merely might. (Still to run: a
+stationary deep-Doze pass.)
 
 ## Roadmap shape
 
@@ -169,10 +179,12 @@ receiving alerts in the background
 - Native background publish (the design doc above) — the single biggest
   unlock, closing the gap between "works when I'm watching" and "works when
   I'm not."
-- Re-run a proper Phase 0-style measurement once the native pipeline exists,
-  with split native/JS instrumentation so a future regression can tell "GPS
-  sampling stopped" from "JS delivery stalled" apart — tonight's evidence
-  suggests the original spike methodology couldn't distinguish the two.
+- Re-run a proper Phase 0-style measurement with split native/JS instrumentation
+  once the native pipeline exists, so a future regression can tell "GPS sampling
+  stopped" from "JS delivery stalled" apart. **The native-side half is already
+  measured green (2026-07-05, `native/gps-probe/`)** — GPS delivery to a locked
+  GrapheneOS service is confirmed; what remains is instrumenting the JS side once
+  the pipeline lands.
 
 **Also on the list, lower urgency:**
 - A genuine movement trail (direction/speed at a glance) for live-sharing
