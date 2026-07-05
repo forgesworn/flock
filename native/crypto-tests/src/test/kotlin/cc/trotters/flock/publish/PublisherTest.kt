@@ -92,4 +92,24 @@ class PublisherTest {
         assertEquals(null, store.getCadence(v.getString("circleId")).lastGeohash)
         assertTrue(store.journal.none { it.contains("\"t\":\"pub\"") })
     }
+
+    @Test
+    fun `malformed skHex does not throw — build failure retries like publish failure`() {
+        // Config with odd-length (invalid) skHex — buildBeaconWrapJson will throw
+        val badConfig = """
+          {"v":1,"skHex":"abc","circleId":"${v.getString("circleId")}",
+           "seedHex":"${v.getString("seedHex")}","precision":6,"festivalUntil":0,
+           "relayUrls":["wss://r"],"offGridUntil":0,"noReportZones":[]}
+        """.trimIndent()
+        val store = FakeStore(badConfig); val relays = FakeRelays(1)
+        // onFix must not throw; exception from buildBeaconWrapJson is caught
+        publisher(store, relays).onFix(51.5007, -0.1246, 10.0, 1_751_699_000_000)
+        // Nothing published
+        assertEquals(0, relays.published.size)
+        // Cadence untouched (no retry gating)
+        assertEquals(null, store.getCadence(v.getString("circleId")).lastGeohash)
+        // No "pub" entry; "fix" is still recorded
+        assertTrue(store.journal.any { it.contains("\"t\":\"fix\"") })
+        assertTrue(store.journal.none { it.contains("\"t\":\"pub\"") })
+    }
 }

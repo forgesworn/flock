@@ -41,8 +41,12 @@ class FlockPublisher(
             jitteredSeconds(COARSE_HEARTBEAT, CADENCE_JITTER_FRACTION, rand()),
         )
         if (!send) return
-        val wrapJson = buildBeaconWrapJson(cfg.skHex, cfg.seedHex, cfg.circleId, geohash, precision, now, rand)
-        val accepted = try { relays.publish(cfg.relayUrls, wrapJson) } catch (_: Exception) { 0 }
+        // Build + publish under one guard — autoEmit's semantics: any failure leaves
+        // cadence untouched so the next fix retries; onFix must never throw.
+        val accepted = try {
+            val wrapJson = buildBeaconWrapJson(cfg.skHex, cfg.seedHex, cfg.circleId, geohash, precision, now, rand)
+            relays.publish(cfg.relayUrls, wrapJson)
+        } catch (_: Exception) { 0 }
         if (accepted > 0) {
             // Same semantics as autoEmit: only record once a relay accepted, so a
             // transient failure retries on the next fix.
