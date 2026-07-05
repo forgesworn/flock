@@ -36,4 +36,11 @@ class GeoTest {
 
     @Test fun `inside the polygon withholds`() =
         assertEquals("withhold", noReportPolicyAt(LatLng(51.50, -0.12), listOf(square), 0.0))
+
+    @Test fun `exact circle boundary at accuracy zero reads as inside (fail-safe)`() {
+        val centre = LatLng(51.5, -0.12)
+        val point = LatLng(51.5007, -0.1246)
+        val zone = NoReportZone(Geofence.Circle(centre, haversineMetres(point, centre)), "withhold")
+        assertEquals("withhold", noReportPolicyAt(point, listOf(zone), 0.0))
+    }
 }

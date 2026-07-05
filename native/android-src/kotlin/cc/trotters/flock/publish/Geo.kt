@@ -83,7 +83,14 @@ private fun uncertaintyBounds(p: LatLng, accuracyMetres: Double): Bounds {
 
 /** Is the uncertainty disc confidently outside this fence? (src/geofence.ts fenceContainment) */
 private fun fullyOutside(point: LatLng, accuracyMetres: Double, fence: Geofence): Boolean = when (fence) {
-    is Geofence.Circle -> haversineMetres(point, fence.centre) - accuracyMetres >= fence.radiusMetres
+    is Geofence.Circle -> {
+        // Mirror src/geofence.ts classifyContainment: fullyInside is checked FIRST,
+        // so an exact boundary tie (d == radius at accuracy 0) reads as inside —
+        // the fail-safe direction for a no-report zone.
+        val d = haversineMetres(point, fence.centre)
+        val fullyInside = d + accuracyMetres <= fence.radiusMetres
+        !fullyInside && d - accuracyMetres >= fence.radiusMetres
+    }
     is Geofence.Polygon -> {
         val ring = fence.vertices.map { doubleArrayOf(it.lon, it.lat) }
         if (accuracyMetres <= 0) !pointInPolygon(point.lon, point.lat, ring)
