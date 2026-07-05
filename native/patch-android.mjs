@@ -206,6 +206,7 @@ if (!rootGradle.includes('kotlin-gradle-plugin')) {
 
 const appGradlePath = resolve(here, '../android/app/build.gradle')
 let appGradle = readFileSync(appGradlePath, 'utf8')
+const appGradleBefore = appGradle
 const APPLY_ANCHOR = "apply plugin: 'com.android.application'"
 if (!appGradle.includes(APPLY_ANCHOR)) {
   throw new Error('patch-android: application plugin anchor not found — update the patch')
@@ -223,8 +224,17 @@ if (!appGradle.includes('org.rust-nostr:nostr-sdk')) {
   if (!appGradle.includes(DEPS_ANCHOR)) throw new Error('patch-android: dependencies block not found — update the patch')
   appGradle = appGradle.replace(DEPS_ANCHOR, `${DEPS_ANCHOR}\n${PUBLISH_DEPS}`)
 }
-writeFileSync(appGradlePath, appGradle)
-console.error('patched app/build.gradle (kotlin plugin + publish deps)')
+
+// Kotlin must match capacitor.build.gradle's Java 21 compileOptions — an
+// unset jvmTarget defaults to 1.8 and hard-fails the mixed-source module.
+if (!appGradle.includes('jvmToolchain')) {
+  appGradle += `\nkotlin {\n    jvmToolchain(21)\n}\n`
+}
+
+if (appGradle !== appGradleBefore) {
+  writeFileSync(appGradlePath, appGradle)
+  console.error('patched app/build.gradle (kotlin plugin + publish deps)')
+}
 
 // ── Fix broadcast out of @capacitor-community/background-geolocation ───────
 // The plugin delivers each fix to JS via the Capacitor bridge, which a
