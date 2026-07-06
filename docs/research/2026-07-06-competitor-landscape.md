@@ -31,7 +31,7 @@ footnoted, not credited.
 
 ## 1. Executive summary
 
-**Flock wins the defined threat model — 47/60 weighted, against 36 for the
+**Flock wins the defined threat model — 49/60 weighted, against 36 for the
 runner-up — and the margin comes exactly where the rubric says it should: the
 triple-weighted privacy areas, where the verified evidence is starkest.**
 
@@ -77,10 +77,13 @@ makes withholding indistinguishable from sharing.** Flock's coercion layer
 counterpart anywhere in the field — the closest analogue failure is Matrix's
 visible `m.beacon_info` beacon announcement.
 
-**The honest caveats that keep Flock at 47 rather than higher:** background
-reliability is unproven on real hardware (every mainstream product beats it
-there today); the Tor toggle ships but the `.onion` endpoint does not exist
-yet, so the IP residual is real; and the app's safety set beyond live
+**The honest caveats that keep Flock at 49 rather than higher:** background
+reliability is measured green and shipped on the GrapheneOS gate device
+(screen locked and Dozing, native beacons flowing) but not yet broadly proven
+— the sustained-walk and stationary deep-Doze passes, breadth across stock
+Androids, and any iOS shell all remain, and mature mainstream products still
+beat it on breadth today; the Tor toggle ships but the `.onion` endpoint does
+not exist yet, so the IP residual is real; and the app's safety set beyond live
 sharing + buzz is parked (library-tested, not wired in). Flock's claim is
 architectural, not yet track-record: Signal has court receipts and Briar a
 Cure53 audit; Flock has neither.
@@ -99,7 +102,7 @@ reliability ×2, circle setup ×1, safety actions ×1, usability ×1. Max 60.
 
 | Product | PA ×3 | MM ×3 | DR ×3 | CR ×2 | LC ×2 | NO ×2 | Rel ×2 | CS ×1 | SA ×1 | U ×1 | **Weighted** |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| **Flock** | 3 | 2 | 3 | 3 | 3 | 2 | 1 | 2 | 2¹ | 1 | **47** |
+| **Flock** | 3 | 2 | 3 | 3 | 3 | 2 | 2 | 2 | 2¹ | 1 | **49** |
 | Signal | 3 | 2 | 3 | 1 | 1 | 1 | 1 | 2 | 0 | 2 | **36** |
 | WhatsApp live location | 2 | 1 | 2 | 0 | 2 | 0 | 2 | 2 | 1 | 3 | **29** |
 | Apple Find My | 2 | 1 | 1 | 0 | 1 | 0 | 3 | 2 | 2 | 3 | **27** |
@@ -155,7 +158,7 @@ architecture/source/reproducible behaviour.
 | IP / account exposure | No accounts; IP visible to relay/host — Tor toggle shipped, onion endpoint pending | **IP logs at subpoena tier** [A] | Apple ID | Google account | Phone + Meta metadata [A] | Phone; nothing else queryable [A] | Phone + cloud | Snap account + device metadata [A] | Account/link based [B] | Your own infra (IP is yours) | Homeserver account; federation metadata [B] |
 | Coercion resistance | **App lock, decoy view, silent duress, withholding = sharing on the wire** | None; pause is visible [†] | None [†] | None [†] | None [†] | Screen lock, disappearing msgs [†] | None [†] | Ghost Mode is a visible setting [†] | None [†] | None [†] | None; `m.beacon_info` is a visible tell [B] |
 | Self-host / own relay / Tor | Static PWA + relay + tiles all self-hostable; multi-relay; Tor toggle (endpoint pending) | No | No | No | No | No (proxies only) [†] | No (MTProto proxies) [†] | No | No | **Yes — entirely** | **Yes — homeserver + own tileserver** [B] |
-| Background reliability | PWA foreground-only; native Android built, **hardware-unproven**; no iOS native | Mature [†] | OS-integrated, best-in-class [†] | Mature [†] | Good; live location primary-device only [A] | n/a (no live mode) | Mature [†] | App-open centric [†] | Good during share [†] | Documented platform pain (FGS notification, Doze batching, ~500 m iOS significant-change) [B] | Beta-grade [†] |
+| Background reliability | PWA foreground-only; native Android background publish **measured GREEN + shipped** on the GrapheneOS gate (locked/Dozing beacons at +7 s, ~50 s cadence); sustained-walk + stationary-Doze passes, breadth + iOS pending | Mature [†] | OS-integrated, best-in-class [†] | Mature [†] | Good; live location primary-device only [A] | n/a (no live mode) | Mature [†] | App-open centric [†] | Good during share [†] | Documented platform pain (FGS notification, Doze batching, ~500 m iOS significant-change) [B] | Beta-grade [†] |
 | Safety actions | Buzz set + check-in in app; SOS/duress, geofences, DMS, meeting points library-tested (parked) | Longest list: SOS, crash, places [†] | Notify-on-arrive, device SOS [†] | Family Link alerts [†] | None | None | None | None | None | DIY via automations [†] | None |
 
 *Google Family Link is scored separately (§2 n⁴, §4): it shares the Google
@@ -442,18 +445,22 @@ included because the goal doc named it.
   ([background location limits](https://developer.android.com/about/versions/oreo/background-location-limits))
 - These are the same constraints Flock's native shell designs around — and
   the reason "reliable background sharing" claims from *any* vendor deserve
-  scepticism proportional to Flock's own Phase 0 caution.
+  scepticism proportional to the caution Flock applied before it measured its
+  own gate green on GrapheneOS.
 
 ## 5. Where Flock loses
 
 Blunt, from the repo's own documentation and the evidence above:
 
-- **Background reliability is unproven.** The PWA cannot share in the
-  background at all (platform constraint — README "make-or-break"); the
-  native Android path is built and golden-vector verified but the hardware
-  round-trip and the GrapheneOS wake-up spike (Phase 0) are still pending.
-  There is no iOS native shell. Life360, Find My, Google, WhatsApp and
-  Telegram all beat Flock here today.
+- **Background reliability is proven on the gate device, not yet broadly.**
+  The PWA cannot share in the background at all (platform constraint — README
+  "make-or-break"); the native Android path closes that gap and is **measured
+  green and shipped** — on a GrapheneOS Pixel 10 Pro, screen locked and
+  Dozing, the relay decrypted native beacons at +7 s and every ~50 s (release
+  0294b8c, 2026-07-05). What remains is validation, not a build: the sustained
+  outdoor-walk pass, the stationary deep-Doze pass, breadth across stock
+  Androids, and there is still no iOS native shell. On maturity and breadth
+  Life360, Find My, Google, WhatsApp and Telegram still beat Flock today.
 - **Tor is a toggle without an endpoint yet.** The opt-in `.onion` toggle
   ships (Orbot detection, fail-loud) but `ONION_RELAYS` is empty until the
   onion service exists, and Tor users currently degrade to foreground-only.
@@ -488,12 +495,14 @@ referenced where they exist):
    even matter, and it is what separates Flock's metadata story from
    Signal's on the network layer. (ROADMAP: mesh-bridge Task B; the toggle
    and Orbot detection already ship.)
-2. **Prove background reliability on hardware.** Phase 0 GrapheneOS spike +
-   the native round-trip runbook. Every mainstream competitor wins this
-   area today; the Android platform limits are documented and designable-
-   around (foreground service; geofencing API at ~couple-of-minutes
-   latency). Until this is proven, the honest pitch stays
-   "foreground-grade".
+2. **Finish background-reliability validation.** The make-or-break gate is
+   already closed — native background publish is measured green and shipped on
+   the GrapheneOS Pixel (locked/Dozing beacons). What's left is the sustained
+   outdoor-walk pass, the stationary deep-Doze pass, breadth across stock
+   Androids, and an iOS shell. The Android platform limits are documented and
+   designed around (foreground service; geofencing API at ~couple-of-minutes
+   latency). Until those land, the honest pitch is "proven on the gate device,
+   foreground-grade elsewhere".
 3. **Un-park check-in / dead-man's-switch first.** It is the highest-value
    parked safety feature (Life360 scores 3 on safety actions largely on
    features of this class), it is already library-tested, and it is pure UI
@@ -565,8 +574,15 @@ directly-quoted Family Link claim — cite it that way.)
 
 ## Appendix A: Flock evidence base (repo, 2026-07-06)
 
-Shipped and live (PWA at flock.forgesworn.dev):
+Shipped (live PWA at flock.forgesworn.dev; native Android APK):
 
+- **Native background publish (Android APK) — the make-or-break gate, closed.**
+  While the app is backgrounded the fix→policy→gift-wrap→relay pipeline runs
+  natively in Kotlin (Android suspends the WebView), with wire-format parity to
+  the JS path held by golden vectors. Measured green and shipped on a
+  GrapheneOS Pixel 10 Pro (2026-07-05, release 0294b8c): screen locked and
+  Dozing, relay-decrypted native beacons at +7 s and every ~50 s. Sustained
+  outdoor-walk and stationary deep-Doze passes still pending.
 - **No account, no phone number, no email.** Identity is a local Nostr key;
   circles are set up by QR/remote invite.
 - **Gift-wrap everything (NIP-59).** A logging relay sees only `kind:1059`
