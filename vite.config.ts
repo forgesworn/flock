@@ -7,15 +7,27 @@ import { execSync } from 'node:child_process'
 // Sideloaded apps never auto-update — this is the only "you're out of date"
 // signal a user gets. Build APK and site from the SAME COMMIT (commit first):
 // a dirty tree is marked so it can never masquerade as a released build.
-const FLOCK_BUILD = (() => {
+//
+// Both the hash AND the date are derived from the COMMIT, never the build
+// machine's wall clock, so a release build is byte-reproducible: a verifier who
+// checks out the same commit rebuilds an identical bundle (docs/verify-apk.md).
+// The committer epoch (`%ct`, UTC seconds) is timezone-independent, so the date
+// is the same whoever rebuilds and wherever. A dirty tree — unreleasable anyway
+// — falls back to the wall clock and is marked `+dev`.
+const git = (cmd: string): string | null => {
   try {
-    const hash = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim()
-    const dirty = execSync('git status --porcelain', { cwd: __dirname }).toString().trim() !== ''
-    return dirty ? `${hash}+dev` : hash
+    return execSync(`git ${cmd}`, { cwd: __dirname }).toString().trim()
   } catch {
-    return 'dev'
+    return null
   }
-})()
+}
+const gitHash = git('rev-parse --short HEAD')
+const gitDirty = (git('status --porcelain') ?? '') !== ''
+const commitEpoch = git('show -s --format=%ct HEAD')
+const FLOCK_BUILD = gitHash ? (gitDirty ? `${gitHash}+dev` : gitHash) : 'dev'
+const FLOCK_BUILT_AT = !gitDirty && commitEpoch
+  ? new Date(Number(commitEpoch) * 1000).toISOString().slice(0, 10)
+  : new Date().toISOString().slice(0, 10)
 
 // The PWA lives in app/ and consumes the flock library straight from src/
 // (aliased), so the app always tracks the latest library code in dev.
@@ -24,7 +36,7 @@ export default defineConfig({
   base: './',
   define: {
     __FLOCK_BUILD__: JSON.stringify(FLOCK_BUILD),
-    __FLOCK_BUILT_AT__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+    __FLOCK_BUILT_AT__: JSON.stringify(FLOCK_BUILT_AT),
   },
   plugins: [
     {

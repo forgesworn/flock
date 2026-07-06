@@ -54,6 +54,19 @@ if [ -f "${APK}" ]; then
   rsync -az /tmp/flock.apk.sha256 "${HOST}:${REMOTE_DIR}/downloads/flock.apk.sha256"
   rsync -az /tmp/flock.apk.json "${HOST}:${REMOTE_DIR}/downloads/apk.json"
   rm -f /tmp/flock.apk.sha256 /tmp/flock.apk.json
+  # Reproducibility anchor: the signed APK above can't be independently rebuilt
+  # (only we hold the key), but the UNSIGNED gradle output is byte-reproducible
+  # from the tagged commit — so publish its hash too, and anyone can confirm the
+  # release matches this source via `npm run apk:verify` (docs/verify-apk.md).
+  # Also mirror it off-host (a signed git tag / Nostr note) so a compelled host
+  # can't swap both APK and hash unnoticed.
+  UNSIGNED="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+  if [ -f "${UNSIGNED}" ]; then
+    shasum -a 256 "${UNSIGNED}" | awk -v n="flock-${APK_BUILD}-unsigned.apk" '{print $1 "  " n}' > /tmp/flock.apk.unsigned.sha256
+    echo "  unsigned anchor: $(awk '{print $1}' /tmp/flock.apk.unsigned.sha256)"
+    rsync -az /tmp/flock.apk.unsigned.sha256 "${HOST}:${REMOTE_DIR}/downloads/flock.apk.unsigned.sha256"
+    rm -f /tmp/flock.apk.unsigned.sha256
+  fi
 else
   echo "  (no local release APK — skipping; run 'npm run apk:release' to ship one)"
 fi

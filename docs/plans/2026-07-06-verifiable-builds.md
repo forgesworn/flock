@@ -1,6 +1,16 @@
 # Verifiable builds — defending against a compelled malicious update
 
-**Status:** Plan · **Date:** 2026-07-06 · **Owner:** flock
+**Status:** In progress — **APK reproducibility achieved & measured (2026-07-06)** ·
+**Date:** 2026-07-06 · **Owner:** flock
+
+> **Measured 2026-07-06.** The unsigned release APK is byte-for-byte reproducible:
+> four independent clean builds produced an identical `app-release-unsigned.apk`.
+> The one non-determinism source in our control (a wall-clock build date) is fixed —
+> the build stamp now derives from the commit, timezone-independent (`vite.config.ts`).
+> A verifier entrypoint (`npm run apk:verify`) and the published anchor hash
+> (`deploy/deploy.sh` → `flock.apk.unsigned.sha256`) ship. Procedure:
+> `docs/verify-apk.md`. **Remaining:** out-of-band/transparency-log publication,
+> Gradle dependency locking, and the PWA side (manifest/SRI).
 
 ## Why this exists
 
@@ -59,7 +69,14 @@ signed, reproducible, out-of-band-attested binary.
 
 ## Plan — APK (the priority; it can actually be made verifiable)
 
-1. **Deterministic build.** Make `native/build-apk.sh release` reproducible:
+1. **Deterministic build. ✅ DONE (measured 2026-07-06).** The unsigned release APK
+   is byte-identical across four independent clean builds. The fix was removing the
+   sole wall-clock input: `__FLOCK_BUILT_AT__` now derives from the committer epoch
+   (`vite.config.ts`), timezone-independent, matching the already-commit-derived
+   build hash. Added `npm run apk:verify` (`build-apk.sh verify` — unsigned build +
+   anchor hash, never touches the key) and anchor publication in `deploy.sh`.
+   The AGP 8.13 / Gradle 8.14 packaging proved deterministic as-is (zip timestamps
+   already normalised) — no extra Gradle config was needed. Full detail below:
    - Pin every input version — Capacitor 8, the Gradle wrapper, the Android Gradle
      Plugin, `build-tools`, JDK 21 (already pinned to the Homebrew `openjdk@21`) — and
      record them in the build stamp.
@@ -134,9 +151,12 @@ The single most valuable addition, cheap to start:
 
 ## Acceptance
 
-- [ ] Two independent release builds of the same tag produce identical APK content hashes.
-- [ ] `docs/verify-apk.md` lets an outsider reproduce and diff without help.
+- [x] Two independent release builds of the same tag produce identical APK content
+      hashes. **(Met 2026-07-06 — four builds, identical unsigned APK.)**
+- [x] `docs/verify-apk.md` lets an outsider reproduce and diff without help.
 - [ ] The release APK hash is published on ≥2 channels not served by our host.
+      *(On-host anchor ships via `deploy.sh`; the off-host/transparency-log copy —
+      signed git tag / Nostr note — is the operational half still to do.)*
 - [ ] The signed asset manifest ships with the PWA and the SW verifies against it.
 - [ ] An append-only, project-key-signed transparency record exists, one entry per release.
 - [ ] `get.html` / the in-app security note states the APK-is-verifiable, PWA-is-reach

@@ -654,17 +654,26 @@ Two halves that compose into one feature:
   typecheck/build/unit + the full two-person e2e suite, SHA-pinned actions, report
   artefact on failure). anvil publishing deliberately omitted while the library is
   private/unpublished.
-- [ ] **Verifiable builds — the compelled-update defence** (plan:
-  `docs/plans/2026-07-06-verifiable-builds.md`). The one court order that bypasses
-  E2E is a compelled **targeted backdoored build** (Lavabit / Apple–San-Bernardino
-  shape); we can't be made unable to comply, but we can make compliance
-  **detectable**. Make the release **APK reproducible** (byte-identical rebuild from
-  a tag), publish its hash **out-of-band** (≥2 channels not on our host) + an
-  independent mirror, and keep an **append-only, project-key-signed transparency log**
-  (build → commit → hash) so a targeted build stands out. PWA gets best-effort
-  tamper-evidence (signed asset manifest + SRI) with the honest ceiling stated —
-  **steer at-risk users to the APK**. Pairs with the warrant canary + `.onion`
-  endpoint (see `docs/PRIVACY.md` "When a court comes knocking").
+- [~] **Verifiable builds — the compelled-update defence** (plan:
+  `docs/plans/2026-07-06-verifiable-builds.md`; procedure: `docs/verify-apk.md`).
+  The one court order that bypasses E2E is a compelled **targeted backdoored build**
+  (Lavabit / Apple–San-Bernardino shape); we can't be made unable to comply, but we
+  can make compliance **detectable**.
+  - [x] **APK reproducibility — DONE, measured 2026-07-06.** The unsigned release
+    APK is byte-identical across four independent clean builds. Removed the sole
+    wall-clock input (build date now derives from the commit epoch, TZ-independent —
+    `vite.config.ts`); added `npm run apk:verify` (unsigned build + anchor hash, key
+    untouched) and anchor publication in `deploy.sh` (`flock.apk.unsigned.sha256`).
+  - [ ] **Off-host / transparency-log publication** — mirror the anchor hash on ≥2
+    channels not on our host (signed git tag / Nostr note, append-only build → commit
+    → hash), so a targeted build absent from the log stands out. *(Operational.)*
+  - [ ] **Gradle dependency locking** — pin transitive artefacts against far-future
+    drift.
+  - [ ] **PWA tamper-evidence** — signed asset manifest + SRI, honest ceiling stated;
+    **steer at-risk users to the APK** (the web app can't match a signed, reproducible
+    binary served from a compellable host).
+  - Pairs with the warrant canary + `.onion` endpoint (see `docs/PRIVACY.md`
+    "When a court comes knocking").
 
 ## Phase H — Minimal footprint (battery, bandwidth, metadata)
 
