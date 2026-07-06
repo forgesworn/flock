@@ -84,10 +84,16 @@
        and settings stay.</p>
     <details>
       <summary>Verify your download (optional)</summary>
-      <p class="muted">Compare the file's fingerprint with
+      <p class="muted">Quick check — compare the file's fingerprint with
         <a href="./downloads/flock.apk.sha256">flock.apk.sha256</a>:</p>
       <p><code>sha256sum flock-*.apk</code></p>
       <p class="muted">The two long strings should match exactly.</p>
+      <p class="muted">Deeper check — the quick fingerprint comes from the same server as the
+         download, so it proves the file arrived intact, not that the server is honest.
+         Each release's fingerprint is therefore also published <em>off</em> this server
+         (a signed <code>release/&lt;build&gt;</code> tag in the source repository), and
+         the app can be rebuilt from its source to the exact same bytes. Full procedure:
+         <a href="https://github.com/forgesworn/flock/blob/main/docs/verify-apk.md">docs/verify-apk.md</a>.</p>
     </details>
   </div>
 
@@ -95,6 +101,11 @@
     <h2>Why the app instead of the website?</h2>
     <p>The app can keep watch <strong>in the background</strong>. It notices you leaving a
        safe place even with the screen off. The website only works while it is open.</p>
+    <p>The app is also the copy of flock that can be <strong>checked</strong>. Each release's
+       fingerprint is published in more than one place — including places we don't run — and
+       anyone can rebuild the app from its source and get the exact same bytes, so a build
+       made specially for one person would stand out. The website can't make that promise:
+       a web page arrives fresh from the server on every visit.</p>
     <p>There is no account and no sign-up. flock makes an anonymous key that lives only on
        your phone, so nothing links it to you. Use it as a guest and reset it whenever.</p>
   </div>
@@ -104,6 +115,9 @@
     <p>Open <a href="https://flock.forgesworn.dev/">flock.forgesworn.dev</a> and add it to your
        home screen (iPhone: Share → <em>Add to Home Screen</em>). Everything works while the app
        is open, including SOS, pick-ups and the live map.</p>
+    <p class="muted">One honest caveat: the website trades checkability for reach. If your
+       safety depends on flock — if someone could pressure us to change it just for you —
+       install the Android app above instead. It's the version that can be verified.</p>
   </div>
 
   <a class="back" href="./">← Back to flock</a>

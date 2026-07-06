@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import { resolve } from 'node:path'
 import { execSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { buildManifest, manifestToBytes, MANIFEST_NAME } from './scripts/pwa-manifest.mjs'
 
 // Build identity: the short git hash, stamped into the bundle (shown in the
 // You tab) and emitted as /version.json so the APK can spot a newer deploy.
@@ -43,6 +46,44 @@ export default defineConfig({
       name: 'flock-version-json',
       generateBundle() {
         this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ build: FLOCK_BUILD }) })
+      },
+    },
+    // PWA tamper-evidence artefacts, produced from the FINAL written output in
+    // closeBundle (in-bundle chunk contents can still be rewritten after
+    // transformIndexHtml — hashing the bytes on disk is the only truth):
+    //
+    // 1. Subresource Integrity on the shipped HTML: a swapped main bundle or
+    //    stylesheet under an unchanged page is rejected by the BROWSER itself —
+    //    a check that holds even if the service worker (our other verifier)
+    //    has been prevented from running. Covers what the HTML references
+    //    directly; the signed manifest + SW cover the rest.
+    // 2. The asset manifest {assetPath: sha256} over everything emitted
+    //    (hashed after SRI so it pins the final HTML). deploy.sh signs it with
+    //    the release key (scripts/sign-pwa-manifest.mjs); sw.js verifies the
+    //    assets it caches against it. Unsigned it asserts nothing — the SW
+    //    quietly ignores a manifest without a valid signature.
+    {
+      name: 'flock-integrity-artifacts',
+      apply: 'build',
+      closeBundle() {
+        const outDir = resolve(__dirname, 'dist-app')
+        try {
+          for (const page of ['index.html', 'get.html']) {
+            const path = resolve(outDir, page)
+            const html = readFileSync(path, 'utf8').replace(/<(script|link)\b[^>]*>/g, (tag) => {
+              if (tag.includes('integrity=')) return tag
+              const ref = tag.match(/(?:src|href)="\.\/([^"]+)"/)?.[1]
+              if (!ref || !existsSync(resolve(outDir, ref)) || !/\.(js|css)$/.test(ref)) return tag
+              const hash = `sha384-${createHash('sha384').update(readFileSync(resolve(outDir, ref))).digest('base64')}`
+              const cross = tag.includes('crossorigin') ? '' : ' crossorigin="anonymous"'
+              return tag.replace(/\s*\/?>$/, (end) => ` integrity="${hash}"${cross}${end}`)
+            })
+            writeFileSync(path, html)
+          }
+          writeFileSync(resolve(outDir, MANIFEST_NAME), manifestToBytes(buildManifest(outDir, FLOCK_BUILD)))
+        } catch (err) {
+          console.warn(`integrity artefacts not written: ${(err as Error).message}`)
+        }
       },
     },
   ],

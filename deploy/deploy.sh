@@ -28,6 +28,19 @@ export VITE_OFFLINE_MAP="${VITE_OFFLINE_MAP:-1}"
 echo "→ building dist-app (offline map: ${VITE_OFFLINE_MAP})"
 npm run build:app
 
+# PWA tamper-evidence: sign the build's asset manifest with the release key so
+# the service worker can verify what it caches (sw.js). Without the key (a
+# self-host) the manifest ships unsigned and the SW quietly skips the check —
+# the canonical host must always sign (docs/transparency/README.md).
+if [ -f native/release-signing-key ]; then
+  echo "→ signing the PWA asset manifest"
+  node scripts/sign-pwa-manifest.mjs
+else
+  echo "⚠ no release signing key — deploying an UNSIGNED PWA manifest (integrity"
+  echo "  verification will be skipped in browsers; fine for a self-host, wrong"
+  echo "  for flock.forgesworn.dev — see docs/transparency/README.md)."
+fi
+
 echo "→ deploying to ${HOST}:${REMOTE_DIR}"
 # Never ship prebuilt basemap tiles (app/public/basemap/*.pmtiles) — those are
 # local dev/demo + market-proof extracts only. The real feature downloads each

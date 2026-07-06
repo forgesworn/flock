@@ -1732,6 +1732,13 @@ function advancedSections(me: store.Identity, c: store.Circle): string {
         : `<button class="btn small ghost" data-action="ask-reset">Sign out &amp; reset this device…</button>
            <div class="note">Wipes your key and every circle from this browser.</div>`}
     </div>
+    <div class="section-title" style="margin-top:18px">This copy of flock</div>
+    <div class="card stack">
+      ${isNativeShell()
+        ? `<div class="note">✓ You're on the Android app — the copy of flock that can be checked. Each release's fingerprint is published in more than one place, including places we don't run, and anyone can rebuild the app from its source and get the exact same bytes. A build made specially for one person would stand out.</div>`
+        : `<div class="note">You're on the web version. It's the same flock, but a website arrives fresh from the server on every visit, so it can't be verified the way an installed app can. If you're relying on flock for safety, use the Android app instead — it's the copy that can be checked against its published source.</div>
+           <a class="btn small ghost" href="https://flock.forgesworn.dev/get.html" target="_blank" rel="noopener">Get the Android app</a>`}
+    </div>
   `
 }
 

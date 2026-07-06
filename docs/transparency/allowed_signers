@@ -13,5 +13,9 @@
 #   git config gpg.ssh.allowedSignersFile docs/transparency/allowed_signers
 #   git verify-tag release/<build>
 #
+# The key signs in two namespaces: "git" (release tags) and
+# "flock-pwa-manifest" (the PWA asset manifest, scripts/sign-pwa-manifest.mjs).
+# Distinct namespaces mean one signature can never be replayed as the other.
+#
 # principal                              options            key
-releases@flock.forgesworn.dev namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII5D3Fwt4jTxxrdbyXIP1DE/iiS9teXADyDQC6CbB1sS
+releases@flock.forgesworn.dev namespaces="git,flock-pwa-manifest" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII5D3Fwt4jTxxrdbyXIP1DE/iiS9teXADyDQC6CbB1sS
