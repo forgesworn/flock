@@ -49,3 +49,6 @@ native/vectors/kotlin-wraps.json
 .claude/
 CLAUDE.local.md
 .superpowers/
+
+# Local dev scratch (relay watchers, device screenshots) — never committed
+scratchpad/

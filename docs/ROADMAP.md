@@ -9,9 +9,10 @@ GrapheneOS (built, hardware-measured GREEN, and shipped 2026-07-05 as release
 `0294b8c`; see "Native background publish" below and Phase G). The only standing
 items that need things code can't provide are Darren-side: **relay #2** (runbook
 ready — `docs/runbooks/second-relay.md`, blocked only on a host) and **publishing
-`keystore-kit` to npm**. Remaining native work is validation — the outdoor walk is
-now **MEASURED GREEN (2026-07-06, `13266fc`, two-phone; see "Native background publish")**;
-only the stationary deep-Doze pass is left — not a build.
+`keystore-kit` to npm**. Native validation is now **complete**: the outdoor walk
+**and** the stationary deep-Doze pass are both **MEASURED GREEN (2026-07-06; see
+"Native background publish")** — a motionless, locked, screen-off phone pinned in
+deep Doze keeps publishing fresh location. Nothing native is left to prove.
 
 ## MVP scope (2026-07)
 
@@ -82,10 +83,25 @@ and shipped (release `0294b8c` live on flock.forgesworn.dev).
   must be run at exact precision AND outdoors** — coarse (~610 m) masks movement inside
   one geohash cell, and indoors there is no GPS fix to publish at any precision; a frozen
   last-seen under coarse/indoors is expected, not a failure.
-- **Remaining (validation, not build):** the **stationary deep-Doze pass** (long screen-off
-  with no movement — the walk keeps the device out of deep Doze). Follow-ups in the goal doc:
-  run the native GPS service only while backgrounded; drop the bg-geo dependency once
-  battle-tested.
+- **STATIONARY DEEP-DOZE — MEASURED GREEN (2026-07-06, GrapheneOS Pixel 10 Pro, API 37).**
+  The one case the walk couldn't prove (movement keeps a device *out* of deep Doze). Forced
+  the harshest condition via `dumpsys battery unplug` + `dumpsys deviceidle force-idle` — the
+  device pinned in deep **`IDLE`** (`mDeepEnabled=true`), screen off (`Dozing`), OS-unplugged,
+  **no maintenance windows** (so if Doze cut flock's network, publishes would stop dead).
+  Throughout: `FlockLocationService` stayed a foreground service, flock stayed Doze-whitelisted,
+  and **GPS kept delivering at 5 s** (fix counter climbing continuously under idle). flock
+  published **three exact (p9) beacons at the ~300 s stationary cadence** (16:15:31, 16:20:31,
+  16:24:51), **all decrypted on the relay** — the 300 s spacing is flock's own cadence timer
+  (driven by the surviving 5 s GPS callback), not irregular Doze maintenance windows. So a
+  motionless, locked, screen-off phone in deep Doze keeps publishing fresh location.
+  Observed with a Mac-side watcher (`scratchpad/relay-watch.mjs`, reproduces the app's
+  subscribe→giftUnwrap→decryptBeacon path; needs auto-reconnect because relay.trotters.cc
+  drops idle subs ~every 75–90 s — the app's `SimplePool` handles this with
+  `enableReconnect`/`enablePing`). Method note: `force-idle` is the standard Doze test; a
+  real multi-hour **unplugged overnight run + battery-cost measurement** remains as optional
+  extra assurance (already tracked as a separate Phase-G item).
+- **Follow-ups (housekeeping, not gating):** run the native GPS service only while
+  backgrounded; drop the bg-geo dependency once battle-tested (goal doc).
 
 ## Chat-led Home & reliability (2026-07-04 pm)
 
@@ -543,8 +559,12 @@ Two halves that compose into one feature:
     those locked fixes into published beacons, **measured GREEN end-to-end** on the
     same Pixel — native beacons decrypting on the relay with the screen locked
     (Dozing), at +7 s then ~50 s cadence, geohashes changing. Shipped as release
-    `0294b8c`. **Still open (validation, not build):** the stationary deep-Doze pass
-    and the outdoor walk.
+    `0294b8c`. **Both remaining validations now GREEN (2026-07-06):** the **outdoor
+    walk** (two-phone, moving pin through a locked/pocketed screen) and the **stationary
+    deep-Doze pass** (device pinned in forced deep `IDLE` — screen off, OS-unplugged, no
+    maintenance windows — still published three exact beacons at the ~300 s cadence, all
+    decrypted on the relay, GPS ticking at 5 s throughout). Nothing native left to prove;
+    see "Native background publish" above for the full measurements.
 - [x] **Inbound alerts (app closed) — SHIPPED via Option A, validated on the A32
   (2026-07-04).** Signal-parity notifications: a message/buzz/alert lands on a
   **locked screen while flock is fully closed**. Implemented as a **location-free
