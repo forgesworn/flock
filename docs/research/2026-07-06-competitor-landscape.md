@@ -50,7 +50,7 @@ The verified landscape splits into three tiers:
    Family Link — the child-supervision tool the goal doc named — runs a
    child's real-time location through Google Maps location sharing on a
    Google-managed account, makes no E2EE claim for it, and an under-13 child
-   cannot switch it off [B].
+   cannot switch it off [A].
 2. **E2EE content, but account-bound and metadata-rich.** WhatsApp live
    location is genuinely end-to-end encrypted — the February 2026 whitepaper
    documents a custom fast ratchet for it [A] — but it is primary-device
@@ -125,8 +125,9 @@ now has its own row (n⁴) after a 2026-07-06 follow-up pass.
 Bluetooth discovery [B]); Berty likewise has none and warns it "should not
 yet be used to exchange sensitive data" [B]. Both are off-grid transport
 contrasts, not competitors for this job.
-⁴ Google Family Link (assessed 2026-07-06, documentation-grade [B] from
-primary Google support pages): parent-over-child supervision on a
+⁴ Google Family Link (assessed 2026-07-06; the account-bound, under-13-only
+and parent-controlled-toggle facts survived 3-vote adversarial verification
+[A], primary Google support pages): parent-over-child supervision on a
 Google-managed child account. Location control scores 1, not 2 — it is
 asymmetric: an under-13 child cannot disable sharing (the parent holds the
 "See your child's location" toggle), and only over-13s "can stop location
@@ -297,33 +298,40 @@ recorded below so it is never asserted.
   Google account.
 ### Google Family Link (child-supervision location)
 
-Assessed 2026-07-06 in a targeted follow-up pass (the original run's agent
-failed). Documentation-grade **[B]**: verbatim from primary Google support
-pages, without the 3-vote adversarial pass the [A] claims carry. It is a
+Assessed 2026-07-06 in a targeted follow-up (the original run's agent
+failed). Its load-bearing facts then passed the same 3-vote adversarial
+verification the report's [A] claims carry — three independent verifiers,
+all confirming — so they are graded **[A]**. One compound claim (that
+Google's servers read the shared location) was refuted 3/3 as a *standalone*
+Family Link claim, because no Family Link page states it directly; it is
+instead **derived** below from two independently-[A] facts. Family Link is a
 parent-over-child supervision tool, not a mutual-trust circle product —
 included because the goal doc named it.
 
-- **Account-bound, provider-processed, no E2EE claim.** "Google Maps is
-  available for children with Google Accounts managed with Family Link", and
-  a parent "can find your child's Android and compatible Fitbit device
-  location in Family Link once device location sharing is turned on". The
-  child's real-time location runs through Google Maps location sharing on a
-  Google-managed account; no Family Link or Maps page makes an end-to-end
-  encryption claim for it, and Google processes Maps location sharing
-  server-side (the Google row's [A] finding). Google's general position is
-  transit-and-at-rest encryption, not E2EE — which leaves the location
-  provider-readable.
+- **Account-bound, no E2EE claim [A].** "Google Maps is available for
+  children with Google Accounts managed with Family Link", and a parent "can
+  find your child's Android and compatible Fitbit device location in Family
+  Link once device location sharing is turned on" — both survived 3-vote
+  verification. No Family Link or Maps support page makes an end-to-end
+  encryption claim for the child's location (verifiers confirmed no E2EE
+  language on any checked page). **Provider-readable, by derivation:** the
+  child's location *is* Google Maps location sharing (above), and the Google
+  row establishes at [A] that Google processes Maps location sharing
+  server-side and reads it — so Google can read the child's location. That
+  conclusion is sound but derived, not separately quotable on a Family Link
+  page, which is why it is stated as a derivation rather than a cited [A]
+  fact.
   ([find & manage location](https://support.google.com/families/answer/7103413?hl=en),
   [Maps & child account](https://support.google.com/families/answer/7307202?hl=en))
-- **Asymmetric by design — the inverse of coercion resistance.** "Children
-  under 13 (or the applicable age in your country) whose accounts are managed
-  with Family Link can only share their real-time location with their
-  parents", and the parent holds the "See your child's location" on/off
-  switch. Only "children over 13 … who had supervision added to their
-  previously existing Google Account can stop location sharing at any time".
-  For a mutual-trust circle this inverts invariant 1: sharing status is a
-  parent-held surveillance signal, not a user-held secret. Hence coercion
-  resistance 0 and location control 1.
+- **Asymmetric by design — the inverse of coercion resistance [A].**
+  "Children under 13 (or the applicable age in your country) whose accounts
+  are managed with Family Link can only share their real-time location with
+  their parents" (confirmed 3/3), and the parent holds the "See your child's
+  location" on/off switch; only "children over 13 … who had supervision added
+  to their previously existing Google Account can stop location sharing at any
+  time" (confirmed 3/3). For a mutual-trust circle this inverts invariant 1:
+  sharing status is a parent-held surveillance signal, not a user-held
+  secret. Hence coercion resistance 0 and location control 1.
 - **Retention and metadata track the Google account.** Location History for a
   supervised child is a Google account setting; the parent-visible view is
   live sharing, but identity, IP and account-data exposure follow Google's
@@ -550,8 +558,10 @@ holds a readable standing movement history (refuted 0–3); that Signal
 "encrypts metadata" (refuted — it *doesn't store* it, which is the correct
 and stronger phrasing); and any background-reliability superiority for Flock
 until the hardware evidence exists. (Family Link, previously unassessed, was
-closed at grade [B] on 2026-07-06 — see §4; claims about it should carry that
-grade.)
+assessed on 2026-07-06: its account-bound, under-13-only and parent-controlled
+facts survived 3-vote verification [A]; that Google can *read* the shared
+location is a sound derivation from the Google row's [A] finding, not a
+directly-quoted Family Link claim — cite it that way.)
 
 ## Appendix A: Flock evidence base (repo, 2026-07-06)
 
@@ -598,6 +608,10 @@ decentralised segment): 25 sources, 119 claims, 25 selected → 15 confirmed,
 subject-matter — OwnTracks/HA background behaviour, Android Doze detail —
 is carried above at grade [B] with verbatim quotes). The original coverage
 gap — Google Family Link (search agent failed) — was closed by a targeted
-follow-up pass on 2026-07-06 at grade [B] (primary Google support pages, no
-3-vote adversarial verification). All verification votes and per-claim quotes
-are preserved in the session's workflow journals.
+follow-up on 2026-07-06: five candidate claims, three independent adversarial
+verifiers each. Four (account-bound, parent-visible, under-13-only,
+parent-controlled toggle) were confirmed 3/3 → grade [A]; one compound claim
+(Google's servers read the shared location) was refuted 3/3 as a standalone
+Family Link claim and is instead carried as a derivation from the Google
+row's [A] finding. All verification votes and per-claim quotes are preserved
+in the session's workflow journals.
