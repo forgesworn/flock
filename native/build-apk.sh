@@ -9,9 +9,12 @@
 #           hash to confirm the shipped build matches this source (never mints
 #           or touches the signing key). See docs/verify-apk.md.
 #
-# First release run mints native/release.keystore + keystore.properties (both
-# gitignored). BACK THEM UP: Android only installs updates signed by the SAME
-# key — lose it and every device must uninstall/reinstall (losing local state).
+# release signs with native/release.keystore + keystore.properties (both gitignored,
+# BACKED UP OUT-OF-BAND). Android only installs updates signed by the SAME key, so:
+#   - if the keystore is MISSING, the build ERRORS (never silently mints a second key);
+#   - the signed cert is checked against the pinned canonical fingerprint and aborts on
+#     mismatch. Deliberately creating the first-ever key needs FLOCK_MINT_KEYSTORE=1.
+# See docs/SIGNING.md.
 set -e
 cd "$(dirname "$0")/.."
 
@@ -39,20 +42,46 @@ if [ "$MODE" = "release" ]; then
   TOOLS="$SDK/build-tools/$BT"
   KS=../native/release.keystore
   PROPS=../native/keystore.properties
+  # The ONE canonical release cert. Every flock update MUST be signed with this key
+  # (Android enforces same-key updates). Pinned here so a wrong/missing keystore fails
+  # loudly instead of silently shipping an un-updatable build. See docs/SIGNING.md.
+  CANONICAL_CERT="320ab5bcee9ebee33a22daa618e79d14e81f1ab80276c3dd9637efab25869877"
   if [ ! -f "$KS" ]; then
+    # Never silently mint a new key — that is exactly how a second, orphaned signing
+    # key gets created (an APK that can't update existing installs). Minting is a
+    # deliberate, first-release-only act, gated behind FLOCK_MINT_KEYSTORE=1.
+    if [ "${FLOCK_MINT_KEYSTORE:-0}" != "1" ]; then
+      echo "✗ No release keystore at native/release.keystore." >&2
+      echo "  Restore your backed-up native/release.keystore + native/keystore.properties" >&2
+      echo "  (canonical cert SHA-256 $CANONICAL_CERT — docs/SIGNING.md) and re-run." >&2
+      echo "  Deliberately creating the FIRST-EVER key (no users, or a full re-key that" >&2
+      echo "  forces every device to reinstall)? Re-run: FLOCK_MINT_KEYSTORE=1 npm run apk:release" >&2
+      exit 1
+    fi
     PASS="$(openssl rand -hex 24)"
     "$JAVA_HOME/bin/keytool" -genkeypair -keystore "$KS" -alias flock \
       -keyalg RSA -keysize 4096 -validity 10950 \
       -storepass "$PASS" -dname "CN=flock"
     printf 'storePass=%s\n' "$PASS" > "$PROPS"
-    echo "Minted native/release.keystore — back it up (updates need this exact key)." >&2
+    echo "⚠ Minted a NEW native/release.keystore — BACK IT UP NOW. This key does NOT match" >&2
+    echo "  existing installs; every device must uninstall/reinstall. Update CANONICAL_CERT" >&2
+    echo "  (build-apk.sh) + docs/SIGNING.md to the new fingerprint below:" >&2
+    "$JAVA_HOME/bin/keytool" -list -v -keystore "$KS" -alias flock -storepass "$PASS" 2>/dev/null | grep -i "SHA256:" >&2
   fi
   PASS="$(sed -n 's/^storePass=//p' "$PROPS")"
   OUT=app/build/outputs/apk/release
   "$TOOLS/zipalign" -f -p 4 "$OUT/app-release-unsigned.apk" "$OUT/flock-release.apk"
   "$TOOLS/apksigner" sign --ks "$KS" --ks-key-alias flock --ks-pass "pass:$PASS" "$OUT/flock-release.apk"
   "$TOOLS/apksigner" verify "$OUT/flock-release.apk"
-  echo "APK: android/$OUT/flock-release.apk"
+  # Fail loud if this isn't the canonical production key — catches a wrong keystore
+  # before it ships an un-updatable build (skipped when deliberately minting a new key).
+  GOT="$("$TOOLS/apksigner" verify --print-certs "$OUT/flock-release.apk" 2>/dev/null | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)"
+  if [ "${FLOCK_MINT_KEYSTORE:-0}" != "1" ] && [ "$GOT" != "$CANONICAL_CERT" ]; then
+    echo "✗ Signed APK cert ($GOT) ≠ canonical production key ($CANONICAL_CERT)." >&2
+    echo "  Wrong keystore — this build can't update installed flocks. Aborting." >&2
+    exit 1
+  fi
+  echo "APK: android/$OUT/flock-release.apk  (signer: ${GOT:-unknown})"
 elif [ "$MODE" = "verify" ]; then
   # Reproducibility check: build the unsigned release APK and print its hash.
   # `clean` so nothing cached masks a mismatch; no signing (a verifier holds no

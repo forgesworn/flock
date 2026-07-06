@@ -93,7 +93,9 @@ Match across channels → the shipped release is built from this exact source. T
 confirm the APK you actually downloaded is properly signed and by the expected key:
 
 ```sh
-apksigner verify --print-certs flock.apk     # exit 0; certificate SHA-256 matches the published fingerprint
+apksigner verify --print-certs flock.apk     # exit 0; certificate SHA-256 must equal
+                                              # the canonical key in docs/SIGNING.md
+                                              # (320ab5bc…25869877)
 ```
 
 ## Known limits (stated honestly)
