@@ -42,18 +42,27 @@ Original 2026-07-06 audit (still valid), scanned the **entire history**
 `git rev-list --all`. If either is non-empty for anything but the `build-apk.sh`
 template, history must be rewritten (`git filter-repo`) *before* going public.
 
-## 2. Infra detail that becomes public — decide, not blocking
+## 2. Infra detail — ✅ SCRUBBED FROM THE TRACKED REPO (2026-07-06)
 
-- **Host IP `95.217.39.110` + SSH users `deploy`/`root`** appear in `deploy/*` and
-  `docs/DEPLOY.md`. The IP is already discoverable (DNS for `flock.forgesworn.dev`),
-  so low marginal risk; the **usernames** are a minor recon gift. Options: accept
-  (SSH should be key-only, no password auth), or parameterise the docs to
-  `deploy@<host>` and keep the real values in a private ops note. *Recommendation:
-  confirm key-only SSH, then accept — redacting docs that describe a public URL's
-  own host is low-value.*
+**Decision (Darren): the host IP and SSH usernames must not live in the repo at
+all.** Done — every tracked file now uses `<user>@<host>` placeholders:
+
+- `deploy/deploy.sh` sources an **untracked, gitignored** `deploy/deploy.local.sh`
+  (`export HOST=user@host`) and **requires** `HOST` (errors if unset) — no hardcoded
+  default. The real host/user live only in that local file + the maintainer's ops note.
+- `deploy/Caddyfile`, `deploy/flock-extract.service`, `docs/DEPLOY.md`,
+  `docs/ARCHITECTURE.md`, `docs/runbooks/second-relay.md` scrubbed to placeholders;
+  the systemd unit's `User=` is now `<user>` (fill on install).
+- **History caveat:** the IP still exists in past commits (and is DNS-discoverable
+  via `flock.forgesworn.dev` anyway). Scrubbing history would need `git filter-repo`
+  — which **rewrites commit hashes and would invalidate the signed `release/dfaa8a9`
+  tag + its ledger commit**. Not done unprompted; decide deliberately if wanted
+  (would require re-cutting the release attestation). Going-forward the tree is clean.
 - **`relay.trotters.cc`** (the no-log private relay) is referenced throughout — but
   it is already the deployed app's default relay, discoverable by any user. Not a new
   exposure; no action.
+- Still worth confirming: **key-only SSH** on the host (no password auth) — the real
+  control regardless of what the docs show.
 
 ## 3. Public-readiness polish
 

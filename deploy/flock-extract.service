@@ -1,6 +1,6 @@
 # flock offline-basemap extract service — systemd unit for the host.
 #
-# Install (host = deploy@95.217.39.110; see docs/DEPLOY.md):
+# Install (host = <user>@<host>; see docs/DEPLOY.md):
 #   sudo install -m0755 go-pmtiles /usr/local/bin/go-pmtiles     # v1.30.3 Linux_x86_64
 #   mkdir -p /opt/flock-extract && cp server/extract.mjs /opt/flock-extract/
 #   sudo cp deploy/flock-extract.service /etc/systemd/system/
@@ -14,7 +14,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=deploy
+User=<user>
 WorkingDirectory=/opt/flock-extract
 Environment=HOST=127.0.0.1
 Environment=PORT=8791

@@ -5,10 +5,10 @@
 # in keeping with flock's privacy promise. The only network calls the app makes
 # are to the user-configured Nostr relay and (optionally) a map tile server.
 #
-# Install on the host (95.217.39.110) — additive conf.d drop-in; never touches the
+# Install on the host — additive conf.d drop-in; never touches the
 # shared /etc/caddy/Caddyfile (which `import`s conf.d/*.Caddyfile). See docs/DEPLOY.md:
-#   cat deploy/Caddyfile | ssh deploy@95.217.39.110 'sudo tee /etc/caddy/conf.d/flock.forgesworn.dev.Caddyfile'
-#   ssh deploy@95.217.39.110 'sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && sudo systemctl reload caddy'
+#   cat deploy/Caddyfile | ssh <user>@<host> 'sudo tee /etc/caddy/conf.d/flock.forgesworn.dev.Caddyfile'
+#   ssh <user>@<host> 'sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && sudo systemctl reload caddy'
 
 flock.forgesworn.dev {
 	root * /var/www/flock

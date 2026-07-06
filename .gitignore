@@ -52,3 +52,6 @@ CLAUDE.local.md
 
 # Local dev scratch (relay watchers, device screenshots) — never committed
 scratchpad/
+
+# Local deploy config — real host/user, never committed
+deploy/deploy.local.sh

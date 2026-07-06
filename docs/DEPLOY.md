@@ -62,26 +62,32 @@ local relay. Don't edit source mid-run — Vite HMR reloads the app under the te
 
 ## Canonical deploy — flock.forgesworn.dev (Hetzner + Caddy)  ✅ LIVE
 
-Shared box (`deploy@95.217.39.110`) running many sites. The deploy is **fully
-isolated** — own web root + one `conf.d` drop-in — and **never touches the shared
-`/etc/caddy/Caddyfile`** (which `import`s `conf.d/*.Caddyfile`).
+Shared box running many sites. The deploy is **fully isolated** — own web root +
+one `conf.d` drop-in — and **never touches the shared `/etc/caddy/Caddyfile`**
+(which `import`s `conf.d/*.Caddyfile`).
+
+> **The real host and SSH user are not stored in this repo.** They live in an
+> untracked, gitignored `deploy/deploy.local.sh` (`export HOST=user@host`) and the
+> maintainer's out-of-band ops note. The commands below use `<user>@<host>`
+> placeholders — set `HOST=<user>@<host>` in your shell (or the local file) before
+> running them, and fill the placeholders in the systemd unit / Caddyfile drop-in.
 
 **One-time setup (already done):**
 
 ```sh
 # isolated, deploy-owned web root
-ssh deploy@95.217.39.110 'sudo mkdir -p /var/www/flock && sudo chown -R deploy:deploy /var/www/flock'
+ssh <user>@<host> 'sudo mkdir -p /var/www/flock && sudo chown -R <user>:<user> /var/www/flock'
 # additive site drop-in (deploy/Caddyfile → conf.d, capital-C extension to match the import glob)
-cat deploy/Caddyfile | ssh deploy@95.217.39.110 'sudo tee /etc/caddy/conf.d/flock.forgesworn.dev.Caddyfile >/dev/null'
+cat deploy/Caddyfile | ssh <user>@<host> 'sudo tee /etc/caddy/conf.d/flock.forgesworn.dev.Caddyfile >/dev/null'
 # ALWAYS validate before reloading a shared box, then graceful reload (not restart)
-ssh deploy@95.217.39.110 'sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && sudo systemctl reload caddy'
+ssh <user>@<host> 'sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && sudo systemctl reload caddy'
 ```
 
 **Each deploy, from this repo (content only — no reload needed):**
 
 ```sh
 npm run deploy
-# = build dist-app + rsync to deploy@95.217.39.110:/var/www/flock
+# = build dist-app + rsync to <user>@<host>:/var/www/flock
 # override: HOST=user@host REMOTE_DIR=/srv/flock npm run deploy
 ```
 
@@ -102,17 +108,17 @@ runs as `flock-extract.service` on `127.0.0.1:8791`, reverse-proxied by Caddy at
 `/api/extract` (in `deploy/Caddyfile`). Public endpoint, so the service caps request
 span (60 km) and concurrency (3 → 429).
 
-One-time host setup (`deploy@95.217.39.110`):
+One-time host setup (`<user>@<host>`):
 
 ```sh
 # 1. go-pmtiles binary (Linux x86_64), installed as /usr/local/bin/go-pmtiles
 curl -sSL https://github.com/protomaps/go-pmtiles/releases/download/v1.30.3/go-pmtiles_1.30.3_Linux_x86_64.tar.gz | tar xz pmtiles
 sudo install -m0755 pmtiles /usr/local/bin/go-pmtiles
 # 2. service code + unit
-sudo mkdir -p /opt/flock-extract && sudo chown deploy:deploy /opt/flock-extract
-scp server/extract.mjs deploy@95.217.39.110:/opt/flock-extract/
-cat deploy/flock-extract.service | ssh deploy@95.217.39.110 'sudo tee /etc/systemd/system/flock-extract.service'
-ssh deploy@95.217.39.110 'sudo systemctl daemon-reload && sudo systemctl enable --now flock-extract'
+sudo mkdir -p /opt/flock-extract && sudo chown <user>:<user> /opt/flock-extract
+scp server/extract.mjs <user>@<host>:/opt/flock-extract/
+cat deploy/flock-extract.service | ssh <user>@<host> 'sudo tee /etc/systemd/system/flock-extract.service'
+ssh <user>@<host> 'sudo systemctl daemon-reload && sudo systemctl enable --now flock-extract'
 # 3. the /api/extract route is part of deploy/Caddyfile — drop it in + reload (as above)
 ```
 

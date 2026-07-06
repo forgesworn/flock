@@ -101,7 +101,7 @@ host      ▶ Hetzner + Caddy → flock.forgesworn.dev (auto-TLS, no logs)
 - **De-Googled push:** UnifiedPush or a persistent relay socket (no FCM on Graphene).
 
 ### Hosting / deploy
-- **flock.forgesworn.dev** on the Hetzner box (`95.217.39.110`) behind **Caddy**
+- **flock.forgesworn.dev** on the Hetzner box behind **Caddy**
   (automatic Let's Encrypt TLS, **access logging off**).
 - **Why:** own the whole stack, capture no logs/data, and stay self-hostable —
   the relay and map tiles are build-time configurable (`VITE_DEFAULT_RELAY`,

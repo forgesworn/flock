@@ -1,16 +1,23 @@
 #!/usr/bin/env sh
 # Build the PWA and rsync it to the flock host.
 #
-#   ./deploy/deploy.sh
-#   HOST=root@95.217.39.110 REMOTE_DIR=/var/www/flock ./deploy/deploy.sh
+#   ./deploy/deploy.sh                    # host from deploy/deploy.local.sh (or $HOST)
+#   HOST=user@host REMOTE_DIR=/srv/flock ./deploy/deploy.sh   # or pass inline
 #
-# Override the default relay/tiles for a self-hosted instance:
+# The real host/user are NOT stored in this repo. Put them in an untracked,
+# gitignored deploy/deploy.local.sh (`export HOST=user@host`), or pass HOST= on
+# the command line. Override the default relay/tiles for a self-hosted instance:
 #   VITE_DEFAULT_RELAY=wss://relay.example.com ./deploy/deploy.sh
 set -eu
 
 # Content updates are just an rsync — Caddy serves the static files live, no
 # reload needed (only the one-time conf.d drop-in needed a reload; see DEPLOY.md).
-HOST="${HOST:-deploy@95.217.39.110}"
+# Real host/user are never committed: load them from an untracked local file if
+# present (deploy/deploy.local.sh — gitignored), else require HOST in the env.
+LOCAL_CFG="$(dirname "$0")/deploy.local.sh"
+# shellcheck source=/dev/null
+[ -f "$LOCAL_CFG" ] && . "$LOCAL_CFG"
+HOST="${HOST:?set HOST=user@host — put it in deploy/deploy.local.sh (gitignored) or pass it inline; never commit the real host}"
 REMOTE_DIR="${REMOTE_DIR:-/var/www/flock}"
 
 # Offline maps ("save this area") need the extract service (server/extract.mjs),

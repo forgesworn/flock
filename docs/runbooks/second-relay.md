@@ -22,7 +22,7 @@ IPs, no query logs, no connection journals on disk.
 ## Prerequisites (Darren)
 
 - [ ] A VPS in a **different failure domain** from both relay.trotters.cc *and* the
-      flock host (95.217.39.110, Hetzner Helsinki) — different provider or at least
+      flock host (Hetzner Helsinki) — different provider or at least
       region. 2 GB RAM is ample; disk grows only with ≤16 days of wraps.
 - [ ] A DNS name (suggest `relay2.trotters.cc` or a ForgeSworn domain), **DNS-only /
       grey-cloud** — a CDN in front of a privacy relay would see every member's IP
