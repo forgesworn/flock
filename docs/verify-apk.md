@@ -106,9 +106,15 @@ apksigner verify --print-certs flock.apk     # exit 0; certificate SHA-256 must 
 - **Toolchain drift breaks byte-identity.** A different AGP/Gradle/JDK *major*
   version can change output. Verify with the versions above; CI should rebuild and
   diff on each release tag so a regression is caught, not discovered later.
-- **Transitive dependency drift.** Direct versions are pinned; a far-future rebuild
-  could still resolve different transitive artefacts. Gradle dependency locking is
-  a future hardening step (plan doc).
+- **Transitive dependency drift — locked.** Every Gradle configuration the release
+  build resolves (app, every Capacitor plugin project, and the AGP/Kotlin buildscript
+  classpath) is pinned by committed lockfiles (`native/gradle-locks/`, injected into
+  the generated project by `patch-android.mjs`). A rebuild resolves exactly the locked
+  graph or **fails loudly** ("enforced by Dependency Locking") — upstream repositories
+  moving can no longer silently change bytes. Deliberate updates go through
+  `sh native/build-apk.sh locks`, which rewrites the lock state as a reviewable diff.
+  (The lock pins *versions*; artefact *checksum* verification —
+  `verification-metadata.xml` — remains a possible deeper layer.)
 - **The signing key is trust, not proof.** Reproducibility proves the *content*
   matches source; that the update is signed by *our* key is a separate trust
   anchor (`native/release.keystore`, backed up out-of-band, never in the repo).

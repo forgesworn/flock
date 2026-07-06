@@ -18,7 +18,7 @@
 //    in the browser. autoVerify checks the site's /.well-known/assetlinks.json
 //    (shipped in app/public, so every deploy serves it) against the APK's
 //    signing cert; native/deeplink.ts feeds the arriving URL to the app.
-import { readFileSync, writeFileSync, copyFileSync, cpSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync, cpSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -258,6 +258,44 @@ if (!appGradle.includes('jvmToolchain')) {
 if (appGradle !== appGradleBefore) {
   writeFileSync(appGradlePath, appGradle)
   console.error('patched app/build.gradle (kotlin plugin + publish deps)')
+}
+
+// ── Gradle dependency locking (native/flock-locking.gradle) ────────────────
+// Pins the exact transitive dependency graph so the reproducible APK keeps
+// reproducing after upstream repositories move (docs/verify-apk.md). The lock
+// state lives in the COMMITTED native/gradle-locks/ store — the applied script
+// points every project's lockFile there, so regenerating android/ can't lose
+// it. Re-read the root build.gradle: the Kotlin-plugin patch above may have
+// rewritten it since our first read.
+rootGradle = readFileSync(rootGradlePath, 'utf8')
+let lockingChanged = false
+const LOCKING_APPLY = "apply from: '../native/flock-locking.gradle'"
+if (!rootGradle.includes(LOCKING_APPLY)) {
+  rootGradle += `\n// flock: dependency locking — injected by native/patch-android.mjs\n${LOCKING_APPLY}\n`
+  lockingChanged = true
+}
+// The root buildscript classpath (AGP + Kotlin plugin) resolves while
+// build.gradle's own buildscript block evaluates — BEFORE any applied script
+// runs — so its locking must be activated inside that block, not from
+// flock-locking.gradle.
+const BUILDSCRIPT_LOCK_LINE = '    configurations.classpath { resolutionStrategy.activateDependencyLocking() } // flock: injected by patch-android.mjs'
+if (!rootGradle.includes('activateDependencyLocking')) {
+  const BS_ANCHOR = /buildscript\s*\{/
+  if (!BS_ANCHOR.test(rootGradle)) throw new Error('patch-android: buildscript block not found — update the patch')
+  rootGradle = rootGradle.replace(BS_ANCHOR, (m) => `${m}\n${BUILDSCRIPT_LOCK_LINE}`)
+  lockingChanged = true
+}
+if (lockingChanged) {
+  writeFileSync(rootGradlePath, rootGradle)
+  console.error('enabled dependency locking in root build.gradle (flock-locking.gradle + buildscript)')
+}
+// The root buildscript classpath lockfile (AGP + Kotlin plugin) is the one lock
+// whose location Gradle fixes inside the generated tree — sync it in from the
+// committed store so a fresh android/ enforces it too.
+const BUILDSCRIPT_LOCK = resolve(here, 'gradle-locks/buildscript-gradle.lockfile')
+if (existsSync(BUILDSCRIPT_LOCK)) {
+  copyFileSync(BUILDSCRIPT_LOCK, resolve(here, '../android/buildscript-gradle.lockfile'))
+  console.error('copied buildscript-gradle.lockfile into android/')
 }
 
 // ── Fix broadcast out of @capacitor-community/background-geolocation ───────

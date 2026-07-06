@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the flock Android APK: sh native/build-apk.sh [debug|release|verify]
+# Build the flock Android APK: sh native/build-apk.sh [debug|release|verify|locks]
 # (or `npm run apk` / `npm run apk:release` / `npm run apk:verify`). See native/README.md.
 #
 # debug   → android/app/build/outputs/apk/debug/app-debug.apk
@@ -8,6 +8,10 @@
 #           reproducibility anchor a third party compares against the published
 #           hash to confirm the shipped build matches this source (never mints
 #           or touches the signing key). See docs/verify-apk.md.
+# locks   → regenerate the committed Gradle dependency lock state
+#           (native/gradle-locks/**) from a real release resolution — the
+#           deliberate dependency-update ritual (native/flock-locking.gradle).
+#           Review the lockfile diff and commit it.
 #
 # release signs with native/release.keystore + keystore.properties (both gitignored,
 # BACKED UP OUT-OF-BAND). Android only installs updates signed by the SAME key, so:
@@ -20,6 +24,17 @@ cd "$(dirname "$0")/.."
 
 MODE="${1:-debug}"
 SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+
+# A release/verify build without the committed lock state would silently
+# resolve dependencies unlocked — exactly the drift the locks exist to catch.
+# (debug and the `locks` ritual itself are exempt.)
+if [ "$MODE" = "release" ] || [ "$MODE" = "verify" ]; then
+  if [ ! -f native/gradle-locks/app.lockfile ]; then
+    echo "✗ native/gradle-locks/ is missing or incomplete — the dependency lock state" >&2
+    echo "  must be committed (regenerate deliberately: sh native/build-apk.sh locks)." >&2
+    exit 1
+  fi
+fi
 
 # Capacitor 8 pins a Java 21 toolchain; prefer the Homebrew JDK 21 if present.
 BREW_JDK=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
@@ -82,6 +97,17 @@ if [ "$MODE" = "release" ]; then
     exit 1
   fi
   echo "APK: android/$OUT/flock-release.apk  (signer: ${GOT:-unknown})"
+elif [ "$MODE" = "locks" ]; then
+  # Regenerate the committed dependency lock state from a REAL release
+  # resolution (see native/flock-locking.gradle for why not a resolve-all
+  # sweep); assembleDebug rides along so dev builds are pinned too. The
+  # lockFile redirection writes the per-project lock state straight into
+  # native/gradle-locks/; only the root buildscript lockfile lands in the
+  # generated tree and must be copied back to the committed store.
+  ./gradlew assembleRelease assembleDebug --write-locks --console=plain -q
+  cp buildscript-gradle.lockfile ../native/gradle-locks/buildscript-gradle.lockfile
+  echo "lock state written to native/gradle-locks/ — review the diff and commit:"
+  (cd .. && git status --short native/gradle-locks/)
 elif [ "$MODE" = "verify" ]; then
   # Reproducibility check: build the unsigned release APK and print its hash.
   # `clean` so nothing cached masks a mismatch; no signing (a verifier holds no

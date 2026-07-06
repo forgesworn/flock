@@ -1,0 +1,47 @@
+// Gradle dependency locking for the flock APK build — applied to the GENERATED
+// (gitignored) android/ project by native/patch-android.mjs, re-asserted on every
+// build (the manifest-drift lesson: add-once guards silently rot).
+//
+// Why: the APK is byte-reproducible (docs/verify-apk.md), but Gradle resolves
+// *transitive* Android/Maven artefacts at build time — a resolver change or a new
+// patch version silently changes bytes, and the attested anchor hash would no
+// longer reproduce. Locking pins the exact resolved graph.
+//
+// The crux: android/ is generated and gitignored, so lockfiles written there
+// would vanish on regeneration. Every project's lock state therefore lives in
+// the COMMITTED store native/gradle-locks/ — the lockFile property points each
+// project (including the plugin projects that resolve from node_modules)
+// straight at it. The locks never live in the generated tree, so a Capacitor
+// upgrade or a fresh clone cannot quietly drop them. The one exception is the
+// root buildscript classpath (AGP + Kotlin plugin): its lockfile name/location
+// is fixed by Gradle (android/buildscript-gradle.lockfile), so patch-android.mjs
+// copies it in from the committed store on every run.
+//
+// Deliberate dependency update ritual (mirrors `npm run gen:vectors`):
+//   1. change the dependency (patch-android.mjs / Capacitor upgrade)
+//   2. sh native/build-apk.sh locks     (regenerates native/gradle-locks/**)
+//   3. review the lockfile diff and commit it — every version change is an
+//      explicit, reviewable line in git history
+//
+// Lock state is captured from a REAL `assembleRelease --write-locks` run (the
+// `locks` mode above), not from force-resolving every configuration: legacy
+// attribute-less configurations in the AGP/Capacitor projects are ambiguous
+// when resolved out of context and would fail the sweep. What the release
+// build resolves is exactly what the release APK's bytes depend on — and in
+// a locked build those same configurations are the ones enforced.
+def lockDir = new File(rootDir, '../native/gradle-locks').canonicalFile
+
+// Root buildscript classpath: AGP + the Kotlin Gradle plugin and all their
+// transitives shape the emitted bytes just as much as app dependencies do.
+// (Lockfile location is not configurable for buildscript — it reads/writes
+// android/buildscript-gradle.lockfile; patch-android.mjs syncs it with the
+// committed copy in native/gradle-locks/.)
+project.buildscript.configurations.classpath.resolutionStrategy.activateDependencyLocking()
+
+allprojects { p ->
+    def name = p.path == ':' ? 'root-project' : p.path.substring(1).replace(':', '-')
+    p.dependencyLocking {
+        lockAllConfigurations()
+        lockFile = new File(lockDir, "${name}.lockfile")
+    }
+}
