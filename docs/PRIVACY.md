@@ -170,6 +170,67 @@ one PIN entry. Limits: a short PIN resists a snoop, not an offline PBKDF2 run �
 the card nudges toward 6+ characters; Signet sign-in remains stronger still (the
 key never enters flock).
 
+## When a court comes knocking — legal process
+
+The models above are about a hostile relay and a coercer holding the phone. The
+third adversary is a **court order served on us** — the operator of the relays and
+the host. This is the "Signal subpoena" case, and flock answers it the way Signal
+does: *you cannot be compelled to produce what you do not hold.* The honest picture
+has a strong half and a hard half.
+
+**Two orders, not one.**
+
+- **Retrospective** — *"hand over everything you have on user X."* This the
+  architecture defeats. There is **no flock account** — no phone number, email, or
+  identity we hold; keys are generated on-device — and a relay holds only what the
+  "what a logging relay can and can't see" table above lists: opaque `kind:1059`
+  ciphertext from throwaway keys, plus connection metadata. The order returns no
+  identity, no roster, no signal type, no location, no plaintext history, because
+  none of it exists on our side. **That table is our subpoena-response document.**
+- **Prospective** — *"start logging user X's IP and timing from now on"* (a
+  pen-register / trap-and-trace-shaped order), or *"modify the service to intercept
+  them."* This minimisation alone does **not** defeat: "we don't log" is a policy,
+  reversible under an order. The only durable defence is to make the produced data
+  worthless — the `.onion`/Tor endpoint's job (above), not an operator promise. So
+  shipping Tor by default for signals is a **legal-hardening** step, not only a
+  metadata one.
+
+**The order that beats the encryption: a compelled build.** The strongest thing a
+court can demand is not our data — it is our **software**. We ship the PWA (from our
+host) and the APK (signed with our key). An order to push a **targeted, backdoored
+build to one user** (the Lavabit / Apple–San-Bernardino shape) bypasses *every*
+cryptographic defence in this document, because it attacks the endpoint, not the
+wire. This is the one gap the privacy architecture cannot close on its own; the
+answer is **verifiable builds** — reproducible artefacts, hashes published
+out-of-band, independent mirrors — so a targeted build is *detectable* and cannot be
+shipped silently. Tracked in `docs/plans/2026-07-06-verifiable-builds.md`.
+
+**The order to the user, not to us.** A court (or a border officer) can compel the
+*user* to unlock and disclose. The decoy view and App lock defend the application
+layer observationally, but — stated plainly, as elsewhere — a forensic image still
+finds an opaque blob, and an examiner who knows flock exists can demand the phrase.
+**Decoy over wipe** is deliberate: destroying data under a legal hold risks an
+obstruction charge; a sealed blob destroys nothing.
+
+**Posture, not just architecture:**
+
+- **Jurisdiction is a choice.** The relays and host sit on Hetzner (Germany); where
+  the operating entity and its servers live decides which courts and
+  mutual-legal-assistance paths apply. Pick it deliberately.
+- **Publish a transparency report + warrant canary.** Signal's published subpoena
+  responses are its best credibility asset precisely because the honest answer is
+  "here is the ciphertext, that is all there is." A canary covers the gag order a
+  plain report cannot.
+- **Collect nothing on the host you would not want subpoenaed.** Access logs are
+  already off and rate-limit keys salted-hashed (see the map/host section) — hold
+  that line.
+
+**The load-bearing point:** the defence that survives a courtroom is
+**architectural**, not legal. A no-log promise, a canary, a transparency report are
+all weaker than "the data does not exist" and "a swapped build is detectable."
+Prioritise the architectural moves — Tor, verifiable builds, off-relay transport —
+over the policy ones.
+
 ## Captured requirements
 
 ### Private "no-report" zones (redaction zones)

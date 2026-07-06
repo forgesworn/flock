@@ -654,6 +654,17 @@ Two halves that compose into one feature:
   typecheck/build/unit + the full two-person e2e suite, SHA-pinned actions, report
   artefact on failure). anvil publishing deliberately omitted while the library is
   private/unpublished.
+- [ ] **Verifiable builds — the compelled-update defence** (plan:
+  `docs/plans/2026-07-06-verifiable-builds.md`). The one court order that bypasses
+  E2E is a compelled **targeted backdoored build** (Lavabit / Apple–San-Bernardino
+  shape); we can't be made unable to comply, but we can make compliance
+  **detectable**. Make the release **APK reproducible** (byte-identical rebuild from
+  a tag), publish its hash **out-of-band** (≥2 channels not on our host) + an
+  independent mirror, and keep an **append-only, project-key-signed transparency log**
+  (build → commit → hash) so a targeted build stands out. PWA gets best-effort
+  tamper-evidence (signed asset manifest + SRI) with the honest ceiling stated —
+  **steer at-risk users to the APK**. Pairs with the warrant canary + `.onion`
+  endpoint (see `docs/PRIVACY.md` "When a court comes knocking").
 
 ## Phase H — Minimal footprint (battery, bandwidth, metadata)
 
