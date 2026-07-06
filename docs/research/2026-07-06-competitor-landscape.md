@@ -46,7 +46,11 @@ The verified landscape splits into three tiers:
    as the content it rides on and makes no E2EE claim for location [A].
    Telegram's group live location cannot be E2EE at all (Secret Chats are
    one-to-one only) [A]. Google's own support page says Timeline-associated
-   data can improve "Google services, including ads products" [A].
+   data can improve "Google services, including ads products" [A]. Google
+   Family Link — the child-supervision tool the goal doc named — runs a
+   child's real-time location through Google Maps location sharing on a
+   Google-managed account, makes no E2EE claim for it, and an under-13 child
+   cannot switch it off [B].
 2. **E2EE content, but account-bound and metadata-rich.** WhatsApp live
    location is genuinely end-to-end encrypted — the February 2026 whitepaper
    documents a custom fast ratchet for it [A] — but it is primary-device
@@ -105,6 +109,7 @@ reliability ×2, circle setup ×1, safety actions ×1, usability ×1. Max 60.
 | Glympse | 1 | 1 | 2 | 0 | 2 | 0 | 2 | 1 | 0 | 2 | **23** |
 | Google Maps sharing² | 1 | 0 | 1 | 0 | 2 | 0 | 3 | 2 | 1 | 3 | **22** |
 | Telegram live location | 0 | 0 | 1 | 0 | 2 | 1 | 3 | 2 | 0 | 3 | **20** |
+| Google Family Link⁴ | 1 | 0 | 1 | 0 | 1 | 0 | 3 | 2 | 1 | 3 | **20** |
 | Life360 | 0 | 0 | 0 | 0 | 1 | 0 | 3 | 2 | 3 | 3 | **16** |
 | Snapchat Snap Map | 0 | 0 | 0 | 0 | 2 | 0 | 2 | 2 | 0 | 3 | **13** |
 | Briar / Berty | — | — | — | — | — | — | — | — | — | — | not scored³ |
@@ -113,14 +118,23 @@ reliability ×2, circle setup ×1, safety actions ×1, usability ×1. Max 60.
 app; SOS/duress, geofences, dead-man's-switch, meeting points etc. are
 library-tested but parked post-MVP — 2, not 3, on the "current app plus
 tested library" basis.
-² Scope: Google Maps location sharing (and Timeline evidence). **Family
-Link's child-supervision location was not assessed** — the research agent
-for it failed; no claims exist either way. Do not cite this row against
-Family Link specifically.
+² Scope: Google Maps location sharing (and Timeline evidence), scored
+separately from **Google Family Link's child-supervision location**, which
+now has its own row (n⁴) after a 2026-07-06 follow-up pass.
 ³ Briar has no location feature (its location permission exists solely for
 Bluetooth discovery [B]); Berty likewise has none and warns it "should not
 yet be used to exchange sensitive data" [B]. Both are off-grid transport
 contrasts, not competitors for this job.
+⁴ Google Family Link (assessed 2026-07-06, documentation-grade [B] from
+primary Google support pages): parent-over-child supervision on a
+Google-managed child account. Location control scores 1, not 2 — it is
+asymmetric: an under-13 child cannot disable sharing (the parent holds the
+"See your child's location" toggle), and only over-13s "can stop location
+sharing at any time". Coercion resistance is 0 (a surveillance tool by
+design). Its E2EE, retention and metadata scores mirror the Google row's
+server-processed, account-bound model. It competes for the family-safety
+job the goal doc named, but its architecture is provider-readable — not the
+mutual-trust model this threat model rewards.
 
 Score meanings: 0 missing/hostile/marketing-only · 1 partial but leaks or
 provider-dependent · 2 good with honest limits · 3 strong fit backed by
@@ -131,17 +145,23 @@ architecture/source/reproducible behaviour.
 | Area | Flock (shipped) | Life360 | Find My | Google | WhatsApp | Signal | Telegram | Snap Map | Glympse | OwnTracks / HA | Matrix/Element |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Circle setup | QR/remote invite, no account, reseed + remove, multi-circle | Accounts + circles [†] | Apple IDs, Apple-only [†] | Google accounts [†] | Phone-number groups [†] | Phone-number groups [†] | Phone-number groups [†] | Friend graph [†] | Ad-hoc links, 4-h default [B] | Manual broker/server config [†] | Homeserver accounts + rooms [†] |
-| Location off by default | Yes — sharing starts off, per person | No — standing tracking is the model [†] | Standing once enabled [†] | Timed or until-off [†] | Off; per-chat opt-in [†] | Off (no live mode exists) [A-adjacent] | Off; per-chat opt-in [†] | Off until Snap Map opt-in; Ghost Mode [†] | Off; per-share timer [A] | On while app runs [†] | Off; per-room share [B] |
+| Location off by default | Yes — sharing starts off, per person | No — standing tracking is the model [†] | Standing once enabled [†] | Timed or until-off [†] | Off; per-chat opt-in [†] | Off (no live mode exists) [B] | Off; per-chat opt-in [†] | Off until Snap Map opt-in; Ghost Mode [†] | Off; per-share timer [A] | On while app runs [†] | Off; per-room share [B] |
 | Precision control | **Geohash slider 3–9 per person; map previews what others see** | None | None | None | None | None (pin is exact) | None | City→precise modes [†] | None | None | None |
 | Temporary by default | Circle lifetimes; every wrap expires ≤16 days | No | No | Partly (1-h option) [†] | Yes (15 min–8 h) [†] | n/a | Yes (15 min–8 h) [†] | No (content-lifetime) [A] | **Yes — 12-h cap, 48-h history purge** [A] | No (Recorder keeps history) [A] | Share has duration; events persist in room [B] |
 | E2EE location content | Yes — NIP-59 gift wrap, NIP-44, on-device policy | **No** [A] | Yes (offline finding; vendor claim) [A] | No (server-processed; Timeline now on-device) [A] | **Yes** (incl. custom ratchet) [A] | Yes for what exists (static pin in E2EE message) | **No in groups** [A] | No claim for location [A] | No claim [A] | No — server plaintext by design [A] | Coordinates yes in E2EE rooms; **share-announcement state event unencrypted** [B] |
 | Provider reads plaintext location | Never — no provider; relays see kind-1059 wraps from ephemeral keys | Yes; warrant tier produces it [A] | No (vendor claim, PETS-disputed anonymity) [A] | Yes for sharing [A] | No (content) [A] | No content at all (court-proven near-nothing) [A] | Yes [A] | Yes [A] | Yes during share [A] | Your own server: yes, plaintext [A] | Homeserver: no coordinates in E2EE rooms; yes membership, timing, share-status [B] |
 | Retention | ≤16-day uniform wire expiry; no server accounts; self-purge | Raw ~30 d; **dwell profile 18 months**; policy open-ended [A] | Minimal (vendor claim) [A] | Timeline on-device since 2024 [A]; account data retained | Metadata retained; content transient [A] | **Two timestamps, court-proven** [A] | Cloud chats stored [A] | Content-lifetime [A] | ≤48 h personal, then aggregate [A] | You choose; plaintext history default [A] | Homeserver keeps (encrypted) events indefinitely [B] |
-| IP / account exposure | No accounts; IP visible to relay/host — Tor toggle shipped, onion endpoint pending | **IP logs at subpoena tier** [A] | Apple ID | Google account | Phone + Meta metadata [A-caveat] | Phone; nothing else queryable [A] | Phone + cloud | Snap account + device metadata [A] | Account/link based [B] | Your own infra (IP is yours) | Homeserver account; federation metadata [B] |
+| IP / account exposure | No accounts; IP visible to relay/host — Tor toggle shipped, onion endpoint pending | **IP logs at subpoena tier** [A] | Apple ID | Google account | Phone + Meta metadata [A] | Phone; nothing else queryable [A] | Phone + cloud | Snap account + device metadata [A] | Account/link based [B] | Your own infra (IP is yours) | Homeserver account; federation metadata [B] |
 | Coercion resistance | **App lock, decoy view, silent duress, withholding = sharing on the wire** | None; pause is visible [†] | None [†] | None [†] | None [†] | Screen lock, disappearing msgs [†] | None [†] | Ghost Mode is a visible setting [†] | None [†] | None [†] | None; `m.beacon_info` is a visible tell [B] |
 | Self-host / own relay / Tor | Static PWA + relay + tiles all self-hostable; multi-relay; Tor toggle (endpoint pending) | No | No | No | No | No (proxies only) [†] | No (MTProto proxies) [†] | No | No | **Yes — entirely** | **Yes — homeserver + own tileserver** [B] |
 | Background reliability | PWA foreground-only; native Android built, **hardware-unproven**; no iOS native | Mature [†] | OS-integrated, best-in-class [†] | Mature [†] | Good; live location primary-device only [A] | n/a (no live mode) | Mature [†] | App-open centric [†] | Good during share [†] | Documented platform pain (FGS notification, Doze batching, ~500 m iOS significant-change) [B] | Beta-grade [†] |
 | Safety actions | Buzz set + check-in in app; SOS/duress, geofences, DMS, meeting points library-tested (parked) | Longest list: SOS, crash, places [†] | Notify-on-arrive, device SOS [†] | Family Link alerts [†] | None | None | None | None | None | DIY via automations [†] | None |
+
+*Google Family Link is scored separately (§2 n⁴, §4): it shares the Google
+column's server-processed, account-bound properties and adds an asymmetric
+child-supervision model — an under-13 child cannot independently switch
+sharing off, so its coercion-resistance and location-control scores are
+lower than the Google Maps row's.*
 
 ## 4. Privacy & security findings, with citations
 
@@ -262,7 +282,7 @@ recorded below so it is never asserted.
   ([core.telegram.org/api/end-to-end](https://core.telegram.org/api/end-to-end),
   [FAQ](https://telegram.org/faq))
 
-### Google (Maps location sharing / Timeline; Family Link unassessed)
+### Google (Maps location sharing / Timeline)
 
 - **Provider-side processing, in Google's own words.** The Timeline privacy
   support page states location data associated with Timeline can be used to
@@ -275,8 +295,43 @@ recorded below so it is never asserted.
   **refuted 0–3** in verification and must not be made. Live location
   sharing itself, however, is processed through Google's servers against a
   Google account.
-- **Family Link was not assessed** (research agent failure, no claims either
-  way) — flagged as an open item, not scored.
+### Google Family Link (child-supervision location)
+
+Assessed 2026-07-06 in a targeted follow-up pass (the original run's agent
+failed). Documentation-grade **[B]**: verbatim from primary Google support
+pages, without the 3-vote adversarial pass the [A] claims carry. It is a
+parent-over-child supervision tool, not a mutual-trust circle product —
+included because the goal doc named it.
+
+- **Account-bound, provider-processed, no E2EE claim.** "Google Maps is
+  available for children with Google Accounts managed with Family Link", and
+  a parent "can find your child's Android and compatible Fitbit device
+  location in Family Link once device location sharing is turned on". The
+  child's real-time location runs through Google Maps location sharing on a
+  Google-managed account; no Family Link or Maps page makes an end-to-end
+  encryption claim for it, and Google processes Maps location sharing
+  server-side (the Google row's [A] finding). Google's general position is
+  transit-and-at-rest encryption, not E2EE — which leaves the location
+  provider-readable.
+  ([find & manage location](https://support.google.com/families/answer/7103413?hl=en),
+  [Maps & child account](https://support.google.com/families/answer/7307202?hl=en))
+- **Asymmetric by design — the inverse of coercion resistance.** "Children
+  under 13 (or the applicable age in your country) whose accounts are managed
+  with Family Link can only share their real-time location with their
+  parents", and the parent holds the "See your child's location" on/off
+  switch. Only "children over 13 … who had supervision added to their
+  previously existing Google Account can stop location sharing at any time".
+  For a mutual-trust circle this inverts invariant 1: sharing status is a
+  parent-held surveillance signal, not a user-held secret. Hence coercion
+  resistance 0 and location control 1.
+- **Retention and metadata track the Google account.** Location History for a
+  supervised child is a Google account setting; the parent-visible view is
+  live sharing, but identity, IP and account-data exposure follow Google's
+  standard model — scored as the Google row (MM 0, DR 1).
+- **Where it lands:** weighted **20**, tied with Telegram — real-time
+  location and mature background reliability, but provider-readable,
+  account-bound and asymmetric. It does not change the ranking above Flock,
+  Signal or WhatsApp.
 
 ### Snapchat Snap Map
 
@@ -467,6 +522,11 @@ Honest per-competitor lines the evidence supports (each is citable to §4):
   where you dwell for up to 18 months, and its current policy licenses
   precise location to business partners. Flock's relays can't read yours —
   there is nothing to license, retain, or subpoena."
+- *vs Google Family Link:* "Family Link is built for a parent to watch a
+  child — the location runs through Google on a managed account, with no
+  end-to-end encryption, and a young child can't turn it off. Flock is for a
+  circle of equals: everyone chooses what they share, and no company in the
+  middle can read it."
 - *vs Find My / WhatsApp:* "Encrypted content is not the same as no
   dossier: your identity, your circle and your connection records still
   live with Apple or Meta. Flock has no account to hold them under."
@@ -488,9 +548,10 @@ Honest per-competitor lines the evidence supports (each is citable to §4):
 What may **not** be claimed, per the refuted/unverified record: that Google
 holds a readable standing movement history (refuted 0–3); that Signal
 "encrypts metadata" (refuted — it *doesn't store* it, which is the correct
-and stronger phrasing); anything about Family Link (unassessed); and any
-background-reliability superiority for Flock until the hardware evidence
-exists.
+and stronger phrasing); and any background-reliability superiority for Flock
+until the hardware evidence exists. (Family Link, previously unassessed, was
+closed at grade [B] on 2026-07-06 — see §4; claims about it should carry that
+grade.)
 
 ## Appendix A: Flock evidence base (repo, 2026-07-06)
 
@@ -535,7 +596,8 @@ extracted, 25 verified → 23 confirmed, 2 refuted. Run 2 (self-hosted /
 decentralised segment): 25 sources, 119 claims, 25 selected → 15 confirmed,
 1 refuted, 9 left unverified when the run hit session limits (their
 subject-matter — OwnTracks/HA background behaviour, Android Doze detail —
-is carried above at grade [B] with verbatim quotes). Coverage gap: Google
-Family Link (search agent failed; explicitly unassessed). All verification
-votes and per-claim quotes are preserved in the session's workflow
-journals.
+is carried above at grade [B] with verbatim quotes). The original coverage
+gap — Google Family Link (search agent failed) — was closed by a targeted
+follow-up pass on 2026-07-06 at grade [B] (primary Google support pages, no
+3-vote adversarial verification). All verification votes and per-claim quotes
+are preserved in the session's workflow journals.
