@@ -107,6 +107,8 @@
     "apk:release": "sh native/build-apk.sh release",
     "apk:verify": "sh native/build-apk.sh verify",
     "attest": "node scripts/attest-release.mjs",
+    "attest:nostr": "node scripts/attest-nostr.mjs",
+    "sign:pwa": "node scripts/sign-pwa-manifest.mjs",
     "build:spike": "vite build -c vite.spike.config.ts",
     "preview:app": "vite preview",
     "rooms": "node server/rooms.mjs",

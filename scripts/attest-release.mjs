@@ -71,6 +71,25 @@ if (!existsSync(UNSIGNED_APK)) die(`no unsigned APK at ${APK_DIR}/app-release-un
 const commit = git('rev-parse', 'HEAD')
 const shortCommit = git('rev-parse', '--short', 'HEAD')
 
+// PWA build hash (workstream B of the verifiable-builds plan): when dist-app
+// holds this commit's build, record the sha256 of its asset manifest — the
+// same bytes the release key signs for the service worker
+// (scripts/sign-pwa-manifest.mjs) — so a forced web-asset push is at least
+// RECORDED on a channel we don't serve. Optional: an APK-only attest (or a
+// stale dist-app from another commit) simply omits it, loudly.
+const PWA_MANIFEST = join(ROOT, 'dist-app/asset-manifest.json')
+let pwaManifestSha256 = null
+if (existsSync(PWA_MANIFEST)) {
+  const pwaBuild = JSON.parse(readFileSync(PWA_MANIFEST, 'utf8')).build
+  if (pwaBuild === shortCommit) {
+    pwaManifestSha256 = sha256(PWA_MANIFEST)
+  } else {
+    console.error(`⚠ dist-app/asset-manifest.json is from build ${pwaBuild}, not ${shortCommit} — the PWA hash will NOT be recorded. Run 'npm run build:app' from this commit first if it should be.`)
+  }
+} else {
+  console.error('⚠ no dist-app/asset-manifest.json — the PWA hash will NOT be recorded (build the PWA first if it should be).')
+}
+
 // Ground truth for the build id is the APK's OWN embedded stamp, not the git hash —
 // guards against attesting a stale APK left over from a different commit (deploy.sh
 // reads the same version.json for exactly this reason).
@@ -94,13 +113,16 @@ const date = new Date(commitEpoch * 1000).toISOString().slice(0, 10)
 const existing = readFileSync(LEDGER, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
 if (existing.some((e) => e.build === build)) die(`build ${build} is already attested in the ledger`)
 
+// Schema /2 adds the optional pwaManifestSha256; /1 records (APK-only) remain
+// valid history in the ledger.
 const record = {
-  schema: 'flock.release-attestation/1',
+  schema: 'flock.release-attestation/2',
   build,
   commit,
   date,
   unsignedApkSha256: sha256(UNSIGNED_APK),
   signedApkSha256: sha256(SIGNED_APK),
+  ...(pwaManifestSha256 ? { pwaManifestSha256 } : {}),
 }
 
 // Human-readable tag message embedding the record + how to verify it.
@@ -111,10 +133,16 @@ const tagMessage = [
   `date:                 ${date}  (committer epoch, UTC)`,
   `unsigned APK sha256:  ${record.unsignedApkSha256}`,
   `signed APK sha256:    ${record.signedApkSha256}`,
+  ...(pwaManifestSha256 ? [`PWA manifest sha256:  ${pwaManifestSha256}`] : []),
   '',
   'The unsigned hash is the reproducibility anchor: rebuild it from this commit with',
   '`npm run apk:verify` and confirm it matches (docs/verify-apk.md). The signed hash',
   'identifies the exact file published at downloads/flock.apk.',
+  ...(pwaManifestSha256 ? [
+    'The PWA manifest hash pins the web build: it must equal the sha256 of the',
+    'asset-manifest.json served at flock.forgesworn.dev (signed for the service',
+    'worker by the same release key — scripts/sign-pwa-manifest.mjs).',
+  ] : []),
   '',
   JSON.stringify(record),
   '',
@@ -124,6 +152,7 @@ console.log(`→ attesting release ${build}`)
 console.log(`  commit:              ${commit}`)
 console.log(`  unsigned APK sha256: ${record.unsignedApkSha256}`)
 console.log(`  signed APK sha256:   ${record.signedApkSha256}`)
+if (pwaManifestSha256) console.log(`  PWA manifest sha256: ${pwaManifestSha256}`)
 
 // 1. Append the ledger line and commit it (its own commit; the tag points at the
 //    *source* commit the APK was built from, not this bookkeeping commit).

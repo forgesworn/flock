@@ -1,0 +1,14 @@
+# The flock PROJECT publishing key (Nostr npub) — the identity that signs the
+# per-release attestation note on channel #2 (scripts/attest-nostr.mjs).
+#
+# Distinct from any user key AND from the release-signing key
+# (native/release-signing-key): compromising one channel's key must not let an
+# attacker forge the other. The private half (nsec) is held in the
+# maintainer's out-of-band backup alongside the other release secrets and is
+# supplied at publish time via FLOCK_PROJECT_NSEC — never stored in the repo.
+#
+# PENDING: the key has not been minted yet. Channel #2 is built but not
+# operable until the maintainer mints the key, replaces PENDING below with the
+# real npub, and commits. attest-nostr refuses to publish while this reads
+# PENDING, and refuses any nsec that does not match the npub committed here.
+PENDING
