@@ -1,6 +1,9 @@
 # Verifiable builds — defending against a compelled malicious update
 
-**Status:** In progress — **APK reproducibility achieved & measured (2026-07-06)** ·
+**Status:** Complete except one external input — reproducibility, off-host attestation,
+dependency locking and the PWA layer are **shipped** (see the completion goal,
+`2026-07-06-verifiable-builds-completion-goal.md`); channel #2 publishing waits only on
+the **project Nostr key** being minted (`docs/transparency/project-npub`). ·
 **Date:** 2026-07-06 · **Owner:** flock
 
 > **Measured 2026-07-06.** The unsigned release APK is byte-for-byte reproducible:
@@ -172,16 +175,30 @@ The single most valuable addition, cheap to start:
 - [x] `docs/verify-apk.md` lets an outsider reproduce and diff without help.
 - [~] The release APK hash is published on ≥2 channels not served by our host.
       *(On-host anchor ships via `deploy.sh`; off-host channel #1 — the SSH-signed
-      `release/<build>` git tag + `RELEASES.jsonl` — now ships and is verifiable.
-      Channel #2, a project-key Nostr note, still to wire; and the first real release
-      tag is pushed at the next deploy.)*
-- [ ] The signed asset manifest ships with the PWA and the SW verifies against it.
+      `release/<build>` git tag + `RELEASES.jsonl` — ships and is verifiable.
+      Channel #2 — the project-key Nostr note — is **built and wired**
+      (`npm run attest:nostr`, 2026-07-06): it publishes the ledger record verbatim
+      as an addressable note and refuses to run until the project publishing key is
+      minted and `docs/transparency/project-npub` carries its npub. Operation waits
+      only on that key.)*
+- [x] The signed asset manifest ships with the PWA and the SW verifies against it.
+      **(Met 2026-07-06 — the build emits `asset-manifest.json`, `deploy.sh` signs it
+      with the release key (`ssh-keygen -Y sign`, namespace `flock-pwa-manifest`),
+      and the SW verifies the signature + every listed asset it caches, quiet-retry
+      on deploy races, persistent in-page warning on a confirmed mismatch, SRI on the
+      entry HTML as the SW-independent layer. The manifest hash rides the attestation
+      record, schema /2.)**
 - [x] An append-only, key-signed transparency record exists, one entry per release.
       **(Mechanism met 2026-07-06 — `docs/transparency/`, signed tags, verified
       end-to-end; entries accrue per release. Key is the dedicated release key, not
       yet the Nostr project key.)**
-- [ ] `get.html` / the in-app security note states the APK-is-verifiable, PWA-is-reach
-      trade-off plainly.
+- [x] `get.html` / the in-app security note states the APK-is-verifiable, PWA-is-reach
+      trade-off plainly. **(Met 2026-07-06 — `get.html` carries the trade-off + the
+      deeper off-host verify path; the in-app "This copy of flock" card, in advanced
+      settings, says it per-platform.)**
+- [x] *(Added by the completion goal)* Transitive dependency drift is **locked**, not
+      a stated future risk — committed Gradle lockfiles enforced on every
+      release/verify build; forced drift fails loudly. **(Met 2026-07-06.)**
 
 ## Related
 

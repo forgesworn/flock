@@ -87,9 +87,15 @@ ssh <user>@<host> 'sudo caddy validate --config /etc/caddy/Caddyfile --adapter c
 
 ```sh
 npm run deploy
-# = build dist-app + rsync to <user>@<host>:/var/www/flock
+# = build dist-app + sign the PWA asset manifest + rsync to <user>@<host>:/var/www/flock
 # override: HOST=user@host REMOTE_DIR=/srv/flock npm run deploy
 ```
+
+The build emits `asset-manifest.json` (every asset's sha256); the deploy signs it
+with the release key (`npm run sign:pwa`) so the service worker can verify what it
+caches and warn on a swap (`docs/transparency/README.md`). Without the key (a
+self-host) the manifest ships unsigned and browsers quietly skip the check — the
+canonical host must always sign.
 
 **Android APK (`/downloads/flock.apk`, linked from `/get.html`):** when a signed
 release build exists locally (`npm run apk:release` — see `native/README.md`),

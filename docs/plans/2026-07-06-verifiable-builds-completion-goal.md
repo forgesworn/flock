@@ -1,8 +1,9 @@
 # Verifiable builds — completing the defence (Gradle locking · PWA tamper-evidence · channel #2)
 
-**Status:** Planned — the reproducible-APK + off-host-attestation **core is shipped**
-and the **first real release is attested** (`release/dfaa8a9`, 2026-07-06). This goal
-doc covers the **remaining tail** only. · **Date:** 2026-07-06 · **Owner:** flock
+**Status:** Done (2026-07-06) — A and B are shipped and proven; C is **built, tested
+and wired** but publishes nothing until the maintainer mints the **project Nostr
+key** and fills `docs/transparency/project-npub` (the one input this work cannot
+supply itself). · **Date:** 2026-07-06 · **Owner:** flock
 
 > This is the execution plan for the last open items of
 > [`2026-07-06-verifiable-builds.md`](2026-07-06-verifiable-builds.md) (the umbrella
@@ -99,11 +100,18 @@ pass.
 
 **Acceptance.**
 
-- [ ] Lockfiles are committed (repo-tracked) and injected into the generated `android/`
+- [x] Lockfiles are committed (repo-tracked) and injected into the generated `android/`
       by `patch-android.mjs`; a fresh clone → `cap add` → build uses them.
-- [ ] A clean rebuild resolves identical dependency versions; a forced drift **fails** the
-      build with a lock mismatch.
-- [ ] `docs/verify-apk.md`'s "transitive dependency drift" known-limit is updated from
+      **(Met 2026-07-06 — better than copy-in: `flock-locking.gradle` points every
+      project's `lockFile` straight at the committed `native/gradle-locks/`, so the
+      locks never live in the generated tree at all; only the Gradle-fixed
+      `buildscript-gradle.lockfile` is copied in. Proven by wiping `android/` and
+      rebuilding from scratch.)**
+- [x] A clean rebuild resolves identical dependency versions; a forced drift **fails** the
+      build with a lock mismatch. **(Met — okhttp 4.12.0→4.12.1 fails with "Dependency
+      version enforced by Dependency Locking"; release/verify builds additionally refuse
+      to run without the lock store.)**
+- [x] `docs/verify-apk.md`'s "transitive dependency drift" known-limit is updated from
       *future hardening* to *locked*.
 
 **Risks.** Locking every configuration can surface resolution conflicts that were
@@ -166,12 +174,20 @@ verifiable. That is *why* the APK exists as the artefact we stake the claim on.
 
 **Acceptance.**
 
-- [ ] `get.html` + the in-app security note carry the APK-is-verifiable / PWA-is-reach
-      trade-off plainly. *(Can ship first, independently.)*
-- [ ] A signed asset manifest ships with the PWA; the SW verifies cached assets against it
-      and surfaces a visible mismatch.
-- [ ] SRI on the entry HTML for the main bundle.
-- [ ] The PWA build hash is recorded in the off-host transparency record.
+- [x] `get.html` + the in-app security note carry the APK-is-verifiable / PWA-is-reach
+      trade-off plainly. **(Met 2026-07-06 — plus the "This copy of flock" card in
+      advanced settings.)**
+- [x] A signed asset manifest ships with the PWA; the SW verifies cached assets against it
+      and surfaces a visible mismatch. **(Met — key decision: the release-signing key is
+      reused, namespace `flock-pwa-manifest`; signature format is SSHSIG so custody never
+      changes, verified in-browser via WebCrypto Ed25519 with the exact shipped verifier
+      (`sw-verify.js`) vitest-tested against real `ssh-keygen` output. Verified
+      end-to-end: intact→quiet, swapped index.html→banner, bad sig→banner,
+      unsigned self-host→quiet.)**
+- [x] SRI on the entry HTML for the main bundle. **(Met — sha384 from final written
+      bytes, `index.html` + `get.html`; browser-blocked swap verified.)**
+- [x] The PWA build hash is recorded in the off-host transparency record. **(Met —
+      `pwaManifestSha256` in ledger + tag message, schema `flock.release-attestation/2`.)**
 
 **Risks.** A false-positive mismatch banner (e.g. a mid-deploy race between a new
 `index.html` and old cached assets) would cry wolf — gate the check on a fully-consistent
@@ -208,9 +224,14 @@ key exists and its npub is committed/published, this can be *built* but not *ope
 
 **Acceptance.**
 
-- [ ] Committed project npub + a `attest-nostr` step that publishes one signed note per
-      release, reproducing the tag/ledger record.
-- [ ] `docs/transparency/README.md` documents the three-channel cross-check.
+- [~] Committed project npub + a `attest-nostr` step that publishes one signed note per
+      release, reproducing the tag/ledger record. **(The step is built, tested and wired
+      — `npm run attest:nostr`, kind 30078, `d=flock-release-<build>`, content = the
+      ledger record verbatim, selftest/dry-run prove the chain. The npub slot is
+      committed (`docs/transparency/project-npub`) but reads PENDING until the
+      maintainer mints the project key — the one remaining input; the tool refuses to
+      publish before then and refuses an nsec that doesn't match the committed npub.)**
+- [x] `docs/transparency/README.md` documents the three-channel cross-check.
 
 ---
 

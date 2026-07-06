@@ -86,8 +86,9 @@ compromised or compelled host cannot swap both the APK and its hash unnoticed:
    ```
 
    The tag message carries `unsigned APK sha256: …` — it must equal the hash you
-   rebuilt above and the on-host anchor. (A project-key Nostr note is the intended
-   third, fully-independent channel; see `docs/transparency/README.md`.)
+   rebuilt above and the on-host anchor. (A project-key Nostr note is the third,
+   fully-independent channel — built and wired via `npm run attest:nostr`, publishing
+   once the project key is minted; see `docs/transparency/README.md`.)
 
 Match across channels → the shipped release is built from this exact source. Then
 confirm the APK you actually downloaded is properly signed and by the expected key:

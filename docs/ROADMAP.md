@@ -711,13 +711,30 @@ Two halves that compose into one feature:
     to the forge and **all four channels verified to agree at the edge**: the downloadable
     `downloads/flock.apk` re-hashes to the attested signed hash, `flock.apk.unsigned.sha256`
     == the reproducible anchor, `apk.json` == build `dfaa8a9`, and the off-host signed tag +
-    ledger carry the same record. Remaining: a project-key **Nostr note** as channel #2;
-    **repo made public** so outsiders can see the tags. See `docs/transparency/README.md`.
-  - [ ] **Gradle dependency locking** — pin transitive artefacts against far-future
-    drift.
-  - [ ] **PWA tamper-evidence** — signed asset manifest + SRI, honest ceiling stated;
-    **steer at-risk users to the APK** (the web app can't match a signed, reproducible
-    binary served from a compellable host).
+    ledger carry the same record. Remaining: **repo made public** so outsiders can see
+    the tags. See `docs/transparency/README.md`.
+  - [~] **Channel #2 — project-key Nostr note: BUILT 2026-07-06, awaiting the key.**
+    `npm run attest:nostr` publishes the ledger record verbatim as a NIP-78 addressable
+    note (kind 30078, `d=flock-release-<build>`) signed by the project key — no shared
+    failure/compulsion domain with our host or the forge. Selftest/dry-run prove the
+    chain; publishing refuses to run until the maintainer mints the project key and
+    replaces `docs/transparency/project-npub`'s PENDING with the real npub.
+  - [x] **Gradle dependency locking — DONE 2026-07-06.** Every configuration the release
+    build resolves (app, all Capacitor plugin projects, the AGP/Kotlin buildscript
+    classpath) is pinned by committed lockfiles (`native/gradle-locks/`, injected into the
+    generated project by `patch-android.mjs` — regeneration can't drop them). Proven both
+    ways: a wiped `android/` rebuilds against the locks; a forced drift fails loudly.
+    Deliberate updates: `sh native/build-apk.sh locks` → reviewable diff.
+  - [x] **PWA tamper-evidence — DONE 2026-07-06.** The build emits an asset manifest
+    ({path: sha256}) signed at deploy with the release key (`ssh-keygen -Y sign`,
+    namespace `flock-pwa-manifest`); the service worker verifies the signature (WebCrypto
+    Ed25519, `sw-verify.js` — the exact shipped verifier is vitest-tested against real
+    ssh-keygen output) and every listed asset it caches, with quiet-retry on deploy races
+    and a persistent in-page warning on a confirmed mismatch. SRI on the entry HTML makes
+    the browser itself reject a swapped bundle. The manifest hash rides the attestation
+    record (schema /2). Honest ceiling stated in `get.html` + the in-app "This copy of
+    flock" card, which **steer at-risk users to the APK** — the artefact the strong claim
+    rests on.
   - Pairs with the warrant canary + `.onion` endpoint (see `docs/PRIVACY.md`
     "When a court comes knocking").
 
