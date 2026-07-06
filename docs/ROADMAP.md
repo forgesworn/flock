@@ -9,8 +9,9 @@ GrapheneOS (built, hardware-measured GREEN, and shipped 2026-07-05 as release
 `0294b8c`; see "Native background publish" below and Phase G). The only standing
 items that need things code can't provide are Darren-side: **relay #2** (runbook
 ready — `docs/runbooks/second-relay.md`, blocked only on a host) and **publishing
-`keystore-kit` to npm**. Remaining native work is validation — the outdoor walk +
-a stationary deep-Doze pass — not a build.
+`keystore-kit` to npm**. Remaining native work is validation — the outdoor walk is
+now **MEASURED GREEN (2026-07-06, `13266fc`, two-phone; see "Native background publish")**;
+only the stationary deep-Doze pass is left — not a build.
 
 ## MVP scope (2026-07)
 
@@ -71,10 +72,20 @@ and shipped (release `0294b8c` live on flock.forgesworn.dev).
   decrypted native beacons at +7 s (first background fix) and every ~50 s after,
   geohashes changing — a suspended WebView can't publish. Signed release APK
   `0294b8c` built (same key → installs over the top) and deployed.
-- **Remaining (validation, not build):** the outdoor **walk** (sustained movement,
-  out of deep Doze) and the stationary deep-Doze pass. Follow-ups in the goal doc:
-  run the native GPS service only while backgrounded; drop the bg-geo dependency
-  once battle-tested.
+- **THE WALK — MEASURED GREEN (2026-07-06, on current main `13266fc`):** two-phone
+  test (GrapheneOS Pixel = sharer, Samsung A32 = observer). With the Pixel **locked,
+  screen-off, in pocket, OUTDOORS, at EXACT (~2 m) precision**, the observer tracked
+  its fresh moving position — member card `within 610 m · last seen 14:28` (frozen) →
+  `within 2 m · last seen 15:02 · out · just now`, and the pin **moved** Beacon Hill Rd
+  → Preston Rd/Winstanley Dr (exact dot, no coarse cell). End-to-end confirmation the
+  native publisher pushes fresh location through a locked/Dozing screen. **Method note:
+  must be run at exact precision AND outdoors** — coarse (~610 m) masks movement inside
+  one geohash cell, and indoors there is no GPS fix to publish at any precision; a frozen
+  last-seen under coarse/indoors is expected, not a failure.
+- **Remaining (validation, not build):** the **stationary deep-Doze pass** (long screen-off
+  with no movement — the walk keeps the device out of deep Doze). Follow-ups in the goal doc:
+  run the native GPS service only while backgrounded; drop the bg-geo dependency once
+  battle-tested.
 
 ## Chat-led Home & reliability (2026-07-04 pm)
 
