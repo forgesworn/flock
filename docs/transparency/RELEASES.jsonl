@@ -1,0 +1,1 @@
+{"schema":"flock.release-attestation/1","note":"Append-only release-attestation ledger. One JSON object per line, oldest first. Each real release is appended by scripts/attest-release.mjs and mirrored by a signed git tag release/<build> pointing at <commit>. See docs/transparency/README.md. This first line is the schema marker, not a release."}

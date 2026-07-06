@@ -1,0 +1,17 @@
+# Authorised release-attestation signers for flock (OpenSSH allowed_signers format).
+#
+# `git verify-tag` / `ssh-keygen -Y verify` checks a signed release tag against
+# this file. The principal is the project's release identity, NOT any individual —
+# the matching private half lives only in the maintainer's out-of-band backup
+# (native/release-signing-key, gitignored), like the APK keystore.
+#
+# Rotating the key = append the new line here (keep the old so historical tags
+# still verify) and record the change in a signed commit. Never delete a line a
+# past tag was signed with.
+#
+# Verify a release tag:
+#   git config gpg.ssh.allowedSignersFile docs/transparency/allowed_signers
+#   git verify-tag release/<build>
+#
+# principal                              options            key
+releases@flock.forgesworn.dev namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII5D3Fwt4jTxxrdbyXIP1DE/iiS9teXADyDQC6CbB1sS
