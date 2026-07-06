@@ -40,6 +40,26 @@ VITE_TILE_URL=https://tiles.example.com/{z}/{x}/{y}.png \
 npm run build:app
 ```
 
+## Before you deploy — run the checks locally
+
+CI (`.github/workflows/ci.yml`) runs the fast gates on every push — lint, typecheck,
+build, unit tests, and the Kotlin native parity suite. The **two-person Playwright
+e2e suite is not in CI**: it drives two real identities through a **live Nostr relay**
+and needs a **live Vite dev server**, so it runs on your machine before a deploy,
+where that infra is at hand (and where it can't hammer the production relay or burn
+Actions minutes on a private repo).
+
+```sh
+npm test              # unit (vitest) — fast
+npm run test:e2e      # two-person e2e; Playwright self-starts the dev server
+                      #   (webServer + reuseExistingServer — playwright.config.ts).
+                      #   Targeted spec (the full suite is >10 min):
+                      #   npm run test:e2e -- e2e/quick-action.spec.ts
+```
+
+Uses `relay.trotters.cc` by default; override with `FLOCK_E2E_RELAY` to point at a
+local relay. Don't edit source mid-run — Vite HMR reloads the app under the test.
+
 ## Canonical deploy — flock.forgesworn.dev (Hetzner + Caddy)  ✅ LIVE
 
 Shared box (`deploy@95.217.39.110`) running many sites. The deploy is **fully

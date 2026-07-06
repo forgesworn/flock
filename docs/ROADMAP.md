@@ -651,8 +651,11 @@ Two halves that compose into one feature:
     points at the lock. Signet sign-in remains the stronger path (key never in
     flock at all).
 - [~] **Release CI** — GitHub Actions gates live (`.github/workflows/ci.yml`: lint/
-  typecheck/build/unit + the full two-person e2e suite, SHA-pinned actions, report
-  artefact on failure). anvil publishing deliberately omitted while the library is
+  typecheck/build/unit + the Kotlin native JVM parity suite, SHA-pinned actions).
+  The **two-person e2e suite runs locally**, not in CI (`npm run test:e2e` before a
+  deploy; see `docs/DEPLOY.md`) — it needs a live dev server + live relay, so running
+  it on every push would hammer the production relay and burn Actions minutes on a
+  private repo. anvil publishing deliberately omitted while the library is
   private/unpublished.
 - [~] **Verifiable builds — the compelled-update defence** (plan:
   `docs/plans/2026-07-06-verifiable-builds.md`; procedure: `docs/verify-apk.md`).

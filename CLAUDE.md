@@ -23,6 +23,9 @@ night-out sharing over Nostr.
 
 - `npm run build` — compile the library (`src/` → `dist/`)
 - `npm test` — run library tests (vitest)
+- `npm run test:e2e` — two-person Playwright e2e over a live relay; **runs locally, not
+  in CI** (needs a live dev server + relay — see `docs/DEPLOY.md`). Playwright self-starts
+  the dev server; target one spec with `-- e2e/<file>.spec.ts` (full suite is >10 min).
 - `npm run typecheck` / `npm run lint` — library type-check / lint (`src/` only)
 - `npm run smoke` — build + run the Nostr transport round-trip smoke test
   (in-process; set `FLOCK_RELAY=wss://…` to also round-trip via a live relay)
