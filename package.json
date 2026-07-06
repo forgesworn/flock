@@ -106,6 +106,7 @@
     "apk": "sh native/build-apk.sh debug",
     "apk:release": "sh native/build-apk.sh release",
     "apk:verify": "sh native/build-apk.sh verify",
+    "attest": "node scripts/attest-release.mjs",
     "build:spike": "vite build -c vite.spike.config.ts",
     "preview:app": "vite preview",
     "rooms": "node server/rooms.mjs",

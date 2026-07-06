@@ -75,13 +75,22 @@ compromised or compelled host cannot swap both the APK and its hash unnoticed:
 
 1. **On the download host** — `https://flock.forgesworn.dev/downloads/flock.apk.unsigned.sha256`
    (emitted by `deploy/deploy.sh` alongside the APK).
-2. **Off-host** — a signed git tag and/or a Nostr note from the project key
-   (the append-only transparency record, per the plan doc). *This* is the copy
-   that matters: it lives somewhere we do not serve, so a targeted build absent
-   from it is anomalous on its face.
+2. **Off-host** — an **SSH-signed git tag** `release/<build>` whose message embeds
+   the same hash, plus the append-only ledger `docs/transparency/RELEASES.jsonl`.
+   This rides git (not our web host) to every clone and the forge, so a targeted
+   build absent from this signed history is anomalous on its face. Verify it:
 
-Match on both → the shipped release is built from this exact source. Then confirm
-the APK you actually downloaded is properly signed and by the expected key:
+   ```sh
+   git config gpg.ssh.allowedSignersFile docs/transparency/allowed_signers
+   git verify-tag release/<build>    # → Good "git" signature for releases@flock.forgesworn.dev
+   ```
+
+   The tag message carries `unsigned APK sha256: …` — it must equal the hash you
+   rebuilt above and the on-host anchor. (A project-key Nostr note is the intended
+   third, fully-independent channel; see `docs/transparency/README.md`.)
+
+Match across channels → the shipped release is built from this exact source. Then
+confirm the APK you actually downloaded is properly signed and by the expected key:
 
 ```sh
 apksigner verify --print-certs flock.apk     # exit 0; certificate SHA-256 matches the published fingerprint

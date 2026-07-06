@@ -25,6 +25,9 @@ ios/
 .gradle/
 *.keystore
 native/keystore.properties
+# Release-attestation signing key — private half never committed (the .pub IS),
+# same posture as the keystore: back it up out-of-band (docs/transparency/README.md).
+native/release-signing-key
 native/crypto-tests/.gradle/
 native/crypto-tests/build/
 native/vectors/kotlin-wraps.json

@@ -664,9 +664,15 @@ Two halves that compose into one feature:
     wall-clock input (build date now derives from the commit epoch, TZ-independent —
     `vite.config.ts`); added `npm run apk:verify` (unsigned build + anchor hash, key
     untouched) and anchor publication in `deploy.sh` (`flock.apk.unsigned.sha256`).
-  - [ ] **Off-host / transparency-log publication** — mirror the anchor hash on ≥2
-    channels not on our host (signed git tag / Nostr note, append-only build → commit
-    → hash), so a targeted build absent from the log stands out. *(Operational.)*
+  - [~] **Off-host / transparency-log publication** — **mechanism shipped 2026-07-06.**
+    Append-only, SSH-signed record that rides git off our host: `npm run attest`
+    (`scripts/attest-release.mjs`) appends `docs/transparency/RELEASES.jsonl` and mints a
+    signed `release/<build>` tag embedding `build → commit → unsigned/signed APK sha256`,
+    verifiable with `git verify-tag` against `docs/transparency/allowed_signers`. Dedicated
+    ed25519 release key (gitignored like the keystore, `.pub` committed). Signing chain
+    proven end-to-end (selftest passes; rogue key rejected). Remaining: push the first real
+    release tag; a project-key **Nostr note** as channel #2; **repo made public** so outsiders
+    can see the tags. See `docs/transparency/README.md`.
   - [ ] **Gradle dependency locking** — pin transitive artefacts against far-future
     drift.
   - [ ] **PWA tamper-evidence** — signed asset manifest + SRI, honest ceiling stated;

@@ -9,8 +9,19 @@
 > the build stamp now derives from the commit, timezone-independent (`vite.config.ts`).
 > A verifier entrypoint (`npm run apk:verify`) and the published anchor hash
 > (`deploy/deploy.sh` → `flock.apk.unsigned.sha256`) ship. Procedure:
-> `docs/verify-apk.md`. **Remaining:** out-of-band/transparency-log publication,
-> Gradle dependency locking, and the PWA side (manifest/SRI).
+> `docs/verify-apk.md`.
+>
+> **Off-host transparency added 2026-07-06.** The anchor is no longer only on our
+> host: an append-only, SSH-signed record now rides git. A dedicated ed25519
+> release key (`native/release-signing-key`, gitignored like the keystore; `.pub`
+> + `docs/transparency/allowed_signers` committed) signs a `release/<build>` tag
+> whose message embeds `build → commit → unsigned/signed APK sha256`, mirrored in
+> `docs/transparency/RELEASES.jsonl`. `npm run attest` mints it (local only, never
+> pushes, never touches the APK key); `git verify-tag` checks it. Signing chain
+> proven end-to-end (`npm run attest -- --selftest`; a rogue key is correctly
+> rejected). **Remaining:** publish the first real release tag; a second off-host
+> channel (project-key Nostr note); making the repo public so outsiders can see the
+> tags; Gradle dependency locking; the PWA side (manifest/SRI).
 
 ## Why this exists
 
@@ -91,10 +102,15 @@ signed, reproducible, out-of-band-attested binary.
 2. **Document the rebuild.** A `docs/verify-apk.md`: exact toolchain versions, the one
    command to rebuild, and how to diff against the published hash — written so an
    outsider with no flock context can follow it (F-Droid-style).
-3. **Publish the hash out-of-band.** `deploy.sh` already emits `flock-<build>.apk.sha256`
-   beside the download. Additionally publish that hash where we do **not** control the
-   bytes: a signed git tag, a Nostr note from the project key, the release notes on a
-   third-party forge/mirror — pick ≥2. The point is a comparison anchor off our host.
+3. **Publish the hash out-of-band. ✅ MECHANISM DONE (2026-07-06); channels accrue.**
+   `deploy.sh` emits the on-host anchor; additionally the hash is now attested in an
+   append-only, SSH-signed record that rides git off our host — `scripts/attest-release.mjs`
+   (`npm run attest`) appends `docs/transparency/RELEASES.jsonl` and mints a signed
+   `release/<build>` tag, verifiable with `git verify-tag` against
+   `docs/transparency/allowed_signers`. Chain proven (selftest passes; rogue key
+   rejected). Still to do: the first *real* release tag; a Nostr note from the project
+   key as the second fully-independent channel; repo made public so the tags are
+   externally visible. See `docs/transparency/README.md`.
 4. **Independent mirror.** Host the signed release APK on at least one channel we don't
    operate (a mirror, IPFS/CID, or a well-known third party) so "download" and "verify"
    are not both answered by the same server.
@@ -154,11 +170,16 @@ The single most valuable addition, cheap to start:
 - [x] Two independent release builds of the same tag produce identical APK content
       hashes. **(Met 2026-07-06 — four builds, identical unsigned APK.)**
 - [x] `docs/verify-apk.md` lets an outsider reproduce and diff without help.
-- [ ] The release APK hash is published on ≥2 channels not served by our host.
-      *(On-host anchor ships via `deploy.sh`; the off-host/transparency-log copy —
-      signed git tag / Nostr note — is the operational half still to do.)*
+- [~] The release APK hash is published on ≥2 channels not served by our host.
+      *(On-host anchor ships via `deploy.sh`; off-host channel #1 — the SSH-signed
+      `release/<build>` git tag + `RELEASES.jsonl` — now ships and is verifiable.
+      Channel #2, a project-key Nostr note, still to wire; and the first real release
+      tag is pushed at the next deploy.)*
 - [ ] The signed asset manifest ships with the PWA and the SW verifies against it.
-- [ ] An append-only, project-key-signed transparency record exists, one entry per release.
+- [x] An append-only, key-signed transparency record exists, one entry per release.
+      **(Mechanism met 2026-07-06 — `docs/transparency/`, signed tags, verified
+      end-to-end; entries accrue per release. Key is the dedicated release key, not
+      yet the Nostr project key.)**
 - [ ] `get.html` / the in-app security note states the APK-is-verifiable, PWA-is-reach
       trade-off plainly.
 
