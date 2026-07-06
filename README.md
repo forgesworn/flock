@@ -14,8 +14,14 @@ personas/epochs, multi-circle, app lock + decoy view — see
 pick-me-up, geofences, dead-man's-switch, rendezvous/meeting points, off-grid,
 spoken verification) is **parked post-MVP**: it lives on fully tested in the
 `@forgesworn/flock` library (see the table below) but is no longer wired into
-the app UI. **Not yet:** delivery with the app fully closed — that needs the
-native shell, gated on the Phase 0 GrapheneOS spike. Start with
+the app UI. **Delivery with the app closed now works:** the Android shell
+publishes location natively (Kotlin) while the phone is locked and in deep Doze —
+hardware-measured GREEN on GrapheneOS and shipped (see `docs/ROADMAP.md`). The
+release **APK is the verifiable artefact**: it is reproducible from a tagged
+commit and its hash is attested off-host in a signed transparency log, so a
+targeted backdoored build is detectable — see
+[`docs/verify-apk.md`](docs/verify-apk.md) and [`SECURITY.md`](SECURITY.md).
+Start with
 [`docs/VISION.md`](docs/VISION.md) (the goal — why this exists, who it's for,
 the design principles that aren't up for negotiation),
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the stack & why),

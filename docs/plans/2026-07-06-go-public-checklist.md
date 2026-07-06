@@ -1,16 +1,31 @@
 # Go-public checklist — forgesworn/flock
 
-**Status:** Prep — secrets audit PASSED (2026-07-06) · **Owner:** Darren (the flip
-itself is a GitHub setting, maintainer-only)
+**Status:** Prep **essentially complete** — secrets audit re-PASSED over the full
+277-commit history (2026-07-06), `SECURITY.md` added, README refreshed, first real
+release already attested & published (`release/dfaa8a9`). **Only maintainer steps
+remain:** the DEPLOY.md username-redaction call + confirm key-only SSH (§2), then
+the flip itself. · **Owner:** Darren (the flip is a GitHub setting, maintainer-only)
 
 Making `forgesworn/flock` public exposes **every past commit**, not just the current
 tree. This is the pre-flight. It also *unlocks* the reproducible-build + attestation
 work: `docs/verify-apk.md` and the signed `release/<build>` tags only become
 externally verifiable once outsiders can actually clone the source.
 
-## 1. Secrets audit — ✅ PASSED (2026-07-06)
+## 1. Secrets audit — ✅ RE-PASSED (2026-07-06, full 277-commit history)
 
-Scanned the **entire history** (`git rev-list --all`), not just HEAD:
+Re-run this session over the updated history (new release commits + the
+release-signing key landing). Method corrected to grep every commit
+(`git grep -E <pattern> $(git rev-list --all)` — note `git grep` has no commit
+`--stdin`, so the rev-list must be a positional arg list). Results, all clean:
+**no** `BEGIN … PRIVATE KEY` / `nsec1…` / `xprv…` in any blob; **no** sensitive
+path (`*.keystore`, `keystore.properties`, `release-signing-key`, `.env`, `*.pem`,
+`*.p12`, `*.jks`) ever committed; all three private keys gitignored + untracked;
+the only `storePass=` hits are `build-apk.sh`'s `printf`/`sed` template (no value)
+and this doc; the only "secret" match is the code identifier
+`const secret = generateStorageSecret()` (a runtime RNG call, not a literal).
+
+Original 2026-07-06 audit (still valid), scanned the **entire history**
+(`git rev-list --all`), not just HEAD:
 
 - **No sensitive file ever committed** — checked `native/release.keystore`, any
   `*.keystore`, `native/keystore.properties`, `native/release-signing-key` (the APK
@@ -44,13 +59,19 @@ template, history must be rewritten (`git filter-repo`) *before* going public.
 
 - [x] `LICENSE` present (MIT — matches `package.json`).
 - [x] `README.md` present.
-- [ ] **`SECURITY.md`** — for a coercion-resistance product this matters: how to
-  report a vulnerability, the response expectation, and pointers to the warrant
-  canary + the transparency log (`docs/transparency/`) and `docs/PRIVACY.md`
-  "When a court comes knocking". *Add before or with the flip.*
-- [ ] **README framing** — the header still says "Private repo — Owned by us". Update
-  the public-facing framing (what flock is, install = APK is the verifiable artefact,
-  link `docs/verify-apk.md`) so a first-time visitor lands well.
+- [x] **`SECURITY.md`** — ✅ added (2026-07-06). Private reporting via GitHub
+  private vulnerability reporting (never a public issue); the coercion-resistance
+  invariants as the highest-severity scope; response expectation; pointers to
+  `docs/PRIVACY.md` "When a court comes knocking", `FLOCK.md` §6, `docs/verify-apk.md`,
+  and `docs/transparency/`. Does **not** overclaim the warrant canary (still planned,
+  not published). **Maintainer step:** enable *Private vulnerability reporting* in the
+  repo's Security settings (a GitHub toggle, like the flip) so that channel is live.
+- [x] **README framing** — ✅ refreshed (2026-07-06). Replaced the stale "**Not yet:**
+  delivery with the app fully closed" line (that gate is now shipped + measured GREEN)
+  with the shipped native-background-publish status **and** the "the APK is the
+  verifiable artefact" framing, linking `docs/verify-apk.md` + `SECURITY.md`. (The
+  "Private repo — Owned by us" line lives in `CLAUDE.md`, internal dev guidance, not
+  the README; honest until the flip.)
 - [ ] **CONTRIBUTING.md** (optional) — only if inbound contributions are wanted;
   a private-by-default posture may prefer "issues welcome, PRs by discussion".
 
@@ -64,12 +85,18 @@ template, history must be rewritten (`git filter-repo`) *before* going public.
 
 ## Sequence
 
-1. Add `SECURITY.md` + refresh the README header. *(code — can do now)*
-2. Confirm key-only SSH on the host; decide on the username redaction. *(Darren)*
-3. Re-run the §1 audit immediately before flipping. *(code — can do now)*
-4. Flip to public on GitHub. *(Darren — maintainer-only)*
-5. Drop the "private today" caveats; push the first real `release/<build>` tag at
-   the next deploy so there is a live, externally-verifiable attestation on day one.
+1. ~~Add `SECURITY.md` + refresh the README header.~~ ✅ **done 2026-07-06.**
+2. Confirm key-only SSH on the host; decide on the username redaction. *(Darren —
+   still open; see §2. Recommendation stands: confirm key-only, then accept.)*
+3. ~~Re-run the §1 audit immediately before flipping.~~ ✅ **re-passed 2026-07-06**
+   over the full history — but history keeps moving, so **run it once more in the
+   same session as the flip** (the two scans in §1).
+4. Flip to public on GitHub. *(Darren — maintainer-only)* + enable *Private
+   vulnerability reporting* in Security settings so `SECURITY.md`'s channel is live.
+5. Drop the "private today" caveats in `docs/transparency/README.md` +
+   `docs/verify-apk.md`. **The first real `release/<build>` tag is already published**
+   (`release/dfaa8a9`, 2026-07-06) — so there is a live, externally-verifiable
+   attestation waiting the moment the repo goes public; nothing to build here.
 
 ## Related
 
