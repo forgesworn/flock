@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { deriveVerificationWord } from 'canary-kit'
-import { spokenWordsFor, checkSpokenWord, spokenCounter, SPOKEN_VERIFY } from './spokenverify.js'
+import {
+  spokenWordsFor,
+  checkSpokenWord,
+  spokenCounter,
+  estimateSpokenVerificationRisk,
+  SPOKEN_VERIFY,
+} from './spokenverify.js'
 
 // Deterministic fixtures — patterned hex is valid HMAC input (no curve check).
 const SEED = 'a'.repeat(64)
@@ -112,5 +118,22 @@ describe('SPOKEN_VERIFY parameters', () => {
   it('fixes a single word and a symmetric drift tolerance in one place', () => {
     expect(SPOKEN_VERIFY.wordCount).toBe(1)
     expect(SPOKEN_VERIFY.tolerance).toBeGreaterThanOrEqual(1)
+  })
+
+  it('locks the accepted candidate budget for the current circle roster', () => {
+    const risk = estimateSpokenVerificationRisk(MEMBERS)
+    expect(risk.candidates).toBe(21)
+    expect(risk.groupCandidates).toBe(3)
+    expect(risk.normalIdentityCandidates).toBe(9)
+    expect(risk.duressCandidates).toBe(9)
+    expect(risk.tokenSpace).toBe(2048)
+    expect(risk.singleAttemptSuccessProbability).toBeLessThan(0.011)
+  })
+
+  it('shows why very large one-word rosters need app-level throttling or longer phrases', () => {
+    const risk = estimateSpokenVerificationRisk(100)
+    expect(risk.candidates).toBe(603)
+    expect(risk.singleAttemptSuccessProbability).toBeGreaterThan(0.25)
+    expect(risk.singleAttemptSuccessProbability).toBeLessThan(0.26)
   })
 })

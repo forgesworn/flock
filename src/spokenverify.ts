@@ -21,7 +21,15 @@
  * key), keeping encryption and transport at the edge.
  */
 
-import { deriveVerificationWord, deriveDuressWord, verifyWord, getCounter, type VerifyStatus } from 'canary-kit'
+import {
+  deriveVerificationWord,
+  deriveDuressWord,
+  verifyWord,
+  getCounter,
+  estimateCanaryVerificationRisk,
+  type CanaryVerificationRisk,
+  type VerifyStatus,
+} from 'canary-kit'
 
 /**
  * flock's spoken-verify parameters, fixed in ONE audited place.
@@ -47,6 +55,23 @@ export const SPOKEN_VERIFY = {
   /** Word rotation period (seconds). One hour — fresh, but stable across a pick-up. */
   rotationSeconds: 3600,
 } as const
+
+/** Candidate-surface estimate for flock's spoken-pickup verifier settings. */
+export type SpokenVerificationRisk = CanaryVerificationRisk
+
+/**
+ * Estimate the online guessing surface for flock's spoken-pickup verifier.
+ *
+ * This binds canary-kit's generic estimator to flock's fixed word count and
+ * tolerance so tests and UI policy can reason about the exact deployed settings.
+ */
+export function estimateSpokenVerificationRisk(memberPubkeys: readonly string[] | number): SpokenVerificationRisk {
+  return estimateCanaryVerificationRisk({
+    identities: typeof memberPubkeys === 'number' ? memberPubkeys : memberPubkeys.length,
+    encoding: { format: 'words', count: SPOKEN_VERIFY.wordCount },
+    tolerance: SPOKEN_VERIFY.tolerance,
+  })
+}
 
 /**
  * The counter both devices derive from `now` (unix seconds) using flock's fixed

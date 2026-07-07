@@ -14,6 +14,7 @@ describe('barrel exports', () => {
     expect(typeof flock.encryptBeacon).toBe('function')
     expect(typeof flock.buildDuressAlert).toBe('function')
     expect(typeof flock.createGroup).toBe('function')
+    expect(typeof flock.estimateCanaryVerificationRisk).toBe('function')
   })
 
   it('re-exports canary-kit Nostr builders and flock signals/policy', () => {
@@ -22,6 +23,11 @@ describe('barrel exports', () => {
     expect(typeof flock.buildLocationSignal).toBe('function')
     expect(typeof flock.buildHelpSignal).toBe('function')
     expect(typeof flock.signalTypeForReason).toBe('function')
+  })
+
+  it('re-exports flock spoken-verification risk helpers', () => {
+    expect(typeof flock.estimateSpokenVerificationRisk).toBe('function')
+    expect(flock.estimateSpokenVerificationRisk(3).candidates).toBe(21)
   })
 
   it('re-exports flock night-out helpers', () => {

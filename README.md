@@ -104,7 +104,7 @@ encryption stay at the edge.
 | `meeting` | Fair meeting-point request/share (midpoint computed on-device) | ✅ tested |
 | `disband` | Circle dissolution signal | ✅ tested |
 | `offgrid` | Deliberate "going dark" — pre-announced; never suppresses help/pickup | ✅ tested |
-| `spokenverify` | Face-to-face pick-up verification words + silent duress word | ✅ tested |
+| `spokenverify` | Face-to-face pick-up verification words + silent duress word + candidate-risk estimate | ✅ tested |
 | `app/` (PWA) | **MVP UI** — onboarding, status orb, live sharing with a **precision slider** (geohash 3–9, region → exact spot; the map previews what the circle sees of you), "buzz the circle" quick actions incl. a confirmed one-shot exact **"Come to me"**, QR + remote invites, presence map, reseed/remove; decoy view under compelled unlock; app lock (state encrypted at rest behind a PIN). SOS/pick-me-up, geofences, check-ins, rendezvous/meeting, off-grid: **parked post-MVP** (library retains all of it) | ✅ MVP |
 | `native/` (Capacitor) | Background location sharing + UnifiedPush — APK ships; reuses the same policy/transport. Outbound background publish (Kotlin) built — golden-vector verified both directions ([design](docs/plans/2026-07-05-native-background-publish-design.md)); hardware round-trip verification pending ([runbook](docs/runbooks/native-background-publish-test.md)) | 🧱 shell |
 

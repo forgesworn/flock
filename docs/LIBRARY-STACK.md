@@ -8,7 +8,7 @@ separate from the hosting/deploy view in `docs/ARCHITECTURE.md`.
 | Layer | Technology | Where it is used | Role in flock |
 |---|---|---|---|
 | Public package | `@forgesworn/flock` | `src/`, `package.json` exports | Pure TypeScript location-safety library: geofences, policy, signals, check-ins, trails, buzzes, all-clear, rendezvous, meetings, spoken verification, and related signal types. |
-| Safety/crypto foundation | `canary-kit` | `src/index.ts`, `src/signals.ts`, `src/*` signal modules | Re-exported by flock; provides groups, beacons, duress, Nostr signal builders, NIP-59/NIP-44 helpers, and sync envelopes. |
+| Safety/crypto foundation | `canary-kit` | `src/index.ts`, `src/signals.ts`, `src/*` signal modules | Re-exported by flock; provides groups, beacons, duress, spoken-verification risk estimates, Nostr signal builders, NIP-59/NIP-44 helpers, and sync envelopes. |
 | Root word primitive | `spoken-token` | via `canary-kit` | Underlying HMAC-counter-to-words primitive used by canary-style verification and duress words. |
 | Recovery primitive present in graph | `@forgesworn/shamir-words` | transitive dependency of `canary-kit` | Installed as part of the canary stack, but flock has not wired it into a user-facing circle recovery flow yet. |
 | Geo primitives | `geohash-kit` | `src/geofence.ts`, `app/src/app.ts`, `app/src/meetingPoint.ts` | Haversine distance, point-in-polygon, geohash encoding/decoding, bounds, and privacy precision controls. |
@@ -32,7 +32,7 @@ flowchart TB
     signals["signals + buzz + allclear + joined + lost + findping\nbeacons and circle signals"]
     safety["checkin + trail + offgrid + disband\nsafety workflows"]
     meeting["rendezvous + meeting\nwhen and where to regroup"]
-    spoken["spokenverify\npickup word plus duress word"]
+    spoken["spokenverify\npickup word, duress word, risk budget"]
   end
 
   canary["canary-kit\ngroups, beacons, duress, sync envelopes, Nostr event builders"]
