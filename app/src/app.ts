@@ -19,6 +19,7 @@ import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FI
 import { advertIdNow, meshUuidNow } from './bleId'
 import { createMeshBuffer, remember as rememberMeshWrap, liveEntries as liveMeshEntries, type MeshBufferState } from './meshBuffer'
 import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, wordInviteParkKey, buildWordInviteRef, readWordInviteRef, buildWordInviteDeletion, suggestWords } from './wordcode'
+import { classifyScan, shouldOfferAppHandoff } from './joinassist'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure'
@@ -883,6 +884,47 @@ function inviteFromLink(npub: string): void {
   toast('Key filled in — tap Send encrypted invite')
 }
 
+/** True when running as the installed home-screen app (PWA standalone) —
+ *  the context where a join belongs, as opposed to a plain browser tab. */
+const isStandaloneDisplay = (): boolean =>
+  (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) ||
+  (navigator as unknown as { standalone?: boolean }).standalone === true
+
+/** The in-app scanner, join flavour: scan the inviter's QR from INSIDE flock.
+ *  This is the iPhone-PWA join path — a camera-app scan opens Safari, which
+ *  keeps a different identity from the installed app (joinassist.ts). */
+function openJoinScanner(): void {
+  void import('./qrscan').then((m) => m.openQrScan({
+    layer: overlayLayer,
+    title: 'Scan their invite QR',
+    hint: 'Point the camera at the invite QR on their screen.',
+    onCode: (text) => {
+      const scanned = classifyScan(text)
+      if (scanned?.kind === 'join') { joinFromLink(scanned.code); return true }
+      if (scanned?.kind === 'invite-key') return 'That’s someone’s key QR — ask them to show the invite QR from their circle instead.'
+      return 'Not a flock invite — ask them to open their circle and tap Invite.'
+    },
+    onClosed: () => { /* the view beneath is already current */ },
+  }))
+}
+
+/** The in-app scanner, key flavour: the inviter scans the guest's "Join
+ *  remotely" key QR instead of typing an npub by hand. */
+function openKeyScanner(): void {
+  void import('./qrscan').then((m) => m.openQrScan({
+    layer: overlayLayer,
+    title: 'Scan their key QR',
+    hint: 'Point the camera at the key QR on their screen.',
+    onCode: (text) => {
+      const scanned = classifyScan(text)
+      if (scanned?.kind === 'invite-key') { inviteFromLink(scanned.npub); return true }
+      if (scanned?.kind === 'join') return 'That’s a circle invite QR — you need THEIR key: ask them to tap “Join remotely”.'
+      return 'Not a flock key — ask them to tap “Join remotely” and show the QR it makes.'
+    },
+    onClosed: () => { /* nothing to restore */ },
+  }))
+}
+
 /** Join straight from a scanned/tapped link — the same path as a pasted code.
  *  A guest without a handle is asked for one FIRST (join-name screen): the
  *  moment they land in the circle is exactly when "who is this?" matters. */
@@ -913,11 +955,17 @@ function completeJoin(circle: store.Circle): void {
     : `You've joined ${circle.name} — add your name under You so friends recognise you`)
 }
 
-/** The "what should they call you?" step for a link/QR guest. */
+/** The "what should they call you?" step for a link/QR guest. On a phone
+ *  BROWSER this is also the rescue point: the camera opens join links here,
+ *  not in the installed app (which keeps its own identity) — so offer the way
+ *  across before they join in the wrong place. */
 function joinNameView(c: store.Circle): string {
+  const handoff = shouldOfferAppHandoff({ userAgent: navigator.userAgent, standalone: isStandaloneDisplay(), nativeShell: isNativeShell() })
   return `<main class="screen onboard fade-in">
     <img class="hero-logo" src="./icon.svg" alt="" />
     <h1>Joining ${esc(c.name)}</h1>
+    ${handoff ? `<div class="note onboard-note" style="margin-bottom:14px">Already installed flock? This browser tab keeps its <strong>own separate identity</strong> — join inside the app instead: copy the invite, open flock, tap “Join a circle”, and paste it. (Or scan the QR again from inside the app.)</div>
+    <div class="actions" style="margin-bottom:14px"><button class="btn" data-action="copy-join-invite">Copy the invite</button></div>` : ''}
     <p class="tagline">What should this circle call you? A first name or nickname is perfect.</p>
     <div class="actions">
       <div class="field"><label for="join-handle">Your name</label><input class="input" id="join-handle" maxlength="40" placeholder="Dave · Mum · a nickname" /></div>
@@ -940,6 +988,12 @@ function wireJoinName(): void {
         completeJoin(c)
       } else if (a === 'join-skip') {
         completeJoin(c)
+      } else if (a === 'copy-join-invite') {
+        // The link form survives every messenger and pastes straight into the
+        // app's Join screen (inviteCodeFrom strips it back to the code).
+        void navigator.clipboard.writeText(store.inviteLink(c, shareOrigin()))
+          .then(() => toast('Invite copied — open the flock app, tap “Join a circle”, and paste it'))
+          .catch(() => toast('Could not copy — long-press the QR link instead'))
       }
     })
   })
@@ -1498,7 +1552,7 @@ function inviteSections(): string {
       <div class="qr" id="qr"></div>
       ${showInviteLinkText && activeCircle() ? `<div class="invite-code">${esc(store.inviteLink(activeCircle() as store.Circle, shareOrigin()))}</div>` : ''}
       <button class="btn primary" data-action="copy-invite">${'share' in navigator ? 'Share invite link' : 'Copy invite link'}</button>
-      <div class="note">Let them scan the QR with their camera — it opens flock and joins in one tap. Or copy the link and send it. It carries the secret, so treat it like a password.</div>
+      <div class="note">Best from inside their flock app: <strong>Join a circle → Scan their invite QR</strong>. The phone camera works too but opens the browser version — fine for a first look, wrong if they've installed the app. Or copy the link and send it. It carries the secret, so treat it like a password.</div>
     </div>
 
     <div class="section-title" style="margin-top:22px">Say a code (down the phone)</div>
@@ -1518,6 +1572,7 @@ function inviteSections(): string {
     <div class="card stack">
       ${hint('invite-remote', "In person? Show them the QR above. Far away? Ask them to open flock, tap 'Join remotely', and send you the key it shows.")}
       <div class="field"><label for="invite-npub">Their invite key</label><input class="input" id="invite-npub" placeholder="npub1…" value="${esc(pendingInviteNpub ?? '')}" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
+      <button class="btn small" data-action="scan-invite-key">📷 Scan their key QR</button>
       <button class="btn small primary" data-action="send-invite">Send encrypted invite</button>
       <div class="note">Encrypted just for them — safe to send through any chat. Ask them to tap “Join remotely” and send you the key it shows.</div>
     </div>`
@@ -1831,11 +1886,14 @@ function onboardingView(): string {
   } else if (onboardStep === 'join') {
     inner = `
       <h1>Join a circle</h1>
-      <p class="tagline">Type the six words someone read you — just the first few letters of each finds it, no need to spell the whole thing — or paste an invite code, or join remotely by sharing your key.</p>
+      <p class="tagline">With them now? Scan the QR they're showing. Otherwise type the six words someone read you — just the first few letters of each finds it — or paste an invite code, or join remotely by sharing your key.</p>
+      <div class="actions" style="margin-bottom:18px">
+        <button class="btn primary" data-action="scan-join">📷 Scan their invite QR</button>
+      </div>
       <div class="field" style="text-align:left;margin-bottom:4px"><label for="jwords">Spoken words</label><input class="input" id="jwords" placeholder="six words, in order" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
       <div id="jwords-suggest" class="word-suggest"></div>
       <div class="actions" style="margin-bottom:18px">
-        <button class="btn primary" data-action="join-words"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Finding invite…' : 'Join with words'}</button>
+        <button class="btn" data-action="join-words"${spokenCodeBusy ? ' disabled' : ''}>${spokenCodeBusy ? 'Finding invite…' : 'Join with words'}</button>
       </div>
       <div class="field" style="text-align:left;margin-bottom:16px"><label for="jcode">Or paste an invite code</label><textarea class="input" id="jcode" rows="3" placeholder="Paste code…"></textarea></div>
       <div class="actions">
@@ -1994,6 +2052,7 @@ function wireOnboard(): void {
       else if (a === 'cancel-add') { adding = false; onboardStep = 'intro'; render() }
       else if (a === 'do-create') doCreate()
       else if (a === 'do-join') doJoin()
+      else if (a === 'scan-join') openJoinScanner()
       else if (a === 'join-words') void joinWithWords()
       else if (a === 'join-remote') doJoinRemote()
       else if (a === 'copy-npub') copyNpub()
@@ -3298,6 +3357,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'copy-word-code': void copyWordCode(); break
     case 'save-handle': saveHandle(); break
     case 'copy-npub': copyNpub(); break
+    case 'scan-invite-key': openKeyScanner(); break
     case 'send-invite': void sendInvite(); break
     case 'reseed': void reseedCircle(); break
     case 'ask-remove': removeConfirmPk = node.dataset.pk ?? null; render(); break
