@@ -895,10 +895,11 @@ a.btn { text-decoration: none; }
    Its own phosphor palette on purpose: the scope should read as an instrument,
    not another app card. One person, one scope, one Stop — no other chrome. */
 .radar-shell {
-  /* Above the DM/circle sheets (200/201) — the tracker is the primary
-     experience while it runs — but below the buzz banner/toast layer (9999):
-     an incoming safety alert still shows over the scope. */
-  position: fixed; inset: 0; z-index: 220;
+  /* Above the DM/circle/compose sheets (300) — the tracker is the primary
+     experience while it runs; Stop lands you back on whatever was beneath.
+     Still below the buzz banner/toast layer (9999): an incoming safety
+     alert shows over the scope. */
+  position: fixed; inset: 0; z-index: 320;
   display: flex; flex-direction: column; align-items: center; justify-content: space-between;
   gap: 10px;
   padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
@@ -1005,4 +1006,35 @@ a.btn { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   .radar-sweep { animation: none; opacity: 0.25; }
   .radar-blip, .radar-uncert { transition: none; }
+}
+
+/* ── Who-is-who avatars (2026-07-09 field feedback) ─────────────────────────
+   Bigger tiles, initials from the member's CHOSEN name, and a stable
+   per-member tint (--member-h, set inline from their pubkey) — the same
+   person is the same colour on every phone. "You" keeps its own ring. */
+.member .avatar, .strip-avatar .avatar, .avatar.small {
+  background: hsl(var(--member-h, 215) 42% 26%);
+  color: hsl(var(--member-h, 215) 92% 85%);
+  border-color: hsl(var(--member-h, 215) 48% 44% / 0.55);
+}
+.member .avatar { width: 46px; height: 46px; font-size: 16px; }
+.strip-avatar .avatar { width: 64px; height: 64px; font-size: 19px; }
+.strip-avatar.plus { width: 64px; height: 64px; }
+.presence-dot { width: 15px; height: 15px; }
+.strip-name { font-size: 13px; max-width: 74px; }
+.avatar.me { box-shadow: 0 0 0 2px var(--line-strong); font-size: 0.82em; }
+
+/* ── Radar launch affordances ──────────────────────────────────────────────
+   The headline action sits ON the member row and in the person's chat —
+   tinted like the scope so it reads as "the tracker", not another icon. */
+.radar-launch {
+  width: 38px; height: 38px; font-size: 18px; border-radius: 12px;
+  background: rgba(110, 245, 170, 0.09);
+  border-color: rgba(110, 245, 170, 0.35);
+}
+.radar-launch:active { transform: scale(0.94); }
+.radar-chip {
+  background: rgba(110, 245, 170, 0.09);
+  border-color: rgba(110, 245, 170, 0.35);
+  color: #9fe8bd;
 }

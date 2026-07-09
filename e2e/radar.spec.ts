@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, expandMember, myPubkey, LONDON, SOHO } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, openDmWith, myPubkey, LONDON, SOHO } from './fixtures'
 
 // Radar navigation, first slice: B selects A from the member row and gets the
 // foreground motion-tracker over A's ALREADY-DISCLOSED beacon — the wire path
@@ -16,10 +16,11 @@ test.describe('radar navigation to a person', () => {
 
     await startSharing(A) // exact-spot by default; the beacon auto-emits on the first fix
 
-    // A's beacon has landed once B's roster row carries a location claim.
+    // A's beacon has landed once B's roster row carries a location claim. The
+    // 🧭 sits ON the row (field feedback: behind the chevron nobody found it).
     const aPk = await myPubkey(A)
-    await expandMember(B, aPk)
-    const navBtn = B.locator(`[data-action="radar-member"][data-pk="${aPk}"]`)
+    await gotoTab(B, 'circle')
+    const navBtn = B.locator(`.member-row [data-action="radar-member"][data-pk="${aPk}"]`)
     await expect(navBtn).toBeVisible()
     await navBtn.click()
 
@@ -40,6 +41,16 @@ test.describe('radar navigation to a person', () => {
 
     // Stop: one obvious control, immediate end — overlay gone, sound/haptics with it.
     await shell.locator('.radar-stop').click()
+    await expect(B.locator('#radar-shell')).toHaveCount(0)
+
+    // Second launch surface: the person's private chat (what a map-pin tap
+    // opens) carries a visible "Find them" whenever they have a beacon.
+    await openDmWith(B, aPk)
+    const findBtn = B.locator(`#dm-sheet [data-action="radar-member"][data-pk="${aPk}"]`)
+    await expect(findBtn).toBeVisible()
+    await findBtn.click()
+    await expect(B.locator('#radar-shell')).toBeVisible()
+    await B.locator('.radar-stop').click()
     await expect(B.locator('#radar-shell')).toHaveCount(0)
   })
 })

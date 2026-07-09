@@ -14,6 +14,7 @@ import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
 import { openRadar, closeRadar } from './radarMode'
+import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
 import { createMeshBuffer, remember as rememberMeshWrap, liveEntries as liveMeshEntries, type MeshBufferState } from './meshBuffer'
@@ -513,25 +514,36 @@ function nameFor(pk: string): string {
   try { return `Member ${npubEncode(pk).slice(-4)}` } catch { return `Member ${pk.slice(0, 4)}` }
 }
 
+/** The member's REAL chosen name only (petname → announced handle → opted-in
+ *  profile), or '' when none is known — unlike nameFor, never a placeholder.
+ *  Avatar initials and pin labels key off this so unnamed members fall back to
+ *  a per-member pubkey pair instead of everyone collapsing into "ME…". */
+function memberName(pk: string): string {
+  return (persisted.petnames[pk] || persisted.handles?.[pk] || (persisted.showProfiles ? getProfile(pk)?.name : '') || '').trim()
+}
+
 /** Short label for a map pin: my private petname → their announced handle →
  *  public name (opted-in) → 2-char initials. Falls back to initials, never a
  *  long npub, so the pin tag stays tidy; caps a long name so one member can't
  *  stretch the tag across the map. Rendered via textContent in map.ts, so it
  *  is not (and must not be double-) HTML-escaped here. */
 function pinLabel(pk: string): string {
-  const name = (persisted.petnames[pk] || persisted.handles?.[pk] || (persisted.showProfiles ? getProfile(pk)?.name : '') || '').trim()
+  const name = memberName(pk)
   if (!name) return initials(pk)
   return name.length > 14 ? `${name.slice(0, 13)}…` : name
 }
 
-/** Avatar markup — a public picture (opted-in) or initials. `isMe` shows "You". */
+/** Avatar markup — a public picture (opted-in) or initials from the member's
+ *  chosen name, over a stable per-member tint (same person = same colour on
+ *  every phone), so "who is who" reads at a glance. `isMe` shows "You". */
 function avatarHtml(pk: string, isMe: boolean, small = false): string {
-  const cls = small ? 'avatar small' : 'avatar'
+  const cls = `${small ? 'avatar small' : 'avatar'}${isMe ? ' me' : ''}`
+  const tint = ` style="--member-h:${memberHue(pk)}"`
   if (persisted.showProfiles) {
     const pic = getProfile(pk)?.picture
-    if (pic) return `<span class="${cls}"><img src="${esc(pic)}" alt="" loading="lazy" referrerpolicy="no-referrer"/></span>`
+    if (pic) return `<span class="${cls}"${tint}><img src="${esc(pic)}" alt="" loading="lazy" referrerpolicy="no-referrer"/></span>`
   }
-  return `<span class="${cls}">${isMe ? 'You' : initials(pk)}</span>`
+  return `<span class="${cls}"${tint}>${isMe ? 'You' : esc(nameInitials(memberName(pk), initials(pk)))}</span>`
 }
 
 /** Mirror a message to a real system notification while the app is hidden —
@@ -1454,18 +1466,22 @@ function circleMemberRow(pk: string, mePk: string): string {
     : ''
   const actions = expanded ? `<div class="member-actions">
     ${beacon ? `<button class="icon-btn" data-action="see-on-map" data-pk="${pk}" aria-label="See on the map">📍</button>` : ''}
-    ${isMe || !beacon ? '' : `<button class="icon-btn" data-action="radar-member" data-pk="${pk}" aria-label="Navigate to ${esc(nameFor(pk))} by radar">🧭</button>`}
     ${isMe ? '' : `<button class="icon-btn" data-action="msg-member" data-pk="${pk}" aria-label="Message ${esc(nameFor(pk))} privately">✉️</button>`}
     ${isMe || lost ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`}
     ${isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`}
     ${isMe ? '' : `<button class="icon-btn" data-action="ask-remove" data-pk="${pk}" aria-label="Remove ${esc(nameFor(pk))} from this circle">🚪</button>`}
   </div>` : ''
 
+  // Radar is the headline way to reach someone — it earns a place ON the row
+  // (not behind the chevron), whenever there's a disclosed location to go to.
+  const radarBtn = !isMe && beacon
+    ? `<button class="icon-btn radar-launch" data-action="radar-member" data-pk="${pk}" aria-label="Navigate to ${esc(nameFor(pk))} by radar" title="Navigate to them">🧭</button>`
+    : ''
   return `<div class="member${isNew ? ' unseen' : ''}">
     <div class="member-row">
       ${avatarHtml(pk, isMe)}
       <div class="meta"><div class="who">${isMe ? 'You' : esc(nameFor(pk))}${isNew ? ' <span class="pill new">new</span>' : ''}</div><div class="when">${sub}</div></div>
-      ${pill}${chevron}
+      ${pill}${radarBtn}${chevron}
     </div>
     ${lostRow}${actions}
   </div>`
@@ -2143,9 +2159,16 @@ function focusOnMember(pk: string): void {
  *  is sampled locally for my side of the bearing only. Foreground only (the
  *  locked-phone guide mode is a separate native slice). */
 function openRadarFor(pk: string): void {
-  const c = activeCircle()
   const id = persisted.identity
-  if (!c || !id || !pk || pk === id.pk) return
+  if (!id || !pk || pk === id.pk) return
+  // The DM sheet can open radar for a peer who isn't in the ACTIVE circle —
+  // prefer the focused circle, else any shared circle holding a beacon of
+  // theirs. (Still only ever *their* disclosed beacons — just found wherever
+  // they actually disclosed one.)
+  const shared = [activeCircle(), ...persisted.circles]
+    .filter((x): x is store.Circle => !!x && (x.members ?? []).includes(pk))
+  const c = shared.find((x) => cstate(x.id).beacons.get(pk)) ?? shared[0]
+  if (!c) return
   const circleId = c.id
   openRadar({
     layer: overlayLayer,
@@ -2988,6 +3011,13 @@ function dmSheet(): string {
   const chip = (r: string): string => r === 'Come to me'
     ? `<button class="btn small${dmComeToMeArmed ? ' primary' : ''}" data-action="dm-come-to-me">${esc(r)}</button>`
     : `<button class="btn small" data-action="dm-preset" data-reason="${esc(r)}">${esc(r)}</button>`
+  // "Find them": radar straight from the person's chat (which is also what a
+  // map-pin tap opens) — shown whenever they have a disclosed location in any
+  // shared circle. Same consumer-only rules as everywhere else.
+  const findCircle = persisted.circles.find((x) => (x.members ?? []).includes(dmPeer as string) && cstate(x.id).beacons.get(dmPeer as string))
+  const findBtn = findCircle
+    ? `<button class="btn small radar-chip" data-action="radar-member" data-pk="${esc(dmPeer)}">🧭 Find them</button>`
+    : ''
   const confirm = dmComeToMeArmed
     ? `<div class="note">Send this and share your <strong>exact spot</strong> with ${esc(nameFor(dmPeer))} alone, just this once? Nobody else in the circle sees it.</div>
        <div class="row" style="gap:10px">
@@ -3002,7 +3032,7 @@ function dmSheet(): string {
         <button class="bz-x" data-action="dm-close" aria-label="Close">✕</button>
       </div>
       <div class="chat-thread dm-thread" id="dm-thread">${thread}</div>
-      <div class="chip-row chat-presets">${DM_QUICK_ACTIONS.map(chip).join('')}</div>
+      <div class="chip-row chat-presets">${findBtn}${DM_QUICK_ACTIONS.map(chip).join('')}</div>
       ${confirm}
       <div class="chat-composer">
         <textarea class="input" id="dm-input" rows="1" maxlength="500" placeholder="Message ${esc(nameFor(dmPeer))}…" autocapitalize="sentences"></textarea>
