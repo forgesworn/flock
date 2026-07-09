@@ -83,6 +83,10 @@
     "./lost": {
       "types": "./dist/lost.d.ts",
       "import": "./dist/lost.js"
+    },
+    "./radar": {
+      "types": "./dist/radar.d.ts",
+      "import": "./dist/radar.js"
     }
   },
   "files": [

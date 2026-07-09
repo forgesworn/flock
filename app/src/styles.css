@@ -890,3 +890,119 @@ a.btn { text-decoration: none; }
 
 /* The DM sheet is a whole conversation, not a one-shot box — let it breathe. */
 .dm-card { max-height: 82dvh; }
+
+/* ── Radar mode — the Alien-inspired motion tracker ─────────────────────────
+   Its own phosphor palette on purpose: the scope should read as an instrument,
+   not another app card. One person, one scope, one Stop — no other chrome. */
+.radar-shell {
+  /* Above the DM/circle sheets (200/201) — the tracker is the primary
+     experience while it runs — but below the buzz banner/toast layer (9999):
+     an incoming safety alert still shows over the scope. */
+  position: fixed; inset: 0; z-index: 220;
+  display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  gap: 10px;
+  padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+  background: radial-gradient(120% 90% at 50% 0%, #0c1a12 0%, #050a07 70%, #030503 100%);
+  color: #b7ffd2;
+}
+.radar-head {
+  display: flex; width: 100%; max-width: 420px;
+  justify-content: space-between; align-items: baseline; gap: 12px;
+}
+.radar-title {
+  font-family: var(--font-display); font-size: 17px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: #8df5b6;
+}
+.radar-title strong { color: #dcffe9; }
+.radar-fresh { font-size: 13px; color: #69c98f; white-space: nowrap; }
+.radar-fresh[data-tone='aging'] { color: #ffd479; }
+.radar-fresh[data-tone='stale'] { color: #ff8d7a; }
+
+.radar-scope {
+  position: relative; width: min(86vw, 48dvh, 420px); aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle, rgba(78, 220, 140, 0.07) 0%, rgba(6, 18, 11, 0.92) 66%, #04120a 100%);
+  box-shadow: inset 0 0 60px rgba(64, 255, 150, 0.12), 0 0 42px rgba(64, 255, 150, 0.08);
+  overflow: hidden; flex: none;
+}
+.radar-ring {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  border: 1px solid rgba(105, 255, 170, 0.24); border-radius: 50%;
+}
+.radar-ring.r1 { width: 33%; height: 33%; }
+.radar-ring.r2 { width: 66%; height: 66%; }
+.radar-ring.r3 { width: 99%; height: 99%; }
+.radar-cross {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(105, 255, 170, 0.13), rgba(105, 255, 170, 0.13)) 50% 0 / 1px 100% no-repeat,
+    linear-gradient(rgba(105, 255, 170, 0.13), rgba(105, 255, 170, 0.13)) 0 50% / 100% 1px no-repeat;
+}
+.radar-sweep {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg,
+    rgba(120, 255, 180, 0.32) 0deg, rgba(120, 255, 180, 0.05) 55deg, transparent 80deg, transparent 360deg);
+  animation: radar-spin 3.6s linear infinite;
+  mix-blend-mode: screen;
+}
+@keyframes radar-spin { to { transform: rotate(360deg); } }
+/* Degraded scope: the sweep itself slows and dims — felt before it's read. */
+.radar-scope[data-state='stale'] .radar-sweep,
+.radar-scope[data-state='coarse'] .radar-sweep { animation-duration: 6.5s; opacity: 0.55; }
+.radar-scope[data-state='unavailable'] .radar-sweep,
+.radar-scope[data-state='no-fix'] .radar-sweep { animation-duration: 9s; opacity: 0.35; }
+.radar-north { position: absolute; inset: 0; pointer-events: none; }
+.radar-north span {
+  position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; letter-spacing: 0.1em; color: rgba(150, 255, 190, 0.55);
+}
+.radar-self {
+  position: absolute; left: 50%; top: 50%; width: 7px; height: 7px; border-radius: 50%;
+  background: #dcffe9; transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px rgba(180, 255, 210, 0.9);
+}
+.radar-blip {
+  position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; border-radius: 50%;
+  background: #aefec9; box-shadow: 0 0 14px 4px rgba(120, 255, 170, 0.75);
+  transition: transform 0.45s ease;
+}
+.radar-blip[data-tone='aging'] { opacity: 0.7; }
+.radar-blip[data-tone='stale'] { opacity: 0.35; box-shadow: none; }
+.radar-blip.moved { animation: radar-blip-flash 0.9s ease-out; }
+@keyframes radar-blip-flash {
+  0% { box-shadow: 0 0 28px 14px rgba(170, 255, 200, 0.95); }
+}
+/* The honesty band: the disclosed uncertainty drawn at scope scale — a coarse
+   share reads as an area, never a crisp dot. */
+.radar-uncert {
+  position: absolute; left: 50%; top: 50%; border-radius: 50%;
+  border: 1px dashed rgba(140, 255, 190, 0.45); background: rgba(120, 255, 170, 0.08);
+  transition: transform 0.45s ease;
+}
+.radar-range {
+  position: absolute; right: 7%; top: 50%; transform: translateY(-140%);
+  font-size: 11px; color: rgba(150, 255, 190, 0.5);
+}
+.radar-distance {
+  font-family: var(--font-display); font-size: 54px; letter-spacing: -0.01em;
+  color: #eafff2; text-shadow: 0 0 24px rgba(110, 255, 170, 0.4); line-height: 1;
+}
+.radar-status {
+  min-height: 20px; font-size: 14px; color: #9fe8bd; text-align: center;
+  max-width: 420px; padding: 0 8px;
+}
+/* Glove/night-out friendly: two large targets, Stop unmissable. */
+.radar-controls { display: flex; gap: 14px; width: 100%; max-width: 420px; }
+.radar-sound {
+  flex: 1; padding: 16px; font-size: 16px; border-radius: 14px;
+  background: rgba(120, 255, 170, 0.08); color: #b7ffd2;
+  border: 1px solid rgba(120, 255, 170, 0.3);
+}
+.radar-stop {
+  flex: 1.4; padding: 16px; font-size: 18px; font-weight: 700; border-radius: 14px;
+  background: var(--alert); color: #180705; border: none;
+}
+.radar-stop:active { transform: scale(0.98); }
+@media (prefers-reduced-motion: reduce) {
+  .radar-sweep { animation: none; opacity: 0.25; }
+  .radar-blip, .radar-uncert { transition: none; }
+}

@@ -239,6 +239,25 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   temporary high-cadence exact "radar session" must be explicit, visible, and
   time-boxed. Goal/design:
   `docs/plans/2026-07-09-radar-navigation-goal.md`.
+  - [x] **Slice 1 — pure guidance core + foreground tracker (2026-07-09).** The
+    library module `src/radar.ts` owns every decision (distance/bearing, angular
+    error, freshness, the coarse/stale/private degraded states, the beep-grammar
+    cue, target-movement classification, GPS-course fallback), unit-tested with
+    the honesty invariants held: a coarse share never yields a precise pointer,
+    a stale target never sounds confident, arrival silences with one haptic.
+    The foreground tracker (`app/src/radarMode.ts` + pure `radarView.ts`
+    helpers): phosphor scope with range rings/sweep/blip/uncertainty band,
+    distance + freshness readout, plain-words degraded status, Web Audio beeps
+    with a vibration mirror (mute keeps haptics), a distinct "target moved"
+    interrupt, DeviceOrientation heading with an honest no-compass fallback —
+    one selected person, one Stop, one sound toggle, nothing else. Launched from
+    a member row's 🧭 (shown only when a beacon exists); consumes ONLY the
+    cached already-permitted beacon — nothing is published and nobody's
+    precision or cadence changes. iPhone/PWA = foreground/open-phone radar only
+    (deliberately unpromised while locked). e2e `radar.spec.ts` green over the
+    live relay. **Still open:** the Android/GrapheneOS locked-phone guide mode
+    (native audio/haptics/heading while the WebView sleeps), a request/accept
+    live radar session, and stereo/pitch left–right steering.
 
 ## Messaging & map-led Home (2026-07-03)
 

@@ -13,6 +13,7 @@ import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
+import { openRadar, closeRadar } from './radarMode'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
 import { createMeshBuffer, remember as rememberMeshWrap, liveEntries as liveMeshEntries, type MeshBufferState } from './meshBuffer'
@@ -372,6 +373,7 @@ function sweepExpired(): boolean {
 }
 function switchCircle(id: string): void {
   if (!persisted.circles.some((c) => c.id === id)) return
+  closeRadar() // the radar target is circle-scoped — never carry it across a switch
   persisted.activeCircleId = id
   store.save(persisted)
   disbandConfirm = false
@@ -1452,6 +1454,7 @@ function circleMemberRow(pk: string, mePk: string): string {
     : ''
   const actions = expanded ? `<div class="member-actions">
     ${beacon ? `<button class="icon-btn" data-action="see-on-map" data-pk="${pk}" aria-label="See on the map">📍</button>` : ''}
+    ${isMe || !beacon ? '' : `<button class="icon-btn" data-action="radar-member" data-pk="${pk}" aria-label="Navigate to ${esc(nameFor(pk))} by radar">🧭</button>`}
     ${isMe ? '' : `<button class="icon-btn" data-action="msg-member" data-pk="${pk}" aria-label="Message ${esc(nameFor(pk))} privately">✉️</button>`}
     ${isMe || lost ? '' : `<button class="icon-btn" data-action="ask-lost" data-pk="${pk}" aria-label="Report their phone lost">📵</button>`}
     ${isMe ? '' : `<button class="icon-btn" data-action="edit-petname" data-pk="${pk}" aria-label="Set a nickname">✎</button>`}
@@ -1581,7 +1584,7 @@ function youView(): string {
     ${privateChatsSection()}
     <button class="btn ghost" data-action="toggle-settings" style="margin-top:18px" aria-expanded="${showSettings}">${showSettings ? 'Hide settings' : 'Settings…'}</button>
     ${showSettings ? settingsSections(me, c) : ''}
-    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose</div>
+    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose · <a href="./legal.html" target="_blank" rel="noopener">Legal</a></div>
     <div class="app-version">version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
 }
 
@@ -2131,6 +2134,39 @@ function frameCell(geohash: string): void {
 function focusOnMember(pk: string): void {
   const b = active()?.beacons.get(pk)
   if (b) frameCell(b.geohash)
+}
+
+/** Radar mode: person-to-person navigation to one circle member. Strictly a
+ *  CONSUMER of what's already disclosed — the target feed is the same cached
+ *  beacon the map draws (their chosen precision, unchanged), nothing is
+ *  published, and no precision/cadence is raised for anyone. My own position
+ *  is sampled locally for my side of the bearing only. Foreground only (the
+ *  locked-phone guide mode is a separate native slice). */
+function openRadarFor(pk: string): void {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id || !pk || pk === id.pk) return
+  const circleId = c.id
+  openRadar({
+    layer: overlayLayer,
+    targetName: () => nameFor(pk),
+    getTarget: () => {
+      const b = cstate(circleId).beacons.get(pk)
+      if (!b) return null
+      const d = decode(b.geohash)
+      // The cell's disclosed radius is the honesty band — a coarse share reads
+      // as a rough area on the scope, never as a precise pointer (FLOCK §6).
+      return { lat: d.lat, lon: d.lon, uncertaintyMetres: precisionToRadius(b.precision), timestamp: b.timestamp }
+    },
+    getMyFix: () => (fix ? { lat: fix.lat, lon: fix.lon, at: fix.at } : null),
+    // A dedicated high-accuracy watch for MY side of the bearing while the
+    // scope is up — purely local (only onFix-while-sharing ever publishes;
+    // this callback just refreshes the local fix), torn down with the radar.
+    // Deliberate footprint: navigating is exactly the moment to spend GPS.
+    startLocalFix: () => svc.watchLocation((f) => { fix = f }, () => { /* radar shows no-fix */ }, { highAccuracy: true }),
+    fmtDistance,
+    onClosed: () => { /* the overlay removes itself; nothing to restore */ },
+  })
 }
 
 async function initMap(camera?: { lng: number; lat: number; zoom: number }): Promise<void> {
@@ -3174,6 +3210,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'festival-start': startFestival(Number(node.dataset.hours ?? '3')); break
     case 'festival-stop': stopFestival(); break
     case 'msg-member': openDmThread(node.dataset.pk ?? ''); break
+    case 'radar-member': openRadarFor(node.dataset.pk ?? ''); break
     case 'strip-member': {
       if (stripDragGuard) { stripDragGuard = false; break } // just finished a reorder drag — not a tap
       const pk = node.dataset.pk ?? ''
@@ -3892,6 +3929,7 @@ function leave(id?: string): void {
   const c = id ? persisted.circles.find((x) => x.id === id) : activeCircle()
   if (!c) return
   const wasActive = c.id === persisted.activeCircleId
+  if (wasActive) closeRadar() // its target left with the circle
   removeCircle(c.id)
   disbandConfirm = false
   resetConfirm = false
@@ -3912,6 +3950,7 @@ async function disbandCircle(id?: string): Promise<void> {
     await publishSignal(await buildDisbandSignal({ groupId: c.id, seedHex: c.seedHex, by: me.pk }), c)
   } catch { /* still drop locally even if the broadcast fails */ }
   const name = c.name
+  if (wasActive) closeRadar()
   removeCircle(c.id)
   disbandConfirm = false
   resetConfirm = false
@@ -3991,6 +4030,7 @@ async function hideNow(): Promise<void> {
   const cfg = persisted.decoy
   if (!cfg) return
   if (localStorage.getItem(DECOY_CACHE_KEY)) { toast("Couldn't hide — free up some storage and try again"); return }
+  closeRadar() // a hidden app must fall silent — no beeps, haptics or GPS may outlive the hide
   // Nothing may re-arm the native mirror once hiding starts (mirrors lockSaves) —
   // an incoming signal can still render() until the reload lands.
   try { (await import('../../native/publishMirror')).lockNativePublish() } catch { /* plugin-less shell */ }
@@ -4223,6 +4263,7 @@ function wireMemberStrip(wrap: HTMLElement): void {
 
 /** Full reset: sign out, wipe local state and every circle on this device. */
 function resetDevice(): void {
+  closeRadar() // nothing may keep beeping or sampling past a reset
   if (persisted.authMethod === 'signet') { try { void signetLogout() } catch { /* ignore */ } }
   signetSigner = null
   store.reset()
