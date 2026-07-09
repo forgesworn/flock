@@ -16,6 +16,19 @@ test.describe('invites — both ways', () => {
     await settle(A) // let both the parked reference and the gift-wrapped invite reach the relay
 
     await B.click('[data-action="join"]')
+
+    // A WRONG code first (valid words, no invite parked under them) — the
+    // field failure mode. The button must come back to life and the typed
+    // words must survive, so a retry is a correction, not a re-type; a stuck
+    // "Finding invite…" here is exactly the "words never work" report.
+    const wrong = [...words.slice(1), words[0]] // rotated — still 6 valid words, different code
+    await B.fill('#jwords', wrong.join(' '))
+    await B.click('[data-action="join-words"]')
+    await expect(B.locator('[data-action="join-words"]')).toBeEnabled({ timeout: 20_000 })
+    await expect(B.locator('[data-action="join-words"]')).toHaveText('Join with words')
+    await expect(B.locator('#jwords')).toHaveValue(wrong.join(' '))
+
+    // Now the right words — the retry itself must work.
     await B.fill('#jwords', words.join(' '))
     await B.click('[data-action="join-words"]')
 

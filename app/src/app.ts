@@ -3520,6 +3520,12 @@ async function joinWithWords(): Promise<void> {
   try { words = normaliseWordCode(raw) } catch (err) { toast(err instanceof Error ? err.message : 'Check the words.'); return }
   if (words.length !== WORD_INVITE.words) { toast(`Enter all ${WORD_INVITE.words} words, in order.`); return }
   spokenCodeBusy = true; render()
+  // The busy render rebuilds the form, and only a FOCUSED input survives a
+  // render — focus just moved to the button, so put the words back: on a
+  // failure the user corrects them, never re-types six words into a field
+  // that silently emptied itself.
+  const jw = document.getElementById('jwords') as HTMLInputElement | null
+  if (jw) jw.value = raw
   try {
     const codeSeed = await deriveWordCodeSeed(words)
     const refEvent = await svc.fetchWordInvite(activeRelays(), WORD_INVITE.kind, wordInviteTag(codeSeed))
@@ -3549,6 +3555,13 @@ async function joinWithWords(): Promise<void> {
     toast("Those words didn't unlock an invite — double-check them, or ask for a fresh code.")
   } finally {
     spokenCodeBusy = false
+    // Re-enable the button IN PLACE. A failure used to leave "Finding invite…"
+    // stuck disabled — every retry silently did nothing (the field report was
+    // "the words never work"). Not a full re-render: only a FOCUSED input
+    // survives one, and focus is on the button, so re-rendering would wipe the
+    // six typed words. On success the screen has moved on and this is a no-op.
+    const btn = document.querySelector('[data-action="join-words"]') as HTMLButtonElement | null
+    if (btn) { btn.disabled = false; btn.textContent = 'Join with words' }
   }
 }
 
