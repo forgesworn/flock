@@ -25,6 +25,7 @@ Start with
 [`docs/VISION.md`](docs/VISION.md) (the goal — why this exists, who it's for,
 the design principles that aren't up for negotiation),
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the stack & why),
+[`docs/LEGAL.md`](docs/LEGAL.md) (legal and safety notices),
 [`docs/FORGESWORN-TOOLKIT.md`](docs/FORGESWORN-TOOLKIT.md) (how flock uses the
 ForgeSworn freedom-tech toolset), [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md),
 the protocol spec [`FLOCK.md`](FLOCK.md), the tracked backlog
