@@ -21,6 +21,7 @@ import {
   type TimedPosition,
 } from '@forgesworn/flock'
 import { headingFromOrientation, blipXY, niceRange, freshnessLabel, statusCopy } from './radarView'
+import { isNativeShell } from './native'
 
 /** The disclosed observation the host feeds the radar each tick. */
 export interface RadarTargetFeed {
@@ -35,6 +36,8 @@ export interface RadarTargetFeed {
 export interface RadarHost {
   /** Overlay layer the tracker mounts into (survives app re-renders). */
   layer: HTMLElement
+  /** Which disclosure this radar consumes — lets the beacon path notify us. */
+  targetKey: { circleId: string; pk: string }
   targetName: () => string
   /** The selected member's latest already-permitted disclosure, or null. */
   getTarget: () => RadarTargetFeed | null
@@ -66,7 +69,18 @@ interface RadarSession {
   lastFixes: TimedPosition[]
   lastObservation: { position: { lat: number; lon: number }; uncertaintyMetres: number; timestamp: number } | null
   lastState: RadarGuidance['state'] | null
+  /** Native locked-phone guide running (Android shell): it owns ALL audio +
+   *  haptics for the session so the two sources never double-beep; JS keeps
+   *  the visuals. */
+  nativeGuide: boolean
+  nativeCheck: number
   closed: boolean
+}
+
+/** The native guide bridge, when the shell provides it (lazy, cached). */
+const nativeGuideApi = async (): Promise<typeof import('../../native/radarGuide') | null> => {
+  if (!isNativeShell()) return null
+  try { return await import('../../native/radarGuide') } catch { return null }
 }
 
 let session: RadarSession | null = null
@@ -87,8 +101,21 @@ export function closeRadar(): void {
   s.stopLocalFix()
   try { navigator.vibrate?.(0) } catch { /* no haptics */ }
   void s.audio?.close().catch(() => { /* already closed */ })
+  if (s.nativeGuide) void nativeGuideApi().then((m) => m?.stopRadarGuide())
   s.el.remove()
   s.host.onClosed()
+}
+
+/** A beacon just landed for (circleId, member) — if it's this radar's target,
+ *  sync NOW. Event-driven on purpose: while the phone is locked the WebView's
+ *  timers are throttled/suspended, but the relay socket's message handler
+ *  still runs (battery-exempt), so this is the path that keeps the NATIVE
+ *  guide's target fresh. No radar open / different member → no-op. */
+export function radarBeaconLanded(circleId: string, member: string): void {
+  const s = session
+  if (!s || s.closed) return
+  if (s.host.targetKey.circleId !== circleId || s.host.targetKey.pk !== member) return
+  syncTarget(s)
 }
 
 export function openRadar(host: RadarHost): void {
@@ -108,6 +135,8 @@ export function openRadar(host: RadarHost): void {
     lastFixes: [],
     lastObservation: null,
     lastState: null,
+    nativeGuide: false,
+    nativeCheck: 0,
     closed: false,
   }
   const s = session
@@ -117,6 +146,15 @@ export function openRadar(host: RadarHost): void {
     const C = Ctx.AudioContext ?? Ctx.webkitAudioContext
     if (C) s.audio = new C()
   } catch { /* no audio — haptics + visuals still work */ }
+  // Android shell: hand audio/haptics to the native guide so the beeps keep
+  // going when the screen locks (the WebView's timers don't). JS keeps the
+  // visuals; the pure core is the same on both sides (golden vectors).
+  void nativeGuideApi().then((m) => {
+    if (!m || s.closed) return
+    const t = host.getTarget()
+    void m.startRadarGuide(t ? { lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000 } : null, s.muted)
+      .then(() => { if (s.closed) void m.stopRadarGuide(); else s.nativeGuide = true })
+  })
   void startOrientation(s)
   tick(s)
   s.tickTimer = window.setInterval(() => tick(s), TICK_MS)
@@ -162,6 +200,28 @@ function effectiveHeading(s: RadarSession): number | null {
 
 // ── The tick: state → DOM + cue ──────────────────────────────────────────────
 
+/** Pull the target's latest disclosure: fire the moved interrupt on a genuine
+ *  move, remember the observation, and forward it to the native guide (which
+ *  runs the same pure rules for its own moved pulse). Called every tick AND
+ *  directly from the beacon path (radarBeaconLanded) so a locked phone's
+ *  native guide stays fresh without JS timers. */
+function syncTarget(s: RadarSession): void {
+  const t = s.host.getTarget()
+  if (!t) return
+  if (s.lastObservation && t.timestamp !== s.lastObservation.timestamp) {
+    // A genuinely fresher beacon that MOVED gets its own interrupt — the user
+    // must feel the direction change without looking (goal §6).
+    if (targetMoved(s.lastObservation, { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres })) {
+      movedPulse(s)
+    }
+    if (s.nativeGuide) {
+      void nativeGuideApi().then((m) =>
+        m?.updateRadarTarget({ lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000 }))
+    }
+  }
+  s.lastObservation = { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres, timestamp: t.timestamp }
+}
+
 function tick(s: RadarSession): void {
   if (s.closed) return
   const nowSec = Math.floor(Date.now() / 1000)
@@ -173,19 +233,19 @@ function tick(s: RadarSession): void {
     }
   }
 
+  syncTarget(s)
   const t = s.host.getTarget()
   const target = t
     ? { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres, ageSeconds: Math.max(0, nowSec - t.timestamp) }
     : null
 
-  // A genuinely fresher beacon that MOVED gets its own interrupt — the user
-  // must feel the direction change without looking (goal §6).
-  if (t && s.lastObservation && t.timestamp !== s.lastObservation.timestamp) {
-    if (targetMoved(s.lastObservation, { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres })) {
-      movedPulse(s)
-    }
+  // The native guide's notification has its own Stop — if the user ended the
+  // session from the lock screen, the reopened tracker must not linger.
+  if (s.nativeGuide && !document.hidden && ++s.nativeCheck % 4 === 0) {
+    void nativeGuideApi().then((m) => m?.isRadarGuideActive().then((active) => {
+      if (!active && session === s && !s.closed) closeRadar()
+    }))
   }
-  if (t) s.lastObservation = { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres, timestamp: t.timestamp }
 
   const heading = effectiveHeading(s)
   const g = radarGuidance({
@@ -195,7 +255,8 @@ function tick(s: RadarSession): void {
   })
 
   // Arrival: silence immediately, one short confirmation haptic (goal §4).
-  if (g.state === 'arrived' && s.lastState !== 'arrived') {
+  // With the native guide running, IT owns the haptic (same rule, same core).
+  if (g.state === 'arrived' && s.lastState !== 'arrived' && !s.nativeGuide) {
     try { navigator.vibrate?.(cueFor(g).vibrateMs) } catch { /* no haptics */ }
   }
   s.lastState = g.state
@@ -268,11 +329,15 @@ function patchScope(s: RadarSession, g: RadarGuidance, ageSeconds: number | null
 /** The distinct "target moved" interrupt: a rising two-note sweep, a short
  *  triple haptic, and a visual flash — then the normal cadence resumes. */
 function movedPulse(s: RadarSession): void {
-  if (!s.muted && s.audio) {
-    beep(s.audio, 660, 0, 0.09)
-    beep(s.audio, 1320, 0.11, 0.09)
+  // Sound/vibration only when JS owns the cue — the native guide plays its
+  // own moved interrupt from the same pure rule (no double pulse).
+  if (!s.nativeGuide) {
+    if (!s.muted && s.audio) {
+      beep(s.audio, 660, 0, 0.09)
+      beep(s.audio, 1320, 0.11, 0.09)
+    }
+    try { navigator.vibrate?.([40, 40, 40]) } catch { /* no haptics */ }
   }
-  try { navigator.vibrate?.([40, 40, 40]) } catch { /* no haptics */ }
   const blip = s.el.querySelector('#radar-blip') as HTMLElement | null
   if (blip) {
     blip.classList.remove('moved')
@@ -290,7 +355,9 @@ function movedPulse(s: RadarSession): void {
 function beepLoop(s: RadarSession): void {
   if (s.closed) return
   const cue = s.cue
-  if (cue.pattern !== 'silent') {
+  // With the native guide running it is the ONE sound/haptic source (it keeps
+  // going when the screen locks; two sources would double-beep in the hand).
+  if (cue.pattern !== 'silent' && !s.nativeGuide) {
     if (!s.muted && s.audio) {
       const bursts = cue.pattern === 'triple' ? 3 : cue.pattern === 'double' ? 2 : 1
       for (let i = 0; i < bursts; i++) beep(s.audio, cue.toneHz, i * 0.15, 0.07)
@@ -356,6 +423,7 @@ function mountRadar(host: RadarHost): HTMLElement {
     const s = session
     if (!s) return
     s.muted = !s.muted
+    if (s.nativeGuide) void nativeGuideApi().then((m) => m?.setRadarGuideMuted(s.muted))
     const btn = e.currentTarget as HTMLElement
     btn.textContent = s.muted ? '🔇 Sound off' : '🔊 Sound on'
     btn.setAttribute('aria-pressed', String(s.muted))

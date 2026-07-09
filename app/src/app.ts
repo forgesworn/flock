@@ -13,7 +13,7 @@ import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
-import { openRadar, closeRadar } from './radarMode'
+import { openRadar, closeRadar, radarBeaconLanded } from './radarMode'
 import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
@@ -302,6 +302,9 @@ function saveBeacon(circleId: string, b: MemberBeacon): void {
   cstate(circleId).beacons.set(b.member, b)
   persisted.presence[circleId] = [...cstate(circleId).beacons.values()]
   store.save(persisted)
+  // An open radar tracking this member must hear about the fresh disclosure
+  // NOW — with the screen locked only this event path runs, not JS timers.
+  radarBeaconLanded(circleId, b.member)
 }
 /** Stopping sharing makes my own cached pins a stale claim of "still sharing" —
  *  drop them everywhere so my map reads honestly. Local only: publishing a
@@ -2172,6 +2175,7 @@ function openRadarFor(pk: string): void {
   const circleId = c.id
   openRadar({
     layer: overlayLayer,
+    targetKey: { circleId, pk },
     targetName: () => nameFor(pk),
     getTarget: () => {
       const b = cstate(circleId).beacons.get(pk)

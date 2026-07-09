@@ -23,6 +23,7 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(FlockBlePlugin.class);
     registerPlugin(FlockOrbotPlugin.class);
     registerPlugin(FlockPublishPlugin.class);
+    registerPlugin(RadarGuidePlugin.class);
     super.onCreate(savedInstanceState);
   }
 }

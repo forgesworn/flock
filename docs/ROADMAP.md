@@ -255,9 +255,35 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
     cached already-permitted beacon — nothing is published and nobody's
     precision or cadence changes. iPhone/PWA = foreground/open-phone radar only
     (deliberately unpromised while locked). e2e `radar.spec.ts` green over the
-    live relay. **Still open:** the Android/GrapheneOS locked-phone guide mode
-    (native audio/haptics/heading while the WebView sleeps), a request/accept
-    live radar session, and stereo/pitch left–right steering.
+    live relay. **Still open:** a request/accept live radar session and
+    stereo/pitch left–right steering.
+  - [x] **Slice 1.1 — discoverable launch + who-is-who avatars (2026-07-09,
+    field feedback same day).** The 🧭 moved out of the chevron fold onto the
+    member row itself, plus a visible "🧭 Find them" in the person's private
+    chat (the surface a map-pin tap opens; `openRadarFor` resolves the right
+    circle for a DM peer). Avatars: initials from the member's CHOSEN name
+    (per-member pubkey pair when unnamed — never a shared placeholder), a
+    stable per-member tint from the pubkey (same person = same colour on every
+    phone), bigger tiles. e2e covers both launch surfaces.
+  - [x] **Slice 2 — Android/GrapheneOS locked-phone guide mode (built
+    2026-07-09; hardware validation PENDING).** `RadarGuideService` — a
+    user-started, location-typed FGS (the measured-green direct-GPS mechanism)
+    with rotation-vector compass, native synthesised beeps (AudioTrack) and
+    vibration following the SAME pure rules: the guidance core is ported to
+    Kotlin (`native/android-src/kotlin/cc/trotters/flock/radar/RadarCore.kt`,
+    no `android.*`) and pinned to the JS module by golden vectors
+    (`native/vectors/radar-vectors.json`, `npm run gen:vectors`) + JVM tests
+    (6, `npm run test:native`). While radar runs on the shell, native owns ALL
+    audio/haptics (no double-beep) and JS keeps the visuals; target updates
+    are pushed event-driven from the beacon path (`radarBeaconLanded`), so a
+    battery-exempt locked phone keeps guiding — and if updates stop reaching
+    native, the observation ages on the native clock and degrades to the
+    sparse stale pulse (never a confident cue to an old spot). Lock-screen
+    notification is low-detail ("Radar active", no name) with a Stop action;
+    JS reconciles a notification-stop on resume. Short capped wakelock (45
+    min max). **Pending on real hardware (Pixel 10 Pro):** locked-screen
+    beep/haptic continuity, compass-under-wakelock behaviour, and the two-phone
+    half-mile field walk from the goal doc's success criteria.
 
 ## Messaging & map-led Home (2026-07-03)
 

@@ -70,6 +70,12 @@ const PERMISSIONS = [
   // below with that flag. flock already declares FINE/COARSE location (geofencing).
   'android.permission.BLUETOOTH_ADVERTISE',
   'android.permission.BLUETOOTH_CONNECT',
+  // Radar guide haptics (RadarGuideService) — and it lets the WebView's own
+  // navigator.vibrate work too. Normal install-time permission, no prompt.
+  'android.permission.VIBRATE',
+  // RadarGuideService holds a short capped partial wakelock so the beep
+  // scheduler + compass stay honest with the screen off.
+  'android.permission.WAKE_LOCK',
 ]
 
 let xml = readFileSync(manifestPath, 'utf8')
@@ -203,6 +209,26 @@ if (!existingFlockLoc) {
   xml = xml.replace(flockLocServiceRe, FLOCK_LOCATION_SERVICE)
   changed = true
   console.error('corrected FlockLocationService foregroundServiceType → location (was stale)')
+}
+
+// RadarGuideService — locked-phone radar guidance (a location-typed FGS, like
+// FlockLocationService). Same self-heal discipline: CORRECT a stale
+// foregroundServiceType rather than add-once (the cached generated project
+// would otherwise keep an old type and crash startForeground on API 34+).
+const RADAR_GUIDE_SERVICE = `        <service
+            android:name=".RadarGuideService"
+            android:exported="false"
+            android:foregroundServiceType="location" />`
+const radarGuideServiceRe = /<service\b[^>]*android:name="\.RadarGuideService"(?:(?!<service\b)[\s\S])*?<\/service>|<service\b[^>]*android:name="\.RadarGuideService"[^>]*\/>/
+const existingRadarGuide = xml.match(radarGuideServiceRe)?.[0]
+if (!existingRadarGuide) {
+  xml = xml.replace('</application>', `${RADAR_GUIDE_SERVICE}\n    </application>`)
+  changed = true
+  console.error('added RadarGuideService (location) to manifest')
+} else if (!existingRadarGuide.includes('android:foregroundServiceType="location"')) {
+  xml = xml.replace(radarGuideServiceRe, RADAR_GUIDE_SERVICE)
+  changed = true
+  console.error('corrected RadarGuideService foregroundServiceType → location (was stale)')
 }
 
 if (changed) {

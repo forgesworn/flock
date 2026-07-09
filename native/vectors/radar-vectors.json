@@ -1,0 +1,846 @@
+{
+  "bearing": [
+    {
+      "a": {
+        "lat": 0,
+        "lon": 0
+      },
+      "b": {
+        "lat": 1,
+        "lon": 0
+      },
+      "expected": 0
+    },
+    {
+      "a": {
+        "lat": 0,
+        "lon": 0
+      },
+      "b": {
+        "lat": 0,
+        "lon": 1
+      },
+      "expected": 90
+    },
+    {
+      "a": {
+        "lat": 0,
+        "lon": 0
+      },
+      "b": {
+        "lat": -1,
+        "lon": 0
+      },
+      "expected": 180
+    },
+    {
+      "a": {
+        "lat": 0,
+        "lon": 0
+      },
+      "b": {
+        "lat": 0,
+        "lon": -1
+      },
+      "expected": 270
+    },
+    {
+      "a": {
+        "lat": 0,
+        "lon": 0
+      },
+      "b": {
+        "lat": 1,
+        "lon": 1
+      },
+      "expected": 44.99563645534486
+    },
+    {
+      "a": {
+        "lat": 51.5,
+        "lon": -0.12
+      },
+      "b": {
+        "lat": 51.51,
+        "lon": -0.13
+      },
+      "expected": 328.1038653500871
+    },
+    {
+      "a": {
+        "lat": 51.5,
+        "lon": -0.12
+      },
+      "b": {
+        "lat": 48.8566,
+        "lon": 2.3522
+      },
+      "expected": 148.125704676663
+    }
+  ],
+  "angularError": [
+    {
+      "bearing": 30,
+      "heading": 0,
+      "expected": 30
+    },
+    {
+      "bearing": 330,
+      "heading": 0,
+      "expected": -30
+    },
+    {
+      "bearing": 10,
+      "heading": 350,
+      "expected": 20
+    },
+    {
+      "bearing": 350,
+      "heading": 10,
+      "expected": -20
+    },
+    {
+      "bearing": 180,
+      "heading": 0,
+      "expected": 180
+    },
+    {
+      "bearing": 0,
+      "heading": 180,
+      "expected": 180
+    },
+    {
+      "bearing": 90,
+      "heading": 90,
+      "expected": 0
+    }
+  ],
+  "freshness": [
+    {
+      "age": 0,
+      "expected": "fresh"
+    },
+    {
+      "age": 60,
+      "expected": "fresh"
+    },
+    {
+      "age": 61,
+      "expected": "aging"
+    },
+    {
+      "age": 300,
+      "expected": "aging"
+    },
+    {
+      "age": 600,
+      "expected": "aging"
+    },
+    {
+      "age": 601,
+      "expected": "stale"
+    },
+    {
+      "age": 5000,
+      "expected": "stale"
+    }
+  ],
+  "guidance": [
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": null
+      },
+      "guidance": {
+        "state": "unavailable",
+        "distanceMetres": null,
+        "bearingDeg": null,
+        "relativeBearingDeg": null,
+        "freshness": null,
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": null
+      },
+      "cue": {
+        "pattern": "sparse",
+        "periodMs": 4000,
+        "toneHz": 330,
+        "vibrateMs": [
+          30
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": null,
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "no-fix",
+        "distanceMetres": null,
+        "bearingDeg": null,
+        "relativeBearingDeg": null,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "sparse",
+        "periodMs": 4000,
+        "toneHz": 330,
+        "vibrateMs": [
+          30
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 700
+        }
+      },
+      "guidance": {
+        "state": "stale",
+        "distanceMetres": 1111.9492664455875,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "stale",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "sparse",
+        "periodMs": 3500,
+        "toneHz": 330,
+        "vibrateMs": [
+          30
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.05,
+            "lon": 0
+          },
+          "uncertaintyMetres": 610,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "coarse",
+        "distanceMetres": 5559.746332227937,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 610
+      },
+      "cue": {
+        "pattern": "sparse",
+        "periodMs": 3000,
+        "toneHz": 440,
+        "vibrateMs": [
+          40
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.001,
+            "lon": 0
+          },
+          "uncertaintyMetres": 610,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "coarse",
+        "distanceMetres": 111.19492664455875,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 610
+      },
+      "cue": {
+        "pattern": "sparse",
+        "periodMs": 2000,
+        "toneHz": 440,
+        "vibrateMs": [
+          40
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 610,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "coarse",
+        "distanceMetres": 1111.9492664455875,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 610
+      },
+      "cue": {
+        "pattern": "sparse",
+        "periodMs": 2400,
+        "toneHz": 440,
+        "vibrateMs": [
+          40
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00005,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "arrived",
+        "distanceMetres": 5.559746332227936,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "silent",
+        "periodMs": 0,
+        "toneHz": 0,
+        "vibrateMs": [
+          80,
+          60,
+          80
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00015,
+            "lon": 0
+          },
+          "uncertaintyMetres": 19,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "arrived",
+        "distanceMetres": 16.679238996683807,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 19
+      },
+      "cue": {
+        "pattern": "silent",
+        "periodMs": 0,
+        "toneHz": 0,
+        "vibrateMs": [
+          80,
+          60,
+          80
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.0002,
+            "lon": 0
+          },
+          "uncertaintyMetres": 19,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 22.23898532891175,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 19
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 1600,
+        "toneHz": 660,
+        "vibrateMs": [
+          40
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": null,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "no-heading",
+        "distanceMetres": 1111.9492664455875,
+        "bearingDeg": 0,
+        "relativeBearingDeg": null,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 2400,
+        "toneHz": 660,
+        "vibrateMs": [
+          40
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": null,
+        "target": {
+          "position": {
+            "lat": 0.0005,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "no-heading",
+        "distanceMetres": 55.597463322279374,
+        "bearingDeg": 0,
+        "relativeBearingDeg": null,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 1000,
+        "toneHz": 660,
+        "vibrateMs": [
+          40
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.0005,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 55.597463322279374,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "triple",
+        "periodMs": 700,
+        "toneHz": 1175,
+        "vibrateMs": [
+          40,
+          60,
+          40,
+          60,
+          40
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 1111.9492664455875,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "double",
+        "periodMs": 1100,
+        "toneHz": 990,
+        "vibrateMs": [
+          40,
+          60,
+          40
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 45,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 1111.9492664455875,
+        "bearingDeg": 0,
+        "relativeBearingDeg": -45,
+        "freshness": "fresh",
+        "alignment": "near",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 1600,
+        "toneHz": 740,
+        "vibrateMs": [
+          40
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 150,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 1111.9492664455875,
+        "bearingDeg": 0,
+        "relativeBearingDeg": -150,
+        "freshness": "fresh",
+        "alignment": "off",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 2400,
+        "toneHz": 494,
+        "vibrateMs": [
+          30
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 300
+        }
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 1111.9492664455875,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "aging",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "double",
+        "periodMs": 1100,
+        "toneHz": 990,
+        "vibrateMs": [
+          40,
+          60,
+          40
+        ]
+      }
+    }
+  ],
+  "moved": [
+    {
+      "prev": null,
+      "next": {
+        "position": {
+          "lat": 0,
+          "lon": 0
+        },
+        "uncertaintyMetres": 2.4
+      },
+      "expected": false
+    },
+    {
+      "prev": {
+        "position": {
+          "lat": 0,
+          "lon": 0
+        },
+        "uncertaintyMetres": 2.4
+      },
+      "next": {
+        "position": {
+          "lat": 0.0001,
+          "lon": 0
+        },
+        "uncertaintyMetres": 2.4
+      },
+      "expected": false
+    },
+    {
+      "prev": {
+        "position": {
+          "lat": 0,
+          "lon": 0
+        },
+        "uncertaintyMetres": 2.4
+      },
+      "next": {
+        "position": {
+          "lat": 0.0005,
+          "lon": 0
+        },
+        "uncertaintyMetres": 2.4
+      },
+      "expected": true
+    },
+    {
+      "prev": {
+        "position": {
+          "lat": 0,
+          "lon": 0
+        },
+        "uncertaintyMetres": 610
+      },
+      "next": {
+        "position": {
+          "lat": 0.003,
+          "lon": 0
+        },
+        "uncertaintyMetres": 610
+      },
+      "expected": false
+    },
+    {
+      "prev": {
+        "position": {
+          "lat": 0,
+          "lon": 0
+        },
+        "uncertaintyMetres": 610
+      },
+      "next": {
+        "position": {
+          "lat": 0.011,
+          "lon": 0
+        },
+        "uncertaintyMetres": 610
+      },
+      "expected": true
+    }
+  ],
+  "course": [
+    {
+      "prev": {
+        "position": {
+          "lat": 0,
+          "lon": 0
+        },
+        "atSec": 0
+      },
+      "next": {
+        "position": {
+          "lat": 0.0002,
+          "lon": 0
+        },
+        "atSec": 10
+      },
+      "expected": 0
+    },
+    {
+      "prev": {
+        "position": {
+          "lat": 0,
+          "lon": 0
+        },
+        "atSec": 0
+      },
+      "next": {
+        "position": {
+          "lat": 0.00002,
+          "lon": 0
+        },
+        "atSec": 10
+      },
+      "expected": null
+    },
+    {
+      "prev": {
+        "position": {
+          "lat": 0,
+          "lon": 0
+        },
+        "atSec": 10
+      },
+      "next": {
+        "position": {
+          "lat": 0.001,
+          "lon": 0
+        },
+        "atSec": 10
+      },
+      "expected": null
+    }
+  ]
+}
