@@ -59,7 +59,15 @@ import {
 let persisted = store.load()
 let tab: 'home' | 'chat' | 'circle' | 'you' = 'home'
 let fix: svc.Fix | null = null
+// flock's default posture is OPEN: once you're in a circle, you share your
+// location. `sharing` starts false only until maybeAutoShare() flips it on at
+// boot / right after create/join (see there). "Go private" (stopSharing) drops
+// you off for the rest of the session; it defaults back ON on the next launch —
+// a deliberate product choice (session-only, never persisted).
 let sharing = false
+// One-shot latch so the open-by-default auto-share fires exactly once per launch
+// — never re-arming after a deliberate in-session "Go private".
+let autoShareApplied = false
 let geoIssue: 'denied' | 'nofix' | null = null // actionable location trouble shown as a card, not a toast
 let stopWatch: (() => void) | null = null
 let hidden = false // app backgrounded (page hidden) — pause sampling; a hidden PWA can't sample reliably anyway
@@ -93,6 +101,13 @@ let root: HTMLElement
 // full render() never touches. That way rapid buzzes update it in place instead
 // of a render tearing it down and replaying its entrance animation every tick.
 let bannerLayer: HTMLElement
+// Modal overlays (the private-chat sheet, the long-press circle menu) live in
+// this sibling layer for the SAME reason: a full render() rewrites root.innerHTML,
+// which used to drop the open sheet and re-mount it — replaying its slide-up
+// entrance every background tick (the "DM screen flicker"), and wiping whatever
+// was half-typed. Kept outside root, the sheet survives renders untouched; only
+// open/close and an in-place thread refresh ever touch it.
+let overlayLayer: HTMLElement
 let toastTimer = 0
 
 let mapView: MapView | null = null
@@ -406,7 +421,11 @@ function todayWindowSec(): number {
 // spot). It never changes what the phone samples for itself, only what leaves it.
 const PRECISION_MIN = 3
 const PRECISION_MAX = 9
-const PRECISION_DEFAULT = 6
+// Default to the finest detail (Exact spot). flock's default posture is open —
+// everyone in a circle shares, precisely — and the slider is there to dial it
+// DOWN for anyone who wants a rougher share. A circle nobody has adjusted sees
+// each other's exact spot.
+const PRECISION_DEFAULT = 9
 const COME_TO_ME_PRECISION = 9 // the one-shot "come to me" disclosure
 const PRECISION_NAMES: Record<number, string> = {
   3: 'Region', 4: 'City', 5: 'Town', 6: 'Neighbourhood', 7: 'Street', 8: 'Building', 9: 'Exact spot',
@@ -719,6 +738,9 @@ export function mount(el: HTMLElement): void {
   // Persistent banner layer, outside `root` so render() (which rewrites root's
   // innerHTML) can't wipe or re-animate it. Reused across mounts.
   bannerLayer = document.getElementById('banner-layer') ?? document.body.appendChild(Object.assign(document.createElement('div'), { id: 'banner-layer' }))
+  // Overlay layer for modal sheets — outside `root` so render() never tears them
+  // down (and never replays their entrance animation). Reused across mounts.
+  overlayLayer = document.getElementById('overlay-layer') ?? document.body.appendChild(Object.assign(document.createElement('div'), { id: 'overlay-layer' }))
   // App lock: ciphertext at rest means no state may exist in memory until the
   // PIN (or a live grace window) recovers the storage secret.
   if (store.lockedAtRest()) { void bootLocked(); return }
@@ -767,6 +789,9 @@ function bootUnlocked(): void {
   // runs: it carries the seed.
   const frag = consumeFragment()
   render()
+  // Open by default: a returning user with a circle starts sharing straight away.
+  // A fresh user (no circle yet) is a no-op here — the create/join paths call it.
+  maybeAutoShare()
   if (frag?.kind === 'join') joinFromLink(frag.value)
   if (frag?.kind === 'invite') inviteFromLink(frag.value)
   // Tapping a link while flock is already open is a fragment-only navigation —
@@ -865,6 +890,7 @@ function completeJoin(circle: store.Circle): void {
   adding = false
   tab = 'home'
   render()
+  maybeAutoShare() // open by default — joining a circle starts you sharing
   toast(persisted.myHandle
     ? `You've joined ${circle.name}`
     : `You've joined ${circle.name} — add your name under You so friends recognise you`)
@@ -981,8 +1007,10 @@ function render(opts?: { animate?: boolean }): void {
   root.innerHTML = `${findPingBanner()}<main class="screen ${animate ? 'fade-in ' : ''}${screenMod}">${body}</main>${navView()}<div class="toast" id="toast"></div>`
   patchBuzzBanner() // the buzz banner lives in its own layer — keep it in sync after a render
   wireApp()
-  if (dmPeer) mountDmSheet() // a full render drops the overlay — put it back
-  if (circleMenu) mountCircleMenu() // same for the long-press action sheet
+  // The DM sheet + circle menu live in overlayLayer (outside root), so a render
+  // no longer drops them — they persist untouched, with no re-mount and no
+  // replayed entrance animation. Their content is refreshed in place at the
+  // points that actually change it (updateDmThread on a new message, etc.).
   restoreFocusedInput(keep)
   // Being ON the Chat tab with the thread in view IS reading it (Signal-style).
   if (tab === 'chat' && !document.hidden && activeCircle()) markThreadRead(chatKeyOf((activeCircle() as store.Circle).id))
@@ -2274,10 +2302,10 @@ function patchNavBadges(): void {
  *  row (icon button, not a full-width one) — Home's hero is the map, not this. */
 function homeShareBarInner(): string {
   return `<div class="home-share-row">
-      <button class="icon-btn share-toggle${sharing ? ' on' : ''}" data-action="toggle-share" aria-label="${sharing ? 'Stop sharing' : 'Start sharing'}" aria-pressed="${sharing}">${ICON.pin}</button>
+      <button class="share-toggle${sharing ? ' on' : ''}" data-action="toggle-share" aria-label="${sharing ? 'Go private' : 'Share location'}" aria-pressed="${sharing}">${ICON.pin}<span class="st-label">${sharing ? 'Go private' : 'Share'}</span></button>
       ${homeMapStatusHtml()}
     </div>
-    ${hint('home-watch', "Sharing live lets your circle see where you are, you choose how closely under Circle. Stop any time; nothing is shared while it's off. Tap anyone below to zoom to them, or their pin to message them privately.")}`
+    ${hint('home-watch', "You're sharing your location with this circle — that's the default. Tap Go private to drop off any time; nothing is shared while you're private. You choose how closely under Circle. Tap anyone below to zoom to them, or their pin to message them privately.")}`
 }
 
 /** Patch Home's floating overlays in place (alerts, member strip, share bar),
@@ -2453,6 +2481,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     tab = 'home'
     toast(`You've joined ${payload.n}`)
     render()
+    maybeAutoShare() // open by default — a remote-invite joiner shares too
   } else if (payload.t === 'reseed') {
     const existing = persisted.circles.find((c) => c.id === payload.id)
     if (!existing) return
@@ -2904,7 +2933,7 @@ function mountCircleMenu(): void {
   tmp.innerHTML = circleMenuSheet()
   const el = tmp.firstElementChild as HTMLElement | null
   if (!el) return
-  root.appendChild(el)
+  overlayLayer.appendChild(el)
   el.querySelectorAll('[data-action]').forEach((node) => {
     const a = node.getAttribute('data-action') as string
     node.addEventListener('click', () => handleAction(a, node as HTMLElement))
@@ -2956,13 +2985,27 @@ function mountDmSheet(opts?: { keepFocus?: boolean }): void {
   tmp.innerHTML = dmSheet()
   const el = tmp.firstElementChild as HTMLElement | null
   if (!el) return
-  root.appendChild(el)
+  overlayLayer.appendChild(el)
   el.querySelectorAll('[data-action]').forEach((node) => {
     const action = node.getAttribute('data-action') as string
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   })
   const input = el.querySelector('#dm-input') as HTMLTextAreaElement | null
   if (input) { input.value = keep; input.focus() }
+  scrollChatToEnd()
+}
+/** Refresh ONLY the open thread's messages in place — no teardown, so the sheet
+ *  never replays its entrance animation and the composer (value, caret, focus)
+ *  is left exactly as the user had it. This is the hot path: a message sent or
+ *  received re-renders the bubbles and re-scrolls, nothing else. Falls back to a
+ *  full mount if the sheet isn't up yet (e.g. it was closed). */
+function updateDmThread(): void {
+  if (!dmPeer) return
+  const threadEl = document.getElementById('dm-thread')
+  if (!threadEl) { mountDmSheet(); return }
+  const list = persisted.dms?.[dmPeer] ?? []
+  threadEl.innerHTML = list.slice(-CHAT_SHOWN).map((m, i, arr) => chatBubble(m, arr[i - 1])).join('')
+    || `<div class="note chat-empty">No messages yet, it's just the two of you. Encrypted so only ${esc(nameFor(dmPeer))} can read it.</div>`
   scrollChatToEnd()
 }
 /** Send text to the open DM thread, then refresh it in place. Shared by the
@@ -2974,7 +3017,7 @@ function dmSendText(text: string): void {
   const t = text.trim()
   if (!pk) return
   if (!t) { toast('Type a message first'); return }
-  void sendDm(pk, t).then(() => { if (dmPeer === pk) mountDmSheet({ keepFocus: true }) })
+  void sendDm(pk, t).then(() => { if (dmPeer === pk) updateDmThread() })
 }
 /** Send whatever's in the DM composer. */
 function dmSend(): void {
@@ -2998,9 +3041,10 @@ function onIncomingDm(dm: DirectMessage): void {
   // thread silently — only a genuinely new, recent message rings.
   if (!isNew || nowSec() - dm.at > MSG_FRESH_SEC) { refresh(); return }
   if (dmPeer === dm.from && !document.hidden) {
-    // Their thread is open in front of me — the message lands IN the sheet.
+    // Their thread is open in front of me — the message lands IN the sheet,
+    // refreshed in place (no teardown, no flicker, composer untouched).
     markThreadRead(dmKeyOf(dm.from))
-    mountDmSheet({ keepFocus: true })
+    updateDmThread()
     refresh()
     return
   }
@@ -3033,7 +3077,7 @@ function onIncomingLocationShare(loc: PrivateLocationShare): void {
   if (!isNew || nowSec() - loc.at > MSG_FRESH_SEC) { refresh(); return }
   if (dmPeer === loc.from && !document.hidden) {
     markThreadRead(dmKeyOf(loc.from))
-    mountDmSheet({ keepFocus: true })
+    updateDmThread() // in place — no teardown, no flicker
     refresh()
     return
   }
@@ -3265,6 +3309,7 @@ function doCreate(): void {
   ttlMode = 'ongoing'
   tab = 'circle' // land where inviting people is front-and-centre
   render()
+  maybeAutoShare() // open by default — a brand-new circle shares from the off
 }
 
 /** Remote join: create an identity, show my npub, and wait for a gift-wrapped invite. */
@@ -3465,6 +3510,20 @@ function syncWatch(): void {
     stopWatch()
     stopWatch = null
   }
+}
+
+/** Open-by-default: start sharing on its own the first time this launch has an
+ *  identity AND a circle to share with — at boot for a returning user, or the
+ *  moment a fresh user creates/joins their first circle. Runs at most once per
+ *  launch (autoShareApplied), so a deliberate in-session "Go private" is never
+ *  undone by a later render, add-circle or join. Location permission is prompted
+ *  by startSharing → syncWatch, exactly as a manual tap would; a denial reverts
+ *  the toggle and shows the actionable card (see syncWatch's onErr). */
+function maybeAutoShare(): void {
+  if (autoShareApplied) return
+  if (!persisted.identity || !activeCircle()) return // nothing to share with yet — try again after create/join
+  autoShareApplied = true
+  if (!sharing) startSharing()
 }
 
 function startSharing(): void {
@@ -4180,6 +4239,7 @@ function resetDevice(): void {
   inviteSubKey = ''
   if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = 0 }
   sharing = false
+  autoShareApplied = false // reset the open-by-default latch so a circle created after this reset auto-shares
   awaitingInvite = false
   adding = false
   disbandConfirm = false

@@ -675,9 +675,13 @@ a.btn { text-decoration: none; }
   border: 1px solid var(--line);
 }
 .share-toggle {
-  width: 34px; height: 34px; border-radius: 50%;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 13px 0 11px; border-radius: 999px;
   background: var(--surface-2); border: 1px solid var(--line-strong); color: var(--muted);
+  cursor: pointer; font: inherit; flex: none;
 }
+.share-toggle svg { width: 17px; height: 17px; flex: none; }
+.share-toggle .st-label { font-size: 13px; font-weight: 600; white-space: nowrap; }
 .share-toggle.on { background: var(--safe-dim); border-color: var(--safe); color: var(--safe); }
 .map-status { display: flex; align-items: center; gap: 7px; }
 .map-status .ms-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }

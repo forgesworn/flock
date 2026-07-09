@@ -29,6 +29,16 @@ quick actions** (Check in · Come to me · Where are you? · Call me · On my wa
 no-report zones still cap it). Family/night-out modes collapsed to one persistent
 share-live mode (invite wire format unchanged).
 
+**Open by default (2026-07-09):** the default posture flipped from opt-in to
+**sharing ON the moment you're in a circle**, at **Exact-spot** precision — the
+slider now dials *down* from full detail rather than up from off. Sharing
+auto-starts at boot / create / join (`maybeAutoShare`, one-shot per launch via
+`autoShareApplied`); the Home toggle reads **"Go private" ⇄ "Share"** and going
+private is **session-only** (defaults back on next launch). NB: this contradicts
+the "location off by default" row scored as a Flock win in
+`docs/research/2026-07-06-competitor-landscape.md` — that comparison needs a
+re-score (flagged, not yet done).
+
 **Parked post-MVP — removed from the app UI only; the library keeps every module
 tested and exported:** SOS/duress (incl. stand-down, covert holds, breadcrumb
 trail), pick-me-up + spoken verification, take-a-break/off-grid, safe places /
@@ -211,6 +221,24 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   phone was lost, nothing can switch it on from outside: a remote-enable switch
   is indistinguishable from a stalking tool and breaks the invariant that
   disclosure only ever originates from the device's own settings.
+
+## Radar navigation to a moving person (goal, 2026-07-09)
+
+- [ ] **Live radar navigation** — select a trusted circle member and navigate
+  toward them without staring at the map: stand still, rotate the phone, and use
+  the accelerating "beep ... beep ... beep beep ... beep beep beep" cue to find
+  the bearing; then lock the phone and keep navigating by ear, occasionally
+  unlocking for an Alien-inspired xenomorph motion-tracker progress check with
+  range, freshness, uncertainty, and target movement. UX gate: one selected
+  person, one dominant tracker, one obvious Stop, no settings clutter. Platform
+  gate: locked-phone by-ear guidance must work on Android/GrapheneOS; iPhone PWA
+  support can be foreground/open-phone visual + audio radar for v1, with native
+  iOS only if locked iPhone guidance becomes a target later. This is deliberately
+  a better way to consume a permitted disclosure, not a new hidden exact-tracking
+  path: coarse shares remain coarse, no-report zones still cap/withhold, and any
+  temporary high-cadence exact "radar session" must be explicit, visible, and
+  time-boxed. Goal/design:
+  `docs/plans/2026-07-09-radar-navigation-goal.md`.
 
 ## Messaging & map-led Home (2026-07-03)
 

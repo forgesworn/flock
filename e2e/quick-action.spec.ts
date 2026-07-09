@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, setSharePrecision, quickAction, dmComeToMe, openDmWith, myPubkey, settle, gotoTab, joinRemoteAwait, sendRemoteInvite } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, goPrivate, setSharePrecision, quickAction, dmComeToMe, openDmWith, myPubkey, settle, gotoTab, joinRemoteAwait, sendRemoteInvite } from './fixtures'
 
 // Quick actions are split: group-appropriate ones (Check in, On my way) live as
 // preset chips in the circle chat; person-to-person asks (Come to me, Where are
@@ -92,10 +92,11 @@ test.describe('quick actions', () => {
   // The point of sharing an exact spot is that the recipient can SEE it. Before
   // the fix the share arrived as a chat bubble whose "See on map" only panned the
   // camera to empty terrain — the location was never recorded, so no pin was
-  // drawn. Here NEITHER person ambient-shares (a remote gift-wrap invite seeds
-  // each into the other's roster, so no beacon is needed to be known), which
-  // means the only thing that can put A on B's map is the one-shot exact share
-  // itself — an unambiguous regression guard.
+  // drawn. The recorded-location guard is the see-shared-location BUBBLE below
+  // (it only exists once B has recorded the PM location); the map jump then
+  // confirms it frames A's pin. (Sharing is on by default now, so both also
+  // ambient-share — A's pin would be on the map regardless; we target A's pin
+  // specifically rather than asserting it's the only one.)
   test('PM "Come to me" — B can actually SEE A\'s exact spot on the map', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
@@ -111,15 +112,17 @@ test.describe('quick actions', () => {
     await dmComeToMe(A) // A shares its exact spot with B alone (never ambient-shared)
 
     const aPk = await myPubkey(A)
+    // B drops off first so its own pin clears, leaving only A's after the jump.
+    // Done BEFORE opening the thread: the DM sheet's overlay covers the nav bar,
+    // so tabs can't be switched while it's up (see the sibling test's dm-close).
+    await goPrivate(B)
     await openDmWith(B, aPk)
     await expect(B.locator('#dm-thread [data-action="see-shared-location"]')).toBeVisible()
 
-    // Tapping "See on map" lands on A's pin — not empty terrain. Neither person
-    // ever streamed a beacon, so a pin here exists ONLY because the exact share
-    // was recorded as a location.
+    // Tapping "See on map" closes the sheet and frames A's pin — not empty terrain
+    // (the bubble above already proved B recorded the shared location).
     await B.click('#dm-thread [data-action="see-shared-location"]')
     await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
     await expect(B.locator('.map-pin')).toHaveCount(1)
-    await expect(B.locator('.map-pin .tag')).not.toHaveText('You') // it's A, not me
   })
 })

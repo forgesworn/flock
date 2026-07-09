@@ -43,8 +43,10 @@ test.describe('find my phone — a pre-authorised lost phone answers with an exa
     await expect(A.locator('.findping-banner')).toBeVisible()
 
     // The window elapses (~10s) → A answers with one exact beacon → it reaches B:
-    // A's row on B's Circle tab now shows a live location ("last seen").
+    // A's row on B's Circle tab now shows a live location ("last seen"). Scope to
+    // A's row (not "You"): B shares by default too, so B's own row also carries a
+    // "last seen".
     await gotoTab(B, 'circle')
-    await expect(B.locator('.member .when', { hasText: 'last seen' })).toBeVisible({ timeout: 25_000 })
+    await expect(B.locator('.member').filter({ hasNotText: 'You' }).locator('.when', { hasText: 'last seen' })).toBeVisible({ timeout: 25_000 })
   })
 })

@@ -38,8 +38,8 @@ test.describe('precision slider — what the circle actually sees', () => {
     await createCircle(A, { name: 'Mallorca trip' })
     await gotoTab(A, 'circle')
 
-    // Default is Neighbourhood (6).
-    await expect(A.locator('#precision-label')).toContainText('Neighbourhood')
+    // Default is Exact spot (9) — flock shares openly and precisely by default.
+    await expect(A.locator('#precision-label')).toContainText('Exact spot')
 
     // The coarse end is a whole region — Mallorca-sized, not just a city.
     await setSharePrecision(A, 3)

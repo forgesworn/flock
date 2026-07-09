@@ -131,11 +131,33 @@ export async function gotoTab(page: Page, tab: 'home' | 'chat' | 'circle' | 'you
   await page.click(sel.tab(tab))
 }
 
-/** Start foreground location sharing (beacons at the slider's precision). */
+/** Ensure foreground location sharing is ON (beacons at the slider's precision).
+ *  Sharing is now ON by DEFAULT — it auto-starts once you're in a circle — so
+ *  this waits for that to settle and only taps the toggle if it hasn't come up
+ *  on its own (e.g. a denied permission reverted it). Idempotent: tapping an
+ *  already-sharing toggle would turn it OFF, so we must not blind-click it. */
 export async function startSharing(page: Page): Promise<void> {
   await gotoTab(page, 'home')
-  await page.click(sel.toggleShare)
+  const toggle = page.locator(sel.toggleShare)
+  try {
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true', { timeout: 4000 })
+  } catch {
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  }
   await settle(page) // let the first geolocation fix land before we act on it
+}
+
+/** Drop off ("Go private"): stop sharing, which also clears my own map pin
+ *  (dropMyPresence). Handy when a test needs a map with only the OTHER person on
+ *  it — everyone shares by default now, so my own pin is otherwise always there.
+ *  Idempotent: only taps if currently sharing. */
+export async function goPrivate(page: Page): Promise<void> {
+  await gotoTab(page, 'home')
+  const toggle = page.locator(sel.toggleShare)
+  if ((await toggle.getAttribute('aria-pressed')) === 'true') await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  await settle(page)
 }
 
 /** Set the Circle-tab precision slider (geohash 4–9) and commit it. Driving
@@ -179,9 +201,12 @@ export async function openDmWith(page: Page, peerPk: string): Promise<void> {
   await page.click(`.member [data-action="msg-member"][data-pk="${peerPk}"]`)
 }
 
-/** A member row on the Circle tab, addressed by the pill it currently shows. */
+/** A member row on the Circle tab, addressed by the pill it currently shows.
+ *  Scoped to OTHER people's rows (never "You") — everyone shares by default now,
+ *  so my own row also carries an "out" pill; these assertions are always about a
+ *  fellow member, so excluding self keeps them unambiguous (no strict-mode clash). */
 export function memberPill(page: Page, text: string | RegExp) {
-  return page.locator('.member .pill', { hasText: text })
+  return page.locator('.member').filter({ hasNotText: 'You' }).locator('.pill', { hasText: text })
 }
 
 /** Send a message to the whole circle from the Chat tab's composer. A plain

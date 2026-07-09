@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, settle, joinRemoteAwait, sendRemoteInvite } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, goPrivate, gotoTab, settle, joinRemoteAwait, sendRemoteInvite } from './fixtures'
 
 // Messaging: the circle chat (one Signal-style thread, its own Chat tab, shared
 // inbox like a buzz) and private 1:1 threads (gift-wrapped to one member's
@@ -90,9 +90,12 @@ test.describe('messaging — circle chat & private 1:1 threads', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // Only B shares, so A's map holds exactly one pin — B's (A has no "You" pin).
+    // Everyone shares by default, so A's map would also carry A's own pin. Drop
+    // it (A goes private) so the only pin left is B's — proving that tapping a
+    // *member's* pin opens their thread (tapping your own opens nothing).
     await startSharing(B)
     await settle(A)
+    await goPrivate(A)
     await gotoTab(A, 'home')
 
     const pin = A.locator('.map-pin')
@@ -116,9 +119,12 @@ test.describe('messaging — circle chat & private 1:1 threads', () => {
     await settle(B)
 
     // A messages B immediately — B has never emitted a beacon/buzz/join signal.
+    // Scope to B's row: A shares by default now, so A's own row also has a
+    // chevron (its "see on map"), and a bare .first() would be a coin flip.
     await gotoTab(A, 'circle')
-    await A.locator('.member [data-action="toggle-member-actions"]').first().click()
-    await A.locator('.member [data-action="msg-member"]').first().click()
+    const bRow = A.locator('.member').filter({ hasNotText: 'You' })
+    await bRow.locator('[data-action="toggle-member-actions"]').click()
+    await bRow.locator('[data-action="msg-member"]').click()
     await A.fill('#dm-input', 'welcome aboard')
     await A.click('[data-action="dm-send"]')
 

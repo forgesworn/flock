@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, memberPill, setPetname } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, setSharePrecision, gotoTab, memberPill, setPetname } from './fixtures'
 
 test.describe('map — the circle\'s live locations', () => {
   test('the map renders with real height (regression guard)', async ({ browser }) => {
@@ -26,7 +26,10 @@ test.describe('map — the circle\'s live locations', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    await startSharing(A) // a coarse beacon auto-emits on the first fix.
+    // Default is Exact spot now, which draws NO halo — so set A coarse first to
+    // exercise the "rough area" rendering below (a beacon auto-emits on sharing).
+    await setSharePrecision(A, 6)
+    await startSharing(A)
 
     // B receives the beacon (row pill), then opens the map and sees A's pin.
     await gotoTab(B, 'circle')
@@ -36,7 +39,7 @@ test.describe('map — the circle\'s live locations', () => {
     await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
     await expect(B.locator('.map-pin')).toBeVisible()
 
-    // A shared coarsely (the slider defaults to geohash-6, ~600 m) — so the pin
+    // A shares coarsely (geohash-6, ~600 m — set above) — so the pin
     // must carry a "rough area" halo, not a deceptively exact point. Poll the
     // drawn halo count (the source may populate a beat after the marker).
     await expect
