@@ -24,8 +24,11 @@ export const RADAR = {
   freshSeconds: 60,
   /** Beyond this the target is stale — matches the app's presence window. */
   staleSeconds: 600,
-  /** Within this of a precise target you have arrived (GPS can't do better). */
-  arriveMetres: 15,
+  /** Within this of a precise target you have arrived — the endgame runs to
+   *  touching distance. The disclosed uncertainty still caps it (an exact
+   *  share arrives at its ~2.4 m cell), so this never claims sub-cell
+   *  precision; it only stops guidance going silent 15 m short. */
+  arriveMetres: 2,
   /** Disclosed uncertainty above this is a coarse share — area guidance only. */
   coarseUncertaintyMetres: 50,
   /** |angular error| at or under this counts as aligned. */

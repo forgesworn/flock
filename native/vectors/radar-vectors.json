@@ -355,7 +355,7 @@
         "headingDeg": 0,
         "target": {
           "position": {
-            "lat": 0.00005,
+            "lat": 0.000015,
             "lon": 0
           },
           "uncertaintyMetres": 2.4,
@@ -364,12 +364,12 @@
       },
       "guidance": {
         "state": "arrived",
-        "distanceMetres": 5.559746332227936,
+        "distanceMetres": 1.6679238996683812,
         "bearingDeg": 0,
         "relativeBearingDeg": 0,
         "freshness": "fresh",
-        "alignment": "aligned",
-        "bearingUsable": true,
+        "alignment": null,
+        "bearingUsable": false,
         "uncertaintyMetres": 2.4
       },
       "cue": {
@@ -380,6 +380,45 @@
           80,
           60,
           80
+        ]
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00005,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 5.559746332227936,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4
+      },
+      "cue": {
+        "pattern": "triple",
+        "periodMs": 700,
+        "toneHz": 1175,
+        "vibrateMs": [
+          40,
+          60,
+          40,
+          60,
+          40
         ]
       }
     },

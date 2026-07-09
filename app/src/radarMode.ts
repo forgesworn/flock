@@ -69,6 +69,8 @@ interface RadarSession {
   lastFixes: TimedPosition[]
   lastObservation: { position: { lat: number; lon: number }; uncertaintyMetres: number; timestamp: number } | null
   lastState: RadarGuidance['state'] | null
+  /** The scope's current full-scale range — niceRange's hysteresis memory. */
+  rangeMetres: number | null
   /** Native locked-phone guide running (Android shell): it owns ALL audio +
    *  haptics for the session so the two sources never double-beep; JS keeps
    *  the visuals. */
@@ -135,6 +137,7 @@ export function openRadar(host: RadarHost): void {
     lastFixes: [],
     lastObservation: null,
     lastState: null,
+    rangeMetres: null,
     nativeGuide: false,
     nativeCheck: 0,
     closed: false,
@@ -276,7 +279,8 @@ function patchScope(s: RadarSession, g: RadarGuidance, ageSeconds: number | null
   const range = q('radar-range')
   if (!scope || !blip) return
 
-  const rangeMetres = niceRange(g.distanceMetres)
+  const rangeMetres = niceRange(g.distanceMetres, g.uncertaintyMetres ?? 0, s.rangeMetres)
+  s.rangeMetres = rangeMetres
   if (range) range.textContent = s.host.fmtDistance(rangeMetres).replace('~', '')
 
   // Freshness readout + scope mood.

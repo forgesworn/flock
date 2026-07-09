@@ -173,10 +173,19 @@ describe('radarGuidance — live guidance', () => {
     expect(off.alignment).toBe('off')
   })
 
-  it('arrived when within the arrival radius of a fresh precise target', () => {
-    // ~11 m north.
-    const g = radarGuidance(input({ target: target({ position: { lat: 0.0001, lon: 0 } }) }))
+  it('arrived only in the true endgame (~2 m) of a fresh precise target', () => {
+    // ~2.2 m north — within max(arriveMetres, the 2.4 m exact-share cell).
+    const g = radarGuidance(input({ target: target({ position: { lat: 0.00002, lon: 0 } }) }))
     expect(g.state).toBe('arrived')
+    // The endgame contract: guidance runs down to touching distance, so the
+    // last stretch is navigable — not a 15 m "you're here" dead zone.
+    expect(RADAR.arriveMetres).toBe(2)
+  })
+
+  it('still guiding at 11 m — the radar keeps pointing through the final approach', () => {
+    const g = radarGuidance(input({ target: target({ position: { lat: 0.0001, lon: 0 } }) }))
+    expect(g.state).toBe('point')
+    expect(g.bearingUsable).toBe(true)
   })
 
   it('arrival radius grows with the target uncertainty (never claims sub-uncertainty precision)', () => {
@@ -200,7 +209,7 @@ describe('cueFor — the beep grammar', () => {
   const stale = cueFor(radarGuidance(input({ target: target({ ageSeconds: 700 }) })))
   const coarse = cueFor(radarGuidance(input({ target: target({ uncertaintyMetres: 610 }) })))
   const unavailable = cueFor(radarGuidance(input({ target: null })))
-  const arrived = cueFor(radarGuidance(input({ target: target({ position: { lat: 0.00005, lon: 0 } }) })))
+  const arrived = cueFor(radarGuidance(input({ target: target({ position: { lat: 0.00002, lon: 0 } }) })))
 
   it('close and aligned → the triple burst', () => {
     expect(aligned.pattern).toBe('triple')

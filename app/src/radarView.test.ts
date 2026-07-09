@@ -69,6 +69,52 @@ describe('niceRange', () => {
   it('clamps to the largest scope rather than inventing one', () => {
     expect(niceRange(200_000)).toBe(50_000)
   })
+
+  // The last-approach zoom: the endgame (guidance runs to ~2 m) must fill the
+  // scope, not crawl around the centre of a 100 m one.
+  it('zooms to fine scopes for the final approach', () => {
+    expect(niceRange(35)).toBe(50)
+    expect(niceRange(20)).toBe(25)
+    expect(niceRange(8)).toBe(10)
+    expect(niceRange(3)).toBe(10) // the floor — tighter would render GPS noise
+  })
+
+  // HONESTY: the scope never zooms tighter than the disclosed uncertainty —
+  // a loose share must keep its honesty band inside the rim, not gain a
+  // precise-looking close-up it never disclosed.
+  it('never zooms below the disclosed uncertainty', () => {
+    expect(niceRange(20, 610)).toBe(1000) // coarse share stays an area
+    expect(niceRange(20, 60)).toBe(100)
+    expect(niceRange(20, 2.4)).toBe(25) // exact precision: no effect
+  })
+
+  it('holds the last scope when the distance drops out mid-session', () => {
+    expect(niceRange(null, 0, 100)).toBe(100)
+  })
+
+  describe('hysteresis', () => {
+    it('zooms out immediately — a real retreat must never hide at the rim', () => {
+      expect(niceRange(60, 0, 50)).toBe(100)
+    })
+
+    it('zooms in only once comfortably inside the smaller scope', () => {
+      expect(niceRange(21, 0, 50)).toBe(50) // fits 25 at 1.15× but not comfortably
+      expect(niceRange(18, 0, 50)).toBe(25) // now well inside — zoom in
+    })
+
+    it('does not flap across a step boundary on GPS jitter', () => {
+      let range = niceRange(18, 0, 50)
+      expect(range).toBe(25) // zoomed in at 18 m…
+      range = niceRange(21, 0, range)
+      expect(range).toBe(25) // …a 3 m jitter back does not zoom out…
+      range = niceRange(18, 0, range)
+      expect(range).toBe(25) // …and settling again changes nothing
+    })
+
+    it('stays put when the ideal scope is unchanged', () => {
+      expect(niceRange(20, 0, 25)).toBe(25)
+    })
+  })
 })
 
 describe('freshnessLabel', () => {

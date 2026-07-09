@@ -52,7 +52,8 @@ const GUIDANCE_CASES: RadarInput[] = [
   { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.05, 610) }, // coarse far
   { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.001, 610) }, // coarse inside
   { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.01, 610) }, // coarse mid
-  { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.00005) }, // arrived
+  { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.000015) }, // arrived (~1.7 m endgame)
+  { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.00005) }, // point deep in the old dead zone (~5.5 m)
   { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.00015, 19) }, // arrived by uncertainty
   { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.0002, 19) }, // point, bearing not usable
   { me: { lat: 0, lon: 0 }, headingDeg: null, target: target(0.01) }, // no-heading far

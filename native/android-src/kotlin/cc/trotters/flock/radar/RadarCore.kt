@@ -18,7 +18,7 @@ import kotlin.math.sin
 object Radar {
     const val FRESH_SECONDS = 60.0
     const val STALE_SECONDS = 600.0
-    const val ARRIVE_METRES = 15.0
+    const val ARRIVE_METRES = 2.0
     const val COARSE_UNCERTAINTY_METRES = 50.0
     const val ALIGNED_DEGREES = 20.0
     const val NEAR_DEGREES = 60.0

@@ -50,19 +50,45 @@ export function blipXY(angleDeg: number, distanceMetres: number, rangeMetres: nu
   return { x: r * Math.sin(theta), y: -r * Math.cos(theta) }
 }
 
-/** Scope full-scale candidates, metres — familiar round numbers. */
-const RANGE_STEPS = [100, 250, 500, 1000, 2500, 5000, 10_000, 25_000, 50_000] as const
+/** Scope full-scale candidates, metres — familiar round numbers. The 10 m
+ *  floor is the endgame dial: arrival fires at ~2 m (or the disclosed cell),
+ *  so the last approach plays out across the full scope; tighter than 10 m
+ *  would just magnify fix noise. */
+const RANGE_STEPS = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10_000, 25_000, 50_000] as const
 
-/** Pick the scope's full-scale range for a distance: the first round step that
- *  leaves the blip comfortably inside the rim. Null distance (no data yet)
- *  gets a mid default; beyond the largest step clamps (the blip rides the rim,
- *  honestly reading "further than this scope shows"). */
-export function niceRange(distanceMetres: number | null): number {
-  if (distanceMetres === null || !Number.isFinite(distanceMetres)) return 500
-  for (const step of RANGE_STEPS) {
-    if (distanceMetres * 1.15 <= step) return step
-  }
-  return RANGE_STEPS[RANGE_STEPS.length - 1]
+/** Headroom keeping the blip off the rim; a step is picked when span × this fits. */
+const RANGE_HEADROOM = 1.15
+/** Stricter headroom for ZOOMING IN — the gap between the two is the
+ *  hysteresis dead band that stops GPS jitter flapping the scale. */
+const ZOOM_IN_HEADROOM = 1.35
+
+/**
+ * Pick the scope's full-scale range: the first round step that leaves the blip
+ * comfortably inside the rim, so the scope zooms in as the target closes and
+ * the final approach fills the dial instead of crawling around its centre.
+ *
+ * Honesty rule: the scope never zooms tighter than the disclosed uncertainty —
+ * a loose share keeps its honesty band inside the rim rather than gaining a
+ * precise-looking close-up it never disclosed.
+ *
+ * With `prevRange` (the scope currently shown) the change is damped: zooming
+ * OUT is immediate (a retreating target must never sit hidden at the rim), but
+ * zooming IN waits until the span fits the smaller scope with extra headroom.
+ * Null distance (no data yet) keeps the current scope, or a mid default.
+ */
+export function niceRange(
+  distanceMetres: number | null,
+  uncertaintyMetres = 0,
+  prevRange: number | null = null,
+): number {
+  if (distanceMetres === null || !Number.isFinite(distanceMetres)) return prevRange ?? 500
+  const span = Math.max(distanceMetres, uncertaintyMetres)
+  const stepFor = (headroom: number): number =>
+    RANGE_STEPS.find((step) => span * headroom <= step) ?? RANGE_STEPS[RANGE_STEPS.length - 1]
+  const ideal = stepFor(RANGE_HEADROOM)
+  if (prevRange === null || ideal >= prevRange) return ideal
+  const zoomedIn = stepFor(ZOOM_IN_HEADROOM)
+  return zoomedIn < prevRange ? zoomedIn : prevRange
 }
 
 /** "just now" / "18 s old" / "4 min old" — the freshness readout. */
