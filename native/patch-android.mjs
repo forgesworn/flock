@@ -18,7 +18,7 @@
 //    in the browser. autoVerify checks the site's /.well-known/assetlinks.json
 //    (shipped in app/public, so every deploy serves it) against the APK's
 //    signing cert; native/deeplink.ts feeds the arriving URL to the app.
-import { readFileSync, writeFileSync, copyFileSync, cpSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync, cpSync, mkdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -99,6 +99,38 @@ if (!xml.includes('BLUETOOTH_SCAN')) {
 
 if (xml.includes('android:allowBackup="true"')) {
   xml = xml.replace('android:allowBackup="true"', 'android:allowBackup="false"')
+  changed = true
+}
+
+// Cleartext policy for the Tor route. The relay's v3 `.onion` twin is reached
+// as plain ws:// BY DESIGN — Tor's rendezvous encryption is the transport
+// security, and no CA issues `.onion` certs we could pin instead. Android's
+// API-28+ default (cleartext blocked everywhere) is kept for ALL other hosts:
+// this network-security-config carves out `.onion` names only, so no clearnet
+// connection can silently downgrade. Renderer-side twin: allowMixedContent in
+// capacitor.config.ts (Chromium otherwise kills ws:// from an https origin at
+// the WebSocket constructor — measured on-device 2026-07-11).
+const NSC_DIR = resolve(here, '../android/app/src/main/res/xml')
+mkdirSync(NSC_DIR, { recursive: true })
+writeFileSync(resolve(NSC_DIR, 'network_security_config.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Explicitly restate the platform default: no cleartext anywhere… -->
+    <base-config cleartextTrafficPermitted="false" />
+    <!-- …except .onion, whose transport security is Tor itself (ws:// is the
+         correct scheme — see app/src/relays.ts ONION_RELAYS). -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">onion</domain>
+    </domain-config>
+</network-security-config>
+`)
+console.error('wrote res/xml/network_security_config.xml (cleartext: .onion only)')
+if (!xml.includes('android:networkSecurityConfig=')) {
+  xml = xml.replace(/(<application\b)/, '$1 android:networkSecurityConfig="@xml/network_security_config"')
+  changed = true
+} else if (!xml.includes('android:networkSecurityConfig="@xml/network_security_config"')) {
+  // Self-heal a stale value rather than add-once (the lesson from the
+  // FGS-type drift: a cached generated project must not pin old config).
+  xml = xml.replace(/android:networkSecurityConfig="[^"]*"/, 'android:networkSecurityConfig="@xml/network_security_config"')
   changed = true
 }
 

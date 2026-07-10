@@ -23,6 +23,16 @@ const config: CapacitorConfig = {
     // over an existing app is a normal update (no data loss). Never set for a
     // build shipped to the public get-page.
     webContentsDebuggingEnabled: process.env.FLOCK_E2E_HARDWARE === '1',
+    // The Tor route talks to the relay's v3 `.onion` twin as plain ws:// (Tor
+    // IS the transport security; no CA issues `.onion` certs to pin). Chromium
+    // kills any insecure WebSocket from an https origin at the CONSTRUCTOR —
+    // measured in this WebView 2026-07-11 — so mixed content must be allowed
+    // for the onion route to exist at all. The loosening is fenced at the
+    // network layer: the committed network-security-config (patch-android.mjs)
+    // keeps cleartext BLOCKED for every host except `.onion`, and profile
+    // avatars are https-only (app/src/profiles.ts), so no clearnet request
+    // can quietly downgrade because of this flag.
+    allowMixedContent: true,
   },
 }
 

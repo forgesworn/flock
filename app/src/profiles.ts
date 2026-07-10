@@ -40,7 +40,10 @@ function parseProfile(content: string): Profile | null {
     const name = typeof o.display_name === 'string' && o.display_name.trim()
       ? o.display_name.trim()
       : typeof o.name === 'string' ? o.name.trim() : ''
-    const picture = typeof o.picture === 'string' && /^https?:\/\//.test(o.picture) ? o.picture : ''
+    // https only: with mixed content allowed in the native shell (the Tor
+    // route needs it — capacitor.config.ts), an http:// avatar would really
+    // fetch over cleartext, handing an observer a per-member tracking beacon.
+    const picture = typeof o.picture === 'string' && /^https:\/\//.test(o.picture) ? o.picture : ''
     if (!name && !picture) return null
     return { ...(name ? { name } : {}), ...(picture ? { picture } : {}) }
   } catch { return null }

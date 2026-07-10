@@ -90,4 +90,14 @@ describe('fetchProfiles — per-pubkey REQs (audit F3: unbatch the roster)', () 
     expect(updated).toBe(true)
     expect(getProfile(PK_A)).toEqual({ name: 'Alex', picture: 'https://example.com/a.jpg' })
   })
+
+  it('drops a cleartext http:// picture (mixed content is allowed for the onion route, so http would actually fetch)', async () => {
+    const { fetchProfiles, getProfile } = await freshProfiles()
+    subscribeProfilesMock.mockImplementation((_relays, pks, onEvent) => {
+      onEvent({ pubkey: pks[0] as string, content: JSON.stringify({ name: 'Alex', picture: 'http://tracker.example/a.jpg' }), created_at: 1 })
+      return () => { /* noop */ }
+    })
+    fetchProfiles([PK_A], () => { /* noop */ })
+    expect(getProfile(PK_A)).toEqual({ name: 'Alex' })
+  })
 })
