@@ -29,15 +29,26 @@ quick actions** (Check in · Come to me · Where are you? · Call me · On my wa
 no-report zones still cap it). Family/night-out modes collapsed to one persistent
 share-live mode (invite wire format unchanged).
 
-**Open by default (2026-07-09):** the default posture flipped from opt-in to
-**sharing ON the moment you're in a circle**, at **Exact-spot** precision — the
-slider now dials *down* from full detail rather than up from off. Sharing
-auto-starts at boot / create / join (`maybeAutoShare`, one-shot per launch via
-`autoShareApplied`); the Home toggle reads **"Go private" ⇄ "Share"** and going
-private is **session-only** (defaults back on next launch). NB: this contradicts
-the "location off by default" row scored as a Flock win in
-`docs/research/2026-07-06-competitor-landscape.md` — that comparison needs a
-re-score (flagged, not yet done).
+**Privacy default restored (2026-07-10, superseding 2026-07-09):** sharing is
+off at boot/create/join and requires a deliberate tap. New circles start at
+Neighbourhood (precision 6), and remote exact lost-phone consent starts off.
+Once deliberately started in the Android app, sharing still continues while the
+phone is locked/in Doze through the native foreground service until the user
+stops it or a documented teardown condition occurs. The brief open-by-default,
+Exact-spot implementation (`maybeAutoShare` / `autoShareApplied`) was removed.
+
+**Preview access split (decision recorded 2026-07-10; not yet implemented):**
+keep `/` as a public project/features site with public APK and source/download
+links, and move the usable PWA to `/app/`. Normal PWA and APK startup should
+require an operator-issued, signed, expiring preview grant before the existing
+18+/consenting-adults acknowledgement. Carry a web grant in a URL fragment such
+as `/app/#access=...` so ordinary HTTP requests do not include it; verify it
+locally against a bundled public key and store only the resulting local grant.
+The APK must enforce the same grant because a public download with an ungated
+client defeats the restriction. Preserve existing circle invite deep links and
+service-worker scope during the migration. A hidden URL, `noindex`, or shared
+password embedded in the client is not access control, and this preview gate is
+not highly effective age assurance.
 
 **Parked post-MVP — removed from the app UI only; the library keeps every module
 tested and exported:** SOS/duress (incl. stand-down, covert holds, breadcrumb

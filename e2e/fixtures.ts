@@ -27,6 +27,15 @@ export async function settle(page: Page, ms = 1500): Promise<void> {
   await page.waitForTimeout(ms)
 }
 
+/** Accept the current adult-only boundary on a fresh browser profile. */
+export async function acceptLegal(page: Page): Promise<void> {
+  const enter = page.getByRole('button', { name: 'Enter flock' })
+  await expect(enter).toBeVisible()
+  await page.getByLabel('I am 18 or older').check()
+  await page.getByLabel('I will only use flock with consenting adults').check()
+  await enter.click()
+}
+
 /** Open a brand-new device: isolated storage, geolocation + clipboard granted.
  *  `opts.clock` installs Playwright's clock control before load, so a spec can
  *  fast-forward this device's time (e.g. to fire a dead-man's-switch).
@@ -53,6 +62,7 @@ export async function newPerson(
   const page = await context.newPage()
   if (opts.clock) await page.clock.install({ time: new Date() })
   await page.goto('/')
+  await acceptLegal(page)
   // Onboarding hero is the first screen for a fresh identity.
   await expect(page.getByRole('button', { name: 'Create a circle' })).toBeVisible()
   return page
@@ -132,10 +142,7 @@ export async function gotoTab(page: Page, tab: 'home' | 'chat' | 'circle' | 'you
 }
 
 /** Ensure foreground location sharing is ON (beacons at the slider's precision).
- *  Sharing is now ON by DEFAULT — it auto-starts once you're in a circle — so
- *  this waits for that to settle and only taps the toggle if it hasn't come up
- *  on its own (e.g. a denied permission reverted it). Idempotent: tapping an
- *  already-sharing toggle would turn it OFF, so we must not blind-click it. */
+ *  Sharing starts off, so this taps only when needed and remains idempotent. */
 export async function startSharing(page: Page): Promise<void> {
   await gotoTab(page, 'home')
   const toggle = page.locator(sel.toggleShare)
@@ -148,10 +155,7 @@ export async function startSharing(page: Page): Promise<void> {
   await settle(page) // let the first geolocation fix land before we act on it
 }
 
-/** Drop off ("Go private"): stop sharing, which also clears my own map pin
- *  (dropMyPresence). Handy when a test needs a map with only the OTHER person on
- *  it — everyone shares by default now, so my own pin is otherwise always there.
- *  Idempotent: only taps if currently sharing. */
+/** Drop off ("Go private"): stop sharing and clear my own map pin. Idempotent. */
 export async function goPrivate(page: Page): Promise<void> {
   await gotoTab(page, 'home')
   const toggle = page.locator(sel.toggleShare)
@@ -202,9 +206,7 @@ export async function openDmWith(page: Page, peerPk: string): Promise<void> {
 }
 
 /** A member row on the Circle tab, addressed by the pill it currently shows.
- *  Scoped to OTHER people's rows (never "You") — everyone shares by default now,
- *  so my own row also carries an "out" pill; these assertions are always about a
- *  fellow member, so excluding self keeps them unambiguous (no strict-mode clash). */
+ *  Scoped to OTHER people's rows because these assertions target a fellow member. */
 export function memberPill(page: Page, text: string | RegExp) {
   return page.locator('.member').filter({ hasNotText: 'You' }).locator('.pill', { hasText: text })
 }

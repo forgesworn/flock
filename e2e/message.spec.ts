@@ -90,9 +90,8 @@ test.describe('messaging — circle chat & private 1:1 threads', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // Everyone shares by default, so A's map would also carry A's own pin. Drop
-    // it (A goes private) so the only pin left is B's — proving that tapping a
-    // *member's* pin opens their thread (tapping your own opens nothing).
+    // Keep A private so the only pin is B's, proving that tapping a member's pin
+    // opens their thread (tapping your own opens nothing).
     await startSharing(B)
     await settle(A)
     await goPrivate(A)
@@ -119,8 +118,7 @@ test.describe('messaging — circle chat & private 1:1 threads', () => {
     await settle(B)
 
     // A messages B immediately — B has never emitted a beacon/buzz/join signal.
-    // Scope to B's row: A shares by default now, so A's own row also has a
-    // chevron (its "see on map"), and a bare .first() would be a coin flip.
+    // Scope to B's row so a bare selector never depends on self-row controls.
     await gotoTab(A, 'circle')
     const bRow = A.locator('.member').filter({ hasNotText: 'You' })
     await bRow.locator('[data-action="toggle-member-actions"]').click()

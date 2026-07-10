@@ -26,8 +26,8 @@ test.describe('map — the circle\'s live locations', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // Default is Exact spot now, which draws NO halo — so set A coarse first to
-    // exercise the "rough area" rendering below (a beacon auto-emits on sharing).
+    // Pin A to the neighbourhood default explicitly before exercising the rough
+    // area rendering below (a beacon emits after the deliberate Share tap).
     await setSharePrecision(A, 6)
     await startSharing(A)
 

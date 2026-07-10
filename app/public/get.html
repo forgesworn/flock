@@ -24,16 +24,16 @@
     h2 { font-size: 1.15rem; margin: 0 0 4px; }
     p { margin: 8px 0; }
     .tagline { color: var(--muted); margin-bottom: 20px; }
-    .logo { width: 64px; height: 64px; border-radius: 16px; }
+    .logo { width: 64px; height: 64px; border-radius: 8px; }
     .card {
       background: var(--surface); border: 1px solid var(--line);
-      border-radius: 18px; padding: 20px 22px; margin: 16px 0;
+      border-radius: 8px; padding: 20px 22px; margin: 16px 0;
     }
     .btn {
       display: block; width: 100%; text-align: center;
       background: var(--safe); color: #08110d;
       font-weight: 800; font-size: 19px; text-decoration: none;
-      border-radius: 16px; padding: 18px 22px; margin: 6px 0 10px;
+      border-radius: 8px; padding: 18px 22px; margin: 6px 0 10px;
     }
     .muted { color: var(--muted); font-size: .95rem; }
     ol { padding-left: 22px; margin: 10px 0; }
@@ -53,11 +53,14 @@
 <main>
   <img class="logo" src="./icon.svg" alt="" />
   <h1>Get flock</h1>
-  <p class="tagline">Stay close, stay private. Location is shared only when a moment needs it.</p>
+  <p class="tagline">Personal, non-commercial proof of concept for invited adults. Location is shared only when you choose.</p>
 
-  <a class="btn" href="./downloads/flock.apk" download>⬇&nbsp; Download flock for Android</a>
-  <p class="muted">Free. Works on any Android 7+ phone, including GrapheneOS. No Google Play,
-     no Google account, nothing phones home.</p>
+  <p class="muted"><strong>Experimental preview.</strong> This is not a production safety service, an emergency tool, or a child-tracking product. Do not redistribute it to children or rely on it as your only safety plan.</p>
+
+  <a class="btn" href="./downloads/flock.apk" download>Download flock for Android</a>
+  <p class="muted">Free. Works on any Android 7+ phone, including GrapheneOS. No Google Play
+     or Google account. flock connects to the relays and privacy services described in
+     the Privacy Policy.</p>
 
   <div class="card">
     <h2>Install it (takes a minute)</h2>
@@ -69,10 +72,10 @@
           account or tracking is involved in getting it.</span></li>
       <li>When you first share in the app, choose location
           <strong>“Allow all the time”</strong>. Android takes you to Settings for this.
-          <span class="why">Why: this lets flock notice you leaving a safe place while the
-          phone is in your pocket. It does <em>not</em> mean your location is shared all the
-          time. Sharing still follows flock's rules: only on a breach, a pick-up, or a call
-          for help.</span></li>
+          <span class="why">Why: this lets live sharing continue while the phone is locked.
+          flock starts private each time. It shares only after you deliberately tap
+          <strong>Share</strong>; tap <strong>Go private</strong> to stop. Changing Android
+          permission is a separate backstop.</span></li>
       <li>Allow the notification when asked.
           <span class="why">Why: Android requires a visible notice while an app watches
           location in the background. It only appears while sharing is on.</span></li>
@@ -93,20 +96,22 @@
 
   <div class="card">
     <h2>Why the app instead of the website?</h2>
-    <p>The app can keep watch <strong>in the background</strong>. It notices you leaving a
-       safe place even with the screen off. The website only works while it is open.</p>
-    <p>There is no account and no sign-up. flock makes an anonymous key that lives only on
-       your phone, so nothing links it to you. Use it as a guest and reset it whenever.</p>
+    <p>The app can keep live sharing active <strong>in the background</strong>, including
+       with the screen off. The website only shares while it is open.</p>
+    <p>There is no account and no sign-up. flock makes a pseudonymous key that lives only on
+       your phone. Network providers may still see connection metadata; read the privacy
+       policy for the full boundary. Reset the device copy whenever you need to.</p>
   </div>
 
   <div class="card">
     <h2>Any phone, no install</h2>
     <p>Open <a href="https://flock.forgesworn.dev/">flock.forgesworn.dev</a> and add it to your
-       home screen (iPhone: Share → <em>Add to Home Screen</em>). Everything works while the app
-       is open, including SOS, pick-ups and the live map.</p>
+       home screen (iPhone: Share → <em>Add to Home Screen</em>). The web preview supports circle
+       sharing, quick actions, messages, and the live map while it is open.</p>
   </div>
 
-  <p class="muted"><a href="./legal.html">Legal and safety notices</a></p>
+  <p class="muted"><strong>Adults 18+ only.</strong> Do not install or use flock to track a child or anyone who has not freely agreed.</p>
+  <p class="muted"><a href="./terms.html">Terms</a> · <a href="./privacy.html">Privacy</a> · <a href="./legal.html">Legal and safety</a> · <a href="./report.html">Report misuse</a></p>
   <a class="back" href="./">← Back to flock</a>
 </main>
 <script src="./get.js" defer></script>

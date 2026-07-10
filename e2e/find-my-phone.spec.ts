@@ -16,9 +16,12 @@ test.describe('find my phone — a pre-authorised lost phone answers with an exa
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // Standing consent for this circle to find its phone is on by default.
+    // Standing consent fails closed. A deliberately opts this trusted circle in.
     await gotoTab(A, 'circle')
-    await expect(A.locator('[data-action="toggle-ping-consent"]')).toHaveAttribute('aria-checked', 'true')
+    const consent = A.locator('[data-action="toggle-ping-consent"]')
+    await expect(consent).toHaveAttribute('aria-checked', 'false')
+    await consent.click()
+    await expect(consent).toHaveAttribute('aria-checked', 'true')
 
     // B discovers A on A's first signal.
     await sendBuzz(A, 'hello')
@@ -43,9 +46,7 @@ test.describe('find my phone — a pre-authorised lost phone answers with an exa
     await expect(A.locator('.findping-banner')).toBeVisible()
 
     // The window elapses (~10s) → A answers with one exact beacon → it reaches B:
-    // A's row on B's Circle tab now shows a live location ("last seen"). Scope to
-    // A's row (not "You"): B shares by default too, so B's own row also carries a
-    // "last seen".
+    // A's row on B's Circle tab now shows a live location ("last seen").
     await gotoTab(B, 'circle')
     await expect(B.locator('.member').filter({ hasNotText: 'You' }).locator('.when', { hasText: 'last seen' })).toBeVisible({ timeout: 25_000 })
   })

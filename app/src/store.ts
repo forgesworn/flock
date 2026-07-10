@@ -276,13 +276,10 @@ export function adoptLegacyFences(circles: Circle[], legacy?: Geofence[]): Circl
   return circles.map((c) => (c.geofences ? c : { ...c, geofences: [...legacy] }))
 }
 
-/** "Let my circle find my phone" is on by default (new circles set it at
- *  creation/join) — this migrates circles from before that default existed,
- *  so the change actually takes effect for people who already have circles,
- *  not just ones made from here on. Never overwrites an explicit choice
- *  (including a deliberate opt-out) — only an unset field counts. */
+/** Missing legacy consent must fail closed. Existing explicit choices remain
+ *  authoritative, including a deliberate opt-in made on this device. */
 export function withPingConsentDefault(circles: Circle[]): Circle[] {
-  return circles.map((c) => (c.pingConsent === undefined ? { ...c, pingConsent: true } : c))
+  return circles.map((c) => (c.pingConsent === undefined ? { ...c, pingConsent: false } : c))
 }
 
 const toHex = (b: Uint8Array): string =>
@@ -451,7 +448,7 @@ export function createCircle(name: string, mode: Mode, ownerPk: string, circleRo
     checkinInterval: 0,
     epoch: 0,
     reseededAt: Math.floor(Date.now() / 1000),
-    pingConsent: true,
+    pingConsent: false,
     ...(expiresAt ? { expiresAt } : {}),
   }
 }

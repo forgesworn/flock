@@ -1,4 +1,4 @@
-import { test, expect, createCircle } from './fixtures'
+import { test, expect, acceptLegal, createCircle } from './fixtures'
 import { BASE_URL } from '../playwright.config'
 
 test.describe('location permission denied — a way out, not a dead end (audit Slice 8)', () => {
@@ -14,6 +14,7 @@ test.describe('location permission denied — a way out, not a dead end (audit S
     })
     const A = await context.newPage()
     await A.goto('/')
+    await acceptLegal(A)
     await expect(A.getByRole('button', { name: 'Create a circle' })).toBeVisible()
     await createCircle(A, { name: 'The Smiths' })
     await A.click('[data-action="tab"][data-tab="home"]')

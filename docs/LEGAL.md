@@ -1,11 +1,46 @@
 # flock legal and safety notices
 
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 This is a practical legal-risk checklist for flock, not legal advice. Before a
 public launch, paid offering, app-store submission, or high-risk deployment, have
 counsel turn this into jurisdiction-specific terms, a privacy policy, and any
 required consumer, child-safety, export, and data-protection disclosures.
+
+## Current public posture
+
+Flock is currently a personal, free, non-commercial proof of concept published
+by one individual for invited adults; there is no company operating it. The
+hosted preview is explicitly **18+**. It must not be used to install, configure,
+or operate flock on a child's device or to obtain or share a child's location,
+even by a parent or guardian. This is an interim risk boundary, not a claim that
+age wording alone discharges UK child-safety duties.
+
+The operative public pages are:
+
+- `app/public/terms.html` — hosted-service terms and acceptable-use rules
+- `app/public/privacy.html` — UK-oriented privacy information mapped to real data flows
+- `app/public/legal.html` — short, prominent safety and age notices
+- `app/public/report.html` — illegal-use, safeguarding, privacy, and review route
+
+The product now enforces the boundary before normal startup: both adult-use
+confirmations are required and recorded locally against a versioned notice.
+Location sharing starts off on every launch, new circles start at neighbourhood
+detail, and remote exact lost-phone permission starts off per circle. Once an
+adult deliberately starts Android sharing, the foreground service/native
+publisher remains a hard requirement so it continues while locked and in Doze.
+These are privacy defaults, not a claim of highly effective age assurance.
+
+The one-person POC facts and reassessment triggers are in
+`docs/legal/POC-POSTURE.md`. Remaining work that policy text cannot solve is
+tracked in `docs/legal/UK-LEGAL-READINESS.md`. Supporting records are in
+`docs/legal/DPIA.md`, `docs/legal/ROPA.md`,
+`docs/legal/UK-CHILDRENS-ACCESS-ASSESSMENT.md`,
+`docs/legal/UK-ILLEGAL-CONTENT-RISK-ASSESSMENT.md`, and
+`docs/legal/EU-SCOPE.md`. In particular, the operator's legal identity,
+monitored contact channels, applicable address requirements, scope decisions,
+and accountable approvals remain open. The pages must not be described as
+counsel-approved or a guarantee of compliance.
 
 ## What Signal's public posture tells us
 
@@ -73,9 +108,10 @@ safety plan.
 ### Consent and misuse
 
 flock must not be used to track, harass, stalk, coerce, or monitor someone
-without their consent or a lawful guardian basis. Adults should join voluntarily
-and be able to leave. A parent or guardian deploying flock for a minor should
-check local law and explain what is being shared in age-appropriate language.
+without their informed, freely given participation. Adults should control their
+own device and be able to stop sharing or leave. The current hosted preview must
+not be installed or operated on behalf of a minor, including by a parent or
+guardian.
 
 ### Privacy limits
 
@@ -162,20 +198,27 @@ personal data. The POC posture should be:
 ### Children and families
 
 The highest UK/EU risk is marketing this as a child-tracking or family-monitoring
-product while it is still a POC. UK ICO guidance treats children's location data
-as high-risk, and UK children under 13 cannot consent to online-service data
-processing themselves. Under EU GDPR Article 8, the digital-consent age is 16
-unless a member state lowers it, never below 13.
+product. UK ICO guidance treats tracking children's location as high-risk. The
+Children's Code applies to services likely to be accessed by children, not only
+services that say they target children. If consent is the chosen lawful basis for
+an information society service offered directly to a UK child, a child under 13
+cannot provide that consent themselves; this is not a general permission for a
+parent to impose location tracking.
 
-Until there is a proper child-safety/privacy review:
+Current rule:
 
-- do not market the APK/PWA as a product for children
-- do not tell parents to deploy it to minors as a standing tracker
-- keep test groups adult or parent/guardian-supervised
-- keep location sharing visibly under the device holder's control
-- for any child-facing build, make geolocation off by default unless a documented
-  best-interests reason justifies otherwise, show an obvious active-sharing
-  indicator, and use child-readable wording
+- the hosted preview is 18+ only
+- do not market the APK/PWA as a product for children or families with children
+- do not install or configure it on a child's device, create an identity for a
+  child, invite a child, or use it to process a child's location
+- keep all test groups adult-only
+- do not imply that parental responsibility by itself resolves the child's own
+  privacy, best-interests, transparency, or data-rights position
+
+A later child-facing release requires the separate gate in
+`docs/legal/UK-LEGAL-READINESS.md`, including a DPIA, best-interests assessment,
+age-appropriate design, age and parental-responsibility handling, child-readable
+privacy information, and materially different location defaults.
 
 ### Online safety / user-to-user scope
 
@@ -204,17 +247,21 @@ Get a real UK/EU legal review before any of these:
 
 ## Public launch checklist
 
-- Add and keep `/legal.html` available on the PWA and APK download host.
-- Link the legal page from the app settings/You screen, install page, README, and
-  any app-store or APK download page.
-- Add a first-run acknowledgement if counsel recommends explicit acceptance
-  before safety-critical use.
-- Fill in the operating entity, contact address, privacy contact, governing law,
-  dispute venue, age/minor policy, and consumer-rights carve-outs.
+- Keep `/legal.html`, `/terms.html`, `/privacy.html`, and `/report.html`
+  available on the PWA and APK download host.
+- Link Terms, Privacy, and safety notices from the app settings/You screen,
+  onboarding, install page, README, and any app-store or APK download page.
+- [x] Require the versioned adult-use and consenting-adults acknowledgement
+  before normal startup. It is contract evidence, not age assurance.
+- Fill in the operator's legal identity; confirm any applicable address
+  requirement; configure and test the legal, privacy, and abuse email aliases.
+  Do not deploy placeholders.
 - Decide whether flock is a pure self-hosted software project, a hosted service,
   or both. The terms need to match that real deployment.
-- Add a UK/EU privacy notice before a real launch, even if the answer is "we
-  collect almost nothing".
+- Have UK counsel review the Terms and Privacy Policy before a real launch; the
+  repo drafts are an engineering and factual baseline, not signed-off advice.
+- Complete the ICO fee assessment, ROPA/LIA/DPIA work, and Online Safety Act
+  scope, illegal-content, and children's-access assessments.
 - Generate and ship third-party notices for production bundles and APKs.
 - Run an export-control review before broad international distribution.
 - Keep privacy claims aligned with `docs/PRIVACY.md`; never say "anonymous by

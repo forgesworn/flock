@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy policy | flock</title>
+  <meta name="description" content="Privacy policy for the flock hosted preview and app." />
+  <meta name="theme-color" content="#0e1116" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="./legal.css" />
+</head>
+<body>
+<main>
+  <div class="masthead"><img class="logo" src="./icon.svg" alt="" /><span class="wordmark">flock</span></div>
+  <nav aria-label="Legal pages">
+    <a href="./legal.html">Legal and safety</a>
+    <a href="./terms.html">Terms</a>
+    <a aria-current="page" href="./privacy.html">Privacy</a>
+    <a href="./report.html">Report misuse</a>
+    <a href="./">Open flock</a>
+  </nav>
+
+  <h1>Privacy policy</h1>
+  <p class="lede">flock is a personal, free, non-commercial proof of concept designed to keep location and message content on your device and inside your chosen circles. This policy explains what the individual operator still processes, what other participants and infrastructure can see, and what choices you have.</p>
+  <p class="meta">Effective 10 July 2026 · Last updated 10 July 2026</p>
+
+  <div class="notice critical">
+    <p><strong>flock is currently for adults aged 18 and over.</strong> It must not be used to collect, share, or monitor a child's location or other personal information.</p>
+  </div>
+
+  <h2>1. Who this policy covers</h2>
+  <p>This policy covers the hosted preview at <code>flock.forgesworn.dev</code>, its app downloads, same-origin map and geocoding proxies, offline-map extract endpoint, and any relay explicitly described as operator-provided.</p>
+  <p>There is no company behind the preview. The person determining the relevant hosted-service processing is the individual maintainer publishing flock under the name “TheCryptoDonkey”. An individual can still be a data controller. The full legal identity and any further contact or representative details required for the actual countries and scope must be completed before broader distribution or reliance on this as a final public privacy notice. Contact: <a href="mailto:privacy@forgesworn.dev">privacy@forgesworn.dev</a>.</p>
+  <p>This policy does not cover a self-hosted deployment, a relay you add, a VPN or Tor provider, a remote signer, your operating system or browser, or another circle member's handling of information.</p>
+
+  <h2>2. The short version</h2>
+  <ul>
+    <li>No flock account, phone number, or email address is required.</li>
+    <li>Location, messages, circle membership, and chosen names are end-to-end encrypted for the intended recipients.</li>
+    <li>Keys, readable chats, saved places, and recent map presence live on devices, not in a flock account database.</li>
+    <li>The canonical website has no advertising, analytics pixels, behavioural profiling, or non-essential cookies.</li>
+    <li>Relays and infrastructure providers can still observe connection metadata. Circle members can see and retain content sent to them.</li>
+  </ul>
+
+  <h2>3. Information on your device</h2>
+  <p>Depending on the features you use, flock stores an identity key or public signer reference, circle secrets and member keys, chosen names and nicknames, relay settings, location-sharing preferences, private-place settings, recent presence, chat and direct-message history, app-lock material, and optional public profile cache in browser or app storage. Offline maps are stored in device file storage.</p>
+  <p>A separate local record stores the legal-notice version, the two adult-use confirmations, and the time they were accepted. It is used only to enforce the entry gate on that browser or app installation. It is not sent to the operator and remains until site or app storage is cleared or the app is uninstalled.</p>
+  <p>App lock encrypts the main local state at rest. Without App lock, the main state is readable local storage on that device. Device backups are encrypted with the passphrase you choose. We do not receive the backup or passphrase.</p>
+  <p>Recent presence is pruned after six hours when state loads. Chat is capped at 200 messages per thread and is removed when its last associated circle relationship is removed. Other device data remains until you remove a circle, reset flock, clear the app or browser storage, or uninstall it. Browser caches and offline maps may need to be cleared separately through browser or device controls.</p>
+
+  <h2>4. Information sent to circle members</h2>
+  <p>When you share, flock sends the location detail, message, status, or request you select to the intended circle or person. It is encrypted in transit, but the recipients can read it. They may copy, screenshot, export, infer, or retain it. You should only join circles whose members you trust.</p>
+  <p>Location sharing begins only after you deliberately turn it on and returns to private when a new app session starts. New circles start at neighbourhood-level detail; you can choose a rougher or more precise level. The separate permission that lets a lost phone answer a circle's one-shot exact-location request is also off by default. The app shows when sharing is active and provides controls for stopping it and changing detail. Operating-system location permission is separate from the in-app sharing control.</p>
+  <p>In the Android app, a sharing session you deliberately start can continue through screen lock, background use, and Doze using a location foreground service and a persistent Android notification. It continues until you tap <strong>Go private</strong>, hide or reset flock, revoke the required permission, or the operating system stops it. Android may ask you to allow background location and exempt flock from battery optimisation. The website cannot reliably share while it is hidden.</p>
+
+  <h2>5. Information processed by operator-controlled services</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Activity</th><th>Information and purpose</th><th>Retention</th><th>UK GDPR basis</th></tr></thead>
+      <tbody>
+        <tr><td>Website and APK delivery</td><td>IP address, request time, requested file, user agent, and transport data are handled to deliver and secure the connection. Caddy access logs are disabled, but the hosting and network provider may process operational metadata.</td><td>No application access log. Provider-level records follow the provider's controls and retention.</td><td>Legitimate interests in providing and securing the requested service.</td></tr>
+        <tr><td>Map tiles</td><td>The proxy receives tile coordinates. It requests the tile upstream without forwarding your IP or referring page.</td><td>No application access log. Tiles may be cached for up to seven days.</td><td>Legitimate interests in privately providing the map you request.</td></tr>
+        <tr><td>Place and venue search</td><td>The proxy handles the search text or area you submit and forwards it from the server to the relevant OpenStreetMap service without forwarding your IP.</td><td>No application access log; responses are marked not to be stored in shared caches.</td><td>Legitimate interests in providing the search you request.</td></tr>
+        <tr><td>Offline map extract</td><td>The service handles the area boundary you choose. A per-process salted hash of your IP and request times rate-limits abuse.</td><td>The IP hash and times are held in memory for about ten minutes. The temporary map extract is deleted when the request ends. The boundary is not logged.</td><td>Legitimate interests in providing the download and protecting shared infrastructure.</td></tr>
+        <tr><td>Operator-provided relay</td><td>The relay handles your IP, connection timing, subscriptions, and encrypted Nostr envelopes so it can route them. Message type, readable content, real sender identity, and location are inside the encryption.</td><td>Encrypted events request expiry after about 16 days. A relay may fail to honour expiry. Connection metadata is not intentionally logged by the application; infrastructure providers may still observe it.</td><td>Legitimate interests in delivering encrypted traffic requested by users.</td></tr>
+        <tr><td>Legal, privacy, security, or abuse contact</td><td>Your email address and anything you choose to send are used to respond, investigate, protect people and the Services, and meet legal duties.</td><td>Kept only as long as reasonably needed for the request, security record, dispute, or legal obligation.</td><td>Legitimate interests, legal obligation, or establishing and defending legal claims.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>We do not use solely automated decision-making that produces legal or similarly significant effects, and we do not sell or rent personal information.</p>
+
+  <h2>6. Relays and network metadata</h2>
+  <p>Encryption does not hide every connection fact. A relay or network provider may see an IP address, time, duration, bandwidth, connection count, destination, and ciphertext volume. A VPN hides your home or mobile IP from the relay but gives that visibility to the VPN. Tor can provide stronger IP separation but may reduce reliability.</p>
+  <p>You can configure relays. A relay you add is a separate third party with its own jurisdiction, retention, and practices. Optional public-profile lookup contacts public Nostr relays and reveals that your device requested a particular public key; it is off by default.</p>
+
+  <h2>7. Sharing and recipients</h2>
+  <p>Personal information may be handled by intended circle recipients, Hetzner or another hosting and network provider, the configured Nostr relay operators, OpenStreetMap tile and search services through the privacy proxy, a remote signer you choose, and authorities where disclosure is legally required. We disclose only what we hold and can lawfully be required to provide; end-to-end encrypted content is not readable by the operator.</p>
+
+  <h2>8. International processing</h2>
+  <p>The canonical web host and privacy proxies are currently hosted in Germany. User-selected relays, VPNs, Tor routes, signers, and recipients may be anywhere. Selecting a third-party relay can cause information and metadata to be processed outside the UK. Before a broader launch, the operator must document providers, locations, transfer roles, and any required UK transfer safeguard.</p>
+  <p>Whether EU GDPR applies depends on the controller's establishment and whether the Services are offered to or monitor people in the EEA. Those facts are not yet final. Before an EEA-targeted offering, we must publish any required EU representative, relevant supervisory-authority information, processor arrangements, and safeguards for transfers outside the EEA.</p>
+
+  <h2>9. Security</h2>
+  <p>flock uses end-to-end encryption, rotating pseudonymous identifiers, encrypted invitation delivery, no account database, restrictive web headers, short-lived server state, and no application access logs on the canonical host. No system is completely secure. Endpoint compromise, unsafe circle members, leaked invitations, weak device security, malicious builds, network observation, and software defects remain risks.</p>
+
+  <h2>10. Your choices and rights</h2>
+  <p>You can stop location sharing, reduce its detail, leave or remove a circle, disable optional public profiles, change relays, reset the app, clear site storage, and uninstall flock. Because readable content and keys are held on devices, those controls are usually the direct way to erase them.</p>
+  <p>Depending on the circumstances, UK data protection law may give you rights to be informed, access information, correct it, erase it, restrict its use, receive portable information, and object to processing based on legitimate interests. <strong>You have the right to object to processing based on our legitimate interests.</strong> Contact <a href="mailto:privacy@forgesworn.dev">privacy@forgesworn.dev</a>. We may need proportionate information to verify a request. With no account or application logs, we may hold nothing that lets us identify you, and we cannot decrypt or retrieve data held only on devices or by independent relays.</p>
+  <p>If EU GDPR applies, equivalent rights may include access, rectification, erasure, restriction, portability, objection, and the right to complain to the supervisory authority where you live, work, or believe an infringement occurred. No request requires you to waive a complaint right.</p>
+  <p>You can complain to the <a href="https://ico.org.uk/make-a-complaint/">UK Information Commissioner's Office</a>. If EU GDPR applies, you can find EU supervisory authorities through the <a href="https://www.edpb.europa.eu/about-edpb/about-edpb/members_en">European Data Protection Board</a>. Please contact us first where practical so we can investigate, but you do not have to do so.</p>
+
+  <h2>11. Required information and sources</h2>
+  <p>The local adult-use acknowledgement is required to enter the hosted app; without it the app does not start normal services. It is stored only on that installation. Other information is provided by you when you use a feature, generated by your device or network while delivering it, received from intended circle members, or supplied by someone making a report or rights request. No flock account profile is required.</p>
+
+  <h2>12. Children</h2>
+  <p>The Services are not offered to anyone under 18 and must not be used by an adult to track a child. If you believe a child is using flock or a child's information is being shared through an operator-controlled service, contact <a href="mailto:privacy@forgesworn.dev">privacy@forgesworn.dev</a> without sending unnecessary location detail.</p>
+  <p>The first-use adult confirmation is a contractual restriction and self-declaration; it is not document, biometric, or other high-assurance age verification. We review evidence about actual child access and must reassess access controls and child-safety measures if children are likely to use the Services.</p>
+
+  <h2>13. Changes</h2>
+  <p>We will update this policy when the service, operator, providers, or legal position changes. Material changes will be dated and presented through the website or app where practical.</p>
+
+  <footer><p>Privacy questions and rights requests: <a href="mailto:privacy@forgesworn.dev">privacy@forgesworn.dev</a>. Misuse and safeguarding: <a href="./report.html">report here</a>.</p></footer>
+</main>
+</body>
+</html>

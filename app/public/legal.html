@@ -3,88 +3,63 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>flock legal and safety notices</title>
-  <meta name="description" content="Legal, safety, privacy, and open-source notices for flock." />
+  <title>Legal and safety | flock</title>
+  <meta name="description" content="Terms, privacy, age limits, and safety notices for flock." />
   <meta name="theme-color" content="#0e1116" />
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
-  <style>
-    :root {
-      --bg: #0e1116; --surface: #161b22; --line: rgba(255,255,255,.1);
-      --text: #eef1f5; --muted: #b7c2d0; --safe: #5fd0a8; --calm: #8db8ff;
-      color-scheme: dark;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; background: var(--bg); color: var(--text);
-      font: 17px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      display: flex; justify-content: center; padding: 32px 20px 64px;
-    }
-    main { max-width: 760px; width: 100%; }
-    h1 { font-family: Georgia, serif; font-weight: 600; font-size: 2.1rem; margin: 18px 0 6px; }
-    h2 { font-size: 1.15rem; margin: 28px 0 6px; }
-    p, li { color: var(--muted); }
-    strong { color: var(--text); }
-    a { color: var(--calm); }
-    .logo { width: 64px; height: 64px; border-radius: 16px; }
-    .card {
-      background: var(--surface); border: 1px solid var(--line);
-      border-radius: 18px; padding: 20px 22px; margin: 16px 0;
-    }
-    .lede { color: var(--text); font-size: 1.05rem; }
-    .back { display: inline-block; margin-top: 26px; }
-  </style>
+  <link rel="stylesheet" href="./legal.css" />
 </head>
 <body>
 <main>
-  <img class="logo" src="./icon.svg" alt="" />
-  <h1>flock legal and safety notices</h1>
-  <p class="lede">flock is preview safety and privacy software. These notices explain the limits that matter before you rely on it.</p>
-  <p>Last updated: 2026-07-09. This page is a product notice, not legal advice or a complete contract for every jurisdiction.</p>
+  <div class="masthead"><img class="logo" src="./icon.svg" alt="" /><span class="wordmark">flock</span></div>
+  <nav aria-label="Legal pages">
+    <a aria-current="page" href="./legal.html">Legal and safety</a>
+    <a href="./terms.html">Terms</a>
+    <a href="./privacy.html">Privacy</a>
+    <a href="./report.html">Report misuse</a>
+    <a href="./">Open flock</a>
+  </nav>
 
-  <div class="card">
-    <h2>No emergency services</h2>
-    <p><strong>flock is not an emergency service.</strong> It does not contact police, ambulance, fire, hospitals, rescue services, or public-safety organisations. If someone is in immediate danger, use a telephone or another emergency channel such as 112, 999, 911, or the local emergency number.</p>
+  <h1>Legal and safety</h1>
+  <p class="lede">flock is a personal, free, non-commercial location-sharing proof of concept for invited adults. It is not a company product or production safety service. These notices set the boundaries that matter before you test it.</p>
+  <p class="meta">Effective 10 July 2026 · Last updated 10 July 2026</p>
+
+  <div class="notice critical">
+    <p><strong>Adults only. Do not use flock to track a child.</strong></p>
+    <p>You must be at least 18 to use flock. Do not install or configure it on a child's device, create an identity for a child, invite a child to a circle, or use it to obtain or share a child's location. This restriction applies even if you are a parent or guardian.</p>
   </div>
 
-  <div class="card">
-    <h2>Location can fail</h2>
-    <p>Location can be approximate, stale, unavailable, delayed, or wrong. Delivery can fail because of battery settings, permissions, GPS availability, operating-system background limits, mobile-network failure, relay outage, Tor/VPN failure, device loss, or bugs. Notifications can arrive late or not at all. Keep a backup safety plan.</p>
+  <div class="legal-links">
+    <a href="./terms.html">Terms of use<span>Age limit, acceptable use, service limits, and liability.</span></a>
+    <a href="./privacy.html">Privacy policy<span>What stays on devices, what crosses the network, and what the operator can see.</span></a>
+    <a href="./report.html">Report misuse<span>Illegal use, stalking, coercion, child-safety, and privacy concerns.</span></a>
   </div>
 
-  <div class="card">
-    <h2>Consent and misuse</h2>
-    <p>Do not use flock to track, harass, stalk, coerce, or monitor someone without consent or a lawful guardian basis. Adults should join voluntarily and be able to leave. A parent or guardian using flock with a minor should check local law and explain what is shared in age-appropriate language.</p>
-  </div>
+  <h2>Not an emergency service</h2>
+  <p><strong>flock does not contact police, ambulance, fire, hospitals, rescue services, or public-safety organisations.</strong> If someone is in immediate danger, call 999 or 112 in the UK, or use the local emergency number. Keep another way to contact the people you rely on.</p>
 
-  <div class="card">
-    <h2>UK/EU prototype limits</h2>
-    <p>flock is a non-commercial proof of concept, not a public child-tracking, workplace-monitoring, medical, elder-care, or emergency-response service. Until there is a formal UK/EU privacy and child-safety review, use it only with adults or parent/guardian-supervised test groups who understand what is shared.</p>
-    <p>Children may have extra legal protections. In the UK, children under 13 cannot consent to online-service data processing themselves; in the EU, the age can vary by member state. Do not deploy flock as a standing tracker for a child unless you have a lawful basis and have explained the sharing clearly.</p>
-  </div>
+  <h2>Location and delivery can fail</h2>
+  <p>A location can be approximate, stale, delayed, unavailable, or wrong. After you deliberately start sharing in the Android app, it is designed to continue while the phone is locked and in Doze, with a persistent system notification. Battery settings, permissions, GPS conditions, operating-system limits, lost connectivity, relay failure, Tor or VPN failure, a damaged or lost device, and software defects can still interrupt it. Messages and notifications can arrive late or not at all. Do not use flock as your only safety plan.</p>
 
-  <div class="card">
-    <h2>Privacy limits</h2>
-    <p>flock minimises what the service can learn. It does not make the network invisible. Encrypted payloads hide message and location content from relays, but network operators can still see metadata such as IP address, timing, bandwidth, destination domain, and connection count unless you route through Tor or a VPN.</p>
-    <p>This site does not need analytics, advertising pixels, or non-essential cookies. Third parties may include Nostr relays, OpenStreetMap tile/geocoding/Overpass infrastructure, hosting providers, Tor/Orbot, VPNs, Android, browser vendors, remote signers, and notification systems. Their terms and privacy policies may apply.</p>
-  </div>
+  <h2>Consent is not optional</h2>
+  <p>Every adult in a circle must knowingly choose to take part and must control their own device and sharing. Do not hide an installation, pressure someone to join, defeat a device permission, or use flock for stalking, harassment, coercive control, domestic abuse, employee monitoring, or surveillance. A circle invitation is not permission to monitor someone indefinitely.</p>
 
-  <div class="card">
-    <h2>Open source and warranty</h2>
-    <p>flock is open-source software under the MIT Licence. It is provided as-is, without a guarantee that it will be secure, available, accurate, uninterrupted, or fit for any particular safety situation, to the maximum extent permitted by law. Nothing here is intended to remove rights or liabilities that cannot lawfully be excluded in the UK or EU.</p>
-    <p>The source code, licence, security policy, privacy threat model, and APK verification instructions are published in the <a href="https://github.com/forgesworn/flock">flock repository</a>.</p>
-  </div>
+  <h2>Why child use is excluded</h2>
+  <p>Location sharing may help families, but it can also expose a child's movements, reduce their private space, or be misused by an unsafe adult. A child-facing version needs a documented best-interests assessment, age-appropriate information and controls, a data protection impact assessment, suitable age and parental-responsibility checks, and different location defaults. The current preview has not completed that work.</p>
+  <p>A parent who ignores this restriction is responsible for their own breach and misuse. That does not make child use legally invisible: the child is still the person whose location is processed, and law can place separate duties on the service provider that designed and supplied the means. flock therefore uses an adult entry gate and private defaults rather than relying on parental responsibility alone.</p>
 
-  <div class="card">
-    <h2>Cryptography and law</h2>
-    <p>flock includes cryptographic software. Users, distributors, and operators are responsible for complying with applicable export, import, sanctions, and local encryption laws. Do not distribute or use flock where doing so would be unlawful.</p>
-  </div>
+  <h2>Privacy has limits</h2>
+  <p>flock encrypts message and location content for the intended circle and does not require a flock account. That does not make the network invisible. Relays and infrastructure providers may still observe IP addresses, connection times, traffic volume, and destination information. Circle members can see, copy, photograph, or retain anything shared with them. Tor or a VPN changes who can observe an IP address; it does not make a recipient trustworthy.</p>
 
-  <div class="card">
-    <h2>Trademarks and affiliation</h2>
-    <p>flock and ForgeSworn are independent projects. Signal is a trademark of Signal Technology Foundation. flock is not affiliated with, sponsored by, or endorsed by Signal.</p>
-  </div>
+  <h2>Open-source software and hosted services</h2>
+  <p>The source code is provided under the MIT Licence. The hosted preview at <code>flock.forgesworn.dev</code>, its privacy proxies, downloads, and any operator-provided relay are services governed by the <a href="./terms.html">Terms</a>. A self-hosted deployment has its own operator, terms, privacy practices, and responsibility.</p>
 
-  <a class="back" href="./">Back to flock</a>
+  <h2>Independent project</h2>
+  <p>flock and ForgeSworn are independent projects. Signal is a trademark of Signal Technology Foundation. flock is not affiliated with, sponsored by, or endorsed by Signal.</p>
+
+  <footer>
+    <p>Questions about these notices: <a href="mailto:legal@forgesworn.dev">legal@forgesworn.dev</a>. Privacy requests: <a href="mailto:privacy@forgesworn.dev">privacy@forgesworn.dev</a>. Misuse and safeguarding: <a href="./report.html">report here</a>.</p>
+  </footer>
 </main>
 </body>
 </html>

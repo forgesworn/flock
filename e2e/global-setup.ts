@@ -17,6 +17,12 @@ export default async function globalSetup(): Promise<void> {
         await page.waitForTimeout(1_000)
       }
     }
+    const enter = page.getByRole('button', { name: 'Enter flock' })
+    if (await enter.isVisible().catch(() => false)) {
+      await page.getByLabel('I am 18 or older').check()
+      await page.getByLabel('I will only use flock with consenting adults').check()
+      await enter.click()
+    }
     await page.getByRole('button', { name: 'Create a circle' }).waitFor({ timeout: 30_000 }).catch(() => { /* best effort */ })
     await page.waitForTimeout(1_500)
   } finally {

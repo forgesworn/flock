@@ -9,7 +9,7 @@ describe('shouldRing', () => {
     expect(shouldRing({ targetedAtMe: true, iAmFlaggedLost: true })).toBe(true)
   })
 
-  // SAFETY: a normal targeted buzz (parent → child "come home") must NOT blast an
+  // SAFETY: a normal targeted buzz (friend → friend "come home") must NOT blast an
   // alarm — only a phone the circle has flagged lost rings.
   it('does not ring a phone that is not flagged lost', () => {
     expect(shouldRing({ targetedAtMe: true, iAmFlaggedLost: false })).toBe(false)

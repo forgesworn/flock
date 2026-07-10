@@ -94,9 +94,8 @@ test.describe('quick actions', () => {
   // camera to empty terrain — the location was never recorded, so no pin was
   // drawn. The recorded-location guard is the see-shared-location BUBBLE below
   // (it only exists once B has recorded the PM location); the map jump then
-  // confirms it frames A's pin. (Sharing is on by default now, so both also
-  // ambient-share — A's pin would be on the map regardless; we target A's pin
-  // specifically rather than asserting it's the only one.)
+  // confirms it frames A's pin. This one-shot share does not turn on ambient
+  // sharing, so the location comes from the private quick action itself.
   test('PM "Come to me" — B can actually SEE A\'s exact spot on the map', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)

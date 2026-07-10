@@ -32,6 +32,7 @@ import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildD
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
 import { generateStorageSecret, setupPin, unlockWithPin, unlockWithGrace, burnLock } from './lock'
+import { hasLegalAcceptance, recordLegalAcceptance } from './legalAcceptance'
 import {
   decideEmission,
   haversineMetres,
@@ -60,17 +61,12 @@ import {
 
 // ── State ──────────────────────────────────────────────────────────────────
 let persisted = store.load()
+let legalAccepted = hasLegalAcceptance()
 let tab: 'home' | 'chat' | 'circle' | 'you' = 'home'
 let fix: svc.Fix | null = null
-// flock's default posture is OPEN: once you're in a circle, you share your
-// location. `sharing` starts false only until maybeAutoShare() flips it on at
-// boot / right after create/join (see there). "Go private" (stopSharing) drops
-// you off for the rest of the session; it defaults back ON on the next launch —
-// a deliberate product choice (session-only, never persisted).
+// Location is private by default on every launch. Sharing begins only after a
+// deliberate tap and remains session-only, so closing/reopening returns to off.
 let sharing = false
-// One-shot latch so the open-by-default auto-share fires exactly once per launch
-// — never re-arming after a deliberate in-session "Go private".
-let autoShareApplied = false
 let geoIssue: 'denied' | 'nofix' | null = null // actionable location trouble shown as a card, not a toast
 let stopWatch: (() => void) | null = null
 let hidden = false // app backgrounded (page hidden) — pause sampling; a hidden PWA can't sample reliably anyway
@@ -114,6 +110,7 @@ let overlayLayer: HTMLElement
 let toastTimer = 0
 
 let mapView: MapView | null = null
+let mapInitToken = 0
 let offlineBBox: BBox | null = null // bounds of the active circle's saved map (null = not offline)
 let focusMemberPk: string | null = null // "see on map" target — frame their cell once the map mounts
 let focusGeohash: string | null = null // a one-off PM location share's cell — not a live circle beacon, framed once then forgotten
@@ -428,11 +425,9 @@ function todayWindowSec(): number {
 // spot). It never changes what the phone samples for itself, only what leaves it.
 const PRECISION_MIN = 3
 const PRECISION_MAX = 9
-// Default to the finest detail (Exact spot). flock's default posture is open —
-// everyone in a circle shares, precisely — and the slider is there to dial it
-// DOWN for anyone who wants a rougher share. A circle nobody has adjusted sees
-// each other's exact spot.
-const PRECISION_DEFAULT = 9
+// Start at neighbourhood detail. Exact disclosure remains available, but must
+// be a deliberate choice rather than the first location a new circle receives.
+const PRECISION_DEFAULT = 6
 const COME_TO_ME_PRECISION = 9 // the one-shot "come to me" disclosure
 const PRECISION_NAMES: Record<number, string> = {
   3: 'Region', 4: 'City', 5: 'Town', 6: 'Neighbourhood', 7: 'Street', 8: 'Building', 9: 'Exact spot',
@@ -783,6 +778,15 @@ async function bootLocked(): Promise<void> {
 }
 
 function bootUnlocked(): void {
+  if (!legalAccepted) {
+    // A stale native background configuration must not publish behind the legal
+    // gate. Keep the join fragment intact; accepted users consume it on re-entry.
+    if (isNativeShell()) {
+      void import('../../native/publishMirror').then((m) => m.clearNativePublish()).catch(() => { /* plugin unavailable */ })
+    }
+    render()
+    return
+  }
   // Pause sampling when the app is backgrounded, resume when it returns — a hidden PWA
   // can't sample reliably anyway, so this is pure battery saved. `hidden` starts false
   // and only flips on a real visibilitychange, so headless/normal foreground always samples.
@@ -807,9 +811,6 @@ function bootUnlocked(): void {
   // runs: it carries the seed.
   const frag = consumeFragment()
   render()
-  // Open by default: a returning user with a circle starts sharing straight away.
-  // A fresh user (no circle yet) is a no-op here — the create/join paths call it.
-  maybeAutoShare()
   if (frag?.kind === 'join') joinFromLink(frag.value)
   if (frag?.kind === 'invite') inviteFromLink(frag.value)
   // Tapping a link while flock is already open is a fragment-only navigation —
@@ -941,7 +942,7 @@ function completeJoin(circle: store.Circle): void {
   persisted.identity ??= store.createIdentity()
   circle.members = [persisted.identity.pk]
   circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
-  circle.pingConsent = true // on by default: if this phone is ever lost, the circle can ask it to help find it
+  circle.pingConsent = false // remote exact location is a deliberate device-local opt-in
   upsertCircle(circle, true)
   announceJoin(circle)
   pendingJoin = null
@@ -949,7 +950,6 @@ function completeJoin(circle: store.Circle): void {
   adding = false
   tab = 'home'
   render()
-  maybeAutoShare() // open by default — joining a circle starts you sharing
   toast(persisted.myHandle
     ? `You've joined ${circle.name}`
     : `You've joined ${circle.name} — add your name under You so friends recognise you`)
@@ -1054,9 +1054,20 @@ function render(opts?: { animate?: boolean }): void {
   const animate = opts?.animate ?? true
   // The map lives only on Home now (it IS Home) — tear it down everywhere else.
   // wireApp re-mounts it when we land back on Home.
-  if (tab !== 'home' && mapView) { mapView.destroy(); mapView = null }
-  if (persisted.identity) ensureInviteSub()
+  if (tab !== 'home') {
+    mapInitToken++ // invalidate a lazy map mount that has not finished yet
+    const mounted = mapView
+    mapView = null
+    mounted?.destroy()
+  }
   const keep = captureFocusedInput()
+  if (!legalAccepted) {
+    root.innerHTML = legalGateView()
+    wireLegalGate()
+    restoreFocusedInput(keep)
+    return
+  }
+  if (persisted.identity) ensureInviteSub()
   if (pendingJoin) {
     root.innerHTML = joinNameView(pendingJoin)
     wireJoinName()
@@ -1623,7 +1634,7 @@ function circleView(): string {
         <span>Let this circle find my phone</span>
         <button class="switch${c.pingConsent ? ' on' : ''}" data-action="toggle-ping-consent" role="switch" aria-checked="${!!c.pingConsent}" aria-label="Let this circle find my phone"><span class="knob"></span></button>
       </div>
-      <div class="note">${hint('ping-consent', "If your phone is ever lost, members can ask it for its exact location to come and fetch it. It only answers when it's been marked lost, warns you first with a chance to say no, and never turns on ongoing sharing. On by default; turn it off here any time.")}</div>
+      <div class="note">${hint('ping-consent', "If your phone is ever lost, members can ask it for its exact location to come and fetch it. It only answers when it's been marked lost, warns you first with a chance to say no, and never turns on ongoing sharing. Off by default; turn it on only for a circle you trust.")}</div>
     </div>`
 }
 
@@ -1658,7 +1669,7 @@ function youView(): string {
     ${privateChatsSection()}
     <button class="btn ghost" data-action="toggle-settings" style="margin-top:18px" aria-expanded="${showSettings}">${showSettings ? 'Hide settings' : 'Settings…'}</button>
     ${showSettings ? settingsSections(me, c) : ''}
-    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose · <a href="./legal.html" target="_blank" rel="noopener">Legal</a></div>
+    <div class="note" style="margin-top:16px;text-align:center">flock · your location, shared only when you choose · <a href="./legal.html" target="_blank" rel="noopener">Legal</a> · <a href="./report.html" target="_blank" rel="noopener">Report misuse</a></div>
     <div class="app-version">version ${esc(__FLOCK_BUILD__)} · ${esc(__FLOCK_BUILT_AT__)}</div>`
 }
 
@@ -1870,7 +1881,7 @@ function onboardingView(): string {
     inner = `
       <h1>New circle</h1>
       <p class="tagline">Give it a name and choose how long it lasts.</p>
-      <div class="field" style="text-align:left;margin-bottom:14px"><label for="cname">Name</label><input class="input" id="cname" placeholder="Mallorca trip · The Smiths · Sat night" /></div>
+      <div class="field" style="text-align:left;margin-bottom:14px"><label for="cname">Name</label><input class="input" id="cname" placeholder="Mallorca trip · Flatmates · Sat night" /></div>
       <div class="field" style="text-align:left;margin-bottom:6px"><label>How long</label></div>
       <div class="chip-row" role="group" aria-label="Lifetime" style="margin-bottom:10px;justify-content:center">
         ${ttlChip('ongoing', 'Ongoing')}${ttlChip('today', 'Today')}${ttlChip('custom', 'Custom')}
@@ -1929,7 +1940,7 @@ function onboardingView(): string {
   } else if (adding) {
     inner = `
       <h1>Add a circle</h1>
-      <p class="tagline">Create another circle or join one — you can be in many at once: family, a trip, a night out.</p>
+      <p class="tagline">Create another circle or join one — you can be in many at once: friends, a trip, a night out.</p>
       <div class="actions">
         <button class="btn primary" data-action="create">Create a circle</button>
         <button class="btn" data-action="join">Join with a code</button>
@@ -1968,6 +1979,45 @@ function onboardingView(): string {
 }
 
 // ── Wiring ───────────────────────────────────────────────────────────────────
+function legalGateView(): string {
+  return `<main class="screen onboard legal-gate fade-in">
+    <img class="hero-logo" src="./icon.svg" alt="" />
+    <div class="eyebrow">Adults only</div>
+    <h1>Before you enter</h1>
+    <p class="tagline">flock is a personal, non-commercial experiment for adults choosing to share with other adults. Do not install it on, hand it to, or use it to track a child.</p>
+    <div class="legal-checks">
+      <label class="legal-check"><input id="legal-adult" type="checkbox" /><span>I am 18 or older</span></label>
+      <label class="legal-check"><input id="legal-consent" type="checkbox" /><span>I will only use flock with consenting adults</span></label>
+    </div>
+    <p class="legal-gate-note">By entering, you agree to the <a href="./terms.html" target="_blank" rel="noopener">Terms</a> and confirm you have read the <a href="./privacy.html" target="_blank" rel="noopener">Privacy Policy</a> and <a href="./legal.html" target="_blank" rel="noopener">safety notice</a>.</p>
+    <button class="btn primary" data-action="accept-legal" disabled>Enter flock</button>
+    <p class="legal-gate-error" id="legal-gate-error" role="status" hidden>flock cannot record your choice in this browser. Enable local storage before continuing.</p>
+  </main>`
+}
+
+function wireLegalGate(): void {
+  const adult = document.getElementById('legal-adult') as HTMLInputElement | null
+  const consent = document.getElementById('legal-consent') as HTMLInputElement | null
+  const enter = root.querySelector<HTMLButtonElement>('[data-action="accept-legal"]')
+  const error = document.getElementById('legal-gate-error')
+  if (!adult || !consent || !enter) return
+
+  const sync = (): void => { enter.disabled = !(adult.checked && consent.checked) }
+  adult.addEventListener('change', sync)
+  consent.addEventListener('change', sync)
+  enter.addEventListener('click', () => {
+    if (!adult.checked || !consent.checked) return
+    try {
+      recordLegalAcceptance()
+      legalAccepted = true
+      bootUnlocked()
+    } catch {
+      if (error) error.hidden = false
+      enter.disabled = true
+    }
+  })
+}
+
 /** Type-ahead under the "spoken words" join field: as you type the word
  *  currently in progress (the last space-separated token), show up to 6
  *  matches starting with those letters — tapping one completes it and moves
@@ -2256,11 +2306,20 @@ function openRadarFor(pk: string): void {
 }
 
 async function initMap(camera?: { lng: number; lat: number; zoom: number }): Promise<void> {
-  mapView?.destroy()
+  const token = ++mapInitToken
+  const mounted = mapView
+  mapView = null
+  mounted?.destroy()
   const container = document.getElementById('map')
   if (!container) return
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
-  mapView = await MapView.create(container, fix ?? undefined, { circleId: activeCircle()?.id })
+  if (token !== mapInitToken || !container.isConnected || document.getElementById('map') !== container) return
+  const next = await MapView.create(container, fix ?? undefined, { circleId: activeCircle()?.id })
+  if (token !== mapInitToken || !container.isConnected || document.getElementById('map') !== container) {
+    next.destroy()
+    return
+  }
+  mapView = next
   // Tap a member's pin → their private thread (skip my own pin — that's just me).
   mapView.onMemberClick((pk) => { if (pk && pk !== persisted.identity?.pk) openDmThread(pk) })
   if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
@@ -2427,7 +2486,7 @@ function homeShareBarInner(): string {
       <button class="share-toggle${sharing ? ' on' : ''}" data-action="toggle-share" aria-label="${sharing ? 'Go private' : 'Share location'}" aria-pressed="${sharing}">${ICON.pin}<span class="st-label">${sharing ? 'Go private' : 'Share'}</span></button>
       ${homeMapStatusHtml()}
     </div>
-    ${hint('home-watch', "You're sharing your location with this circle — that's the default. Tap Go private to drop off any time; nothing is shared while you're private. You choose how closely under Circle. Tap anyone below to zoom to them, or their pin to message them privately.")}`
+    ${hint('home-watch', "You deliberately started sharing with this circle. On Android it can continue while the phone is locked. Tap Go private to stop; nothing is shared while you're private. You choose how closely under Circle. Tap anyone below to zoom to them, or their pin to message them privately.")}`
 }
 
 /** Patch Home's floating overlays in place (alerts, member strip, share bar),
@@ -2592,7 +2651,7 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     const roster = payload.from && payload.from !== signer.pubkey ? [signer.pubkey, payload.from] : [signer.pubkey]
     const joined: store.Circle = {
       id: payload.id, seedHex: payload.s, name: payload.n, mode: payload.m,
-      members: roster, joinedAt: nowSec(), reseededAt: nowSec(), pingConsent: true,
+      members: roster, joinedAt: nowSec(), reseededAt: nowSec(), pingConsent: false,
       ...(payload.x ? { expiresAt: payload.x } : {}),
     }
     upsertCircle(joined, true)
@@ -2603,7 +2662,6 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     tab = 'home'
     toast(`You've joined ${payload.n}`)
     render()
-    maybeAutoShare() // open by default — a remote-invite joiner shares too
   } else if (payload.t === 'reseed') {
     const existing = persisted.circles.find((c) => c.id === payload.id)
     if (!existing) return
@@ -3440,7 +3498,6 @@ function doCreate(): void {
   ttlMode = 'ongoing'
   tab = 'circle' // land where inviting people is front-and-centre
   render()
-  maybeAutoShare() // open by default — a brand-new circle shares from the off
 }
 
 /** Remote join: create an identity, show my npub, and wait for a gift-wrapped invite. */
@@ -3464,7 +3521,7 @@ function doJoin(): void {
     if (persisted.circles.some((c) => c.id === circle.id)) { switchCircle(circle.id); adding = false; return }
     circle.members = [persisted.identity.pk]
     circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
-    circle.pingConsent = true // on by default
+    circle.pingConsent = false // remote exact location is opt-in
     upsertCircle(circle, true)
     onboardStep = 'intro'
     adding = false
@@ -3636,8 +3693,8 @@ function syncWatch(): void {
         // In the native shell the WebView's navigator.geolocation reports
         // 'denied' the instant sharing arms — BEFORE the runtime-location dialog
         // (raised by the background watcher) has been answered. Treating that as
-        // terminal is the auto-share race: a fresh install would start sharing,
-        // immediately self-revert, and sit Private behind the "can't see your
+        // terminal is the permission race: a fresh sharing tap would immediately
+        // self-revert and sit Private behind the "can't see your
         // location" card even once the user grants permission. The AUTHORITATIVE
         // denial in the shell is the background watcher's NOT_AUTHORIZED
         // (startBgWatch's onDenied), which reverts sharing only on a genuine
@@ -3673,20 +3730,6 @@ function syncWatch(): void {
   }
 }
 
-/** Open-by-default: start sharing on its own the first time this launch has an
- *  identity AND a circle to share with — at boot for a returning user, or the
- *  moment a fresh user creates/joins their first circle. Runs at most once per
- *  launch (autoShareApplied), so a deliberate in-session "Go private" is never
- *  undone by a later render, add-circle or join. Location permission is prompted
- *  by startSharing → syncWatch, exactly as a manual tap would; a denial reverts
- *  the toggle and shows the actionable card (see syncWatch's onErr). */
-function maybeAutoShare(): void {
-  if (autoShareApplied) return
-  if (!persisted.identity || !activeCircle()) return // nothing to share with yet — try again after create/join
-  autoShareApplied = true
-  if (!sharing) startSharing()
-}
-
 function startSharing(): void {
   if (sharing) return
   sharing = true
@@ -3697,7 +3740,7 @@ function startSharing(): void {
 /** Arm the location sources behind `sharing`. In the native shell this first
  *  settles location permission ONCE and awaits it, so the foreground watch and
  *  the background watcher never race a runtime permission request — the collision
- *  that made a fresh install auto-share, then immediately self-revert to Private
+ *  that made a fresh sharing tap immediately self-revert to Private
  *  behind the "can't see your location" card (both requesters fired at once, the
  *  loser got an instant NOT_AUTHORIZED). With permission settled first, both fix
  *  sources start cleanly; a genuine refusal reverts sharing and shows the card. */
@@ -4435,7 +4478,6 @@ function resetDevice(): void {
   inviteSubKey = ''
   if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = 0 }
   sharing = false
-  autoShareApplied = false // reset the open-by-default latch so a circle created after this reset auto-shares
   awaitingInvite = false
   adding = false
   disbandConfirm = false
@@ -4447,8 +4489,10 @@ function resetDevice(): void {
   dmPeer = null
   document.getElementById('dm-sheet')?.remove()
   closeCircleMenu()
-  mapView?.destroy()
+  mapInitToken++
+  const mounted = mapView
   mapView = null
+  mounted?.destroy()
   fix = null
   circleStates.clear()
   beaconCadence.clear()

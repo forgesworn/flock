@@ -1,7 +1,7 @@
 {
   "name": "flock",
   "short_name": "flock",
-  "description": "Coercion-resistant family & friends safety and privacy-preserving location sharing.",
+  "description": "Experimental, non-commercial location sharing for adult friends and trusted groups.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

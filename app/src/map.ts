@@ -119,6 +119,7 @@ export class MapView {
   private contribAreaFeatures = 0 // count of contributor halos currently drawn (inspection/e2e)
   private userMoved = false // a real gesture happened — the camera is theirs now
   private memberClickCb: ((member: string) => void) | null = null
+  private destroyed = false
 
   // Lazily resolve the basemap style, best first: (1) the circle's saved offline
   // area (OPFS vector — zero network at view time); (2) the bundled demo vector
@@ -385,6 +386,8 @@ export class MapView {
   }
 
   destroy(): void {
+    if (this.destroyed) return
+    this.destroyed = true
     this.markers.forEach((m) => m.remove())
     this.contribMarkers.forEach((m) => m.remove())
     this.rzvMarker?.remove()

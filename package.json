@@ -1,7 +1,7 @@
 {
   "name": "@forgesworn/flock",
   "version": "0.0.0",
-  "description": "Coercion-resistant family & friends safety and privacy-preserving location sharing. Built on canary-kit over Nostr.",
+  "description": "Experimental, non-commercial location sharing for adult friends and trusted groups. Built on canary-kit over Nostr.",
   "homepage": "https://flock.forgesworn.dev/",
   "type": "module",
   "private": true,
@@ -121,7 +121,7 @@
   },
   "keywords": [
     "flock",
-    "family-safety",
+    "group-safety",
     "location-sharing",
     "geofence",
     "duress",

@@ -1,8 +1,9 @@
 # flock
 
-> Coercion-resistant family & friends safety and privacy-preserving location sharing.
+> Experimental, non-commercial location sharing for adult friends and trusted groups.
 
-**Status:** 🛠️ Preview live at **https://flock.forgesworn.dev/**. **The app is
+**Status:** 🛠️ Personal, free, non-commercial proof of concept live at
+**https://flock.forgesworn.dev/** for invited adult testers. **The app is
 now a focused MVP** (2026-07): privacy-preserving **live location sharing with
 one group of friends** — set the circle up in advance, invite by QR code, and
 each member controls how closely the others see them with a **geohash precision
@@ -38,16 +39,19 @@ the protocol spec [`FLOCK.md`](FLOCK.md), the tracked backlog
 extends `spoken-token`) into location-aware sharing and safety tooling. The **app MVP**
 serves one audience:
 
-- **A group of friends** (e.g. a trip to Mallorca) who want to see roughly where each
-  other are — **without ever handing their movements to a company**. The group is set
-  up in advance, people join by QR code, sharing is off until each person turns it on,
-  and a per-person **precision slider** decides how closely the others see them
-  (a whole city … the exact spot). Untrackable by design: encrypted end-to-end,
-  fanned out over no-log Nostr relays, no accounts, no server-side location, ever.
+- **A group of adult friends** (e.g. a trip to Mallorca) who want to see roughly where each
+  other are — **without handing readable movements to the service operator**. The group is set
+  up in advance, people join by QR code, and each person deliberately taps **Share**.
+  Sharing is visible and can be stopped with **Go private**; in the Android app a started
+  share continues while the phone is locked. A per-person **precision slider** decides how
+  closely the others see them (a whole region … the exact spot). Minimise tracking by design:
+  encrypted end-to-end, fanned out over Nostr relays, no accounts, and no server-side
+  plaintext location history. Relays and network providers can still observe metadata.
 
-The **library** additionally retains the full family-safety capability set
+The **library** additionally retains the experimental wider safety capability set
 (disclosure-on-event, geofence breach, SOS/duress, check-ins, meeting points…) for
-post-MVP app phases and other ForgeSworn tools.
+post-MVP app phases and other ForgeSworn tools. The hosted preview is 18+ and must
+not be used to track children; see [`docs/LEGAL.md`](docs/LEGAL.md).
 
 All transport is **decentralised over Nostr**. Each device evaluates its own geofence
 **locally** and only ever broadcasts **encrypted** alerts. No server holds plaintext
@@ -124,7 +128,7 @@ native shell (Phase 2).
 
 | Need | Reuse | New |
 |---|---|---|
-| Group lifecycle (guardians + kids / night-out crew) | `createGroup`, `addMember`, `removeMember`, `reseed`, kind 30078 | role tags |
+| Trusted-group lifecycle | `createGroup`, `addMember`, `removeMember`, `reseed`, kind 30078 | role tags |
 | Withheld / coarse location beacon | `encryptBeacon`, `deriveBeaconKey`, `BeaconPayload {geohash, precision, timestamp}` | emission **policy** layer |
 | "I need help / SOS" | `buildDuressAlert` / `encryptDuressAlert` (precision-11, scope) | UI panic trigger |
 | Breach / pick-me-up | `buildSignalEvent` (kind 20078, `t`=type) | two signal types |

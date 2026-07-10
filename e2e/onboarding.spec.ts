@@ -1,8 +1,25 @@
 import { test, expect, newPerson, createCircle, gotoTab } from './fixtures'
+import { BASE_URL } from '../playwright.config'
 
 // Single-person UI contract: plain language and the "inviting is
 // front-and-centre" landing. No relay needed.
 test.describe('onboarding & circle setup', () => {
+  test('adult-only terms must be acknowledged before flock opens', async ({ browser }) => {
+    const context = await browser.newContext({ baseURL: BASE_URL, locale: 'en-GB' })
+    const page = await context.newPage()
+    await page.goto('/')
+
+    const enter = page.getByRole('button', { name: 'Enter flock' })
+    await expect(enter).toBeDisabled()
+    await page.getByLabel('I am 18 or older').check()
+    await expect(enter).toBeDisabled()
+    await page.getByLabel('I will only use flock with consenting adults').check()
+    await expect(enter).toBeEnabled()
+    await enter.click()
+    await expect(page.getByRole('button', { name: 'Create a circle' })).toBeVisible()
+    await context.close()
+  })
+
   test('creating a circle lands on Circle with invite front-and-centre', async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
@@ -37,8 +54,10 @@ test.describe('onboarding & circle setup', () => {
     await createCircle(A, { name: 'Mallorca trip' })
     await gotoTab(A, 'home')
     await expect(A.locator('[data-action="toggle-share"]')).toBeVisible()
+    await expect(A.locator('[data-action="toggle-share"]')).toHaveAttribute('aria-pressed', 'false')
     await gotoTab(A, 'circle')
     await expect(A.locator('#share-precision')).toBeVisible()
+    await expect(A.locator('#share-precision')).toHaveValue('6')
     await gotoTab(A, 'chat')
     await expect(A.locator('[data-action="check-in"]')).toBeVisible()
     await expect(A.locator('[data-action="chat-preset"][data-reason="On my way"]')).toBeVisible()

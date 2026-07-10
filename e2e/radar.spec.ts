@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, gotoTab, openDmWith, myPubkey, setLocation, LONDON, SOHO } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, setSharePrecision, gotoTab, openDmWith, myPubkey, setLocation, LONDON, SOHO } from './fixtures'
 
 // Radar navigation, first slice: B selects A from the member row and gets the
 // foreground motion-tracker over A's ALREADY-DISCLOSED beacon — the wire path
@@ -14,7 +14,7 @@ test.describe('radar navigation to a person', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    await startSharing(A) // exact-spot by default; the beacon auto-emits on the first fix
+    await startSharing(A) // neighbourhood by default; the beacon emits on the first fix
 
     // A's beacon has landed once B's roster row carries a location claim. The
     // 🧭 sits ON the row (field feedback: behind the chevron nobody found it).
@@ -31,9 +31,18 @@ test.describe('radar navigation to a person', () => {
     // A real distance renders (units per preference), not a placeholder dash.
     await expect(shell.locator('#radar-distance')).toHaveText(/\d/)
     await expect(shell.locator('#radar-fresh')).toHaveText(/just now|s old/)
-    // The blip is on the scope: A shares exact, so it draws as a crisp dot
-    // (the uncertainty band only appears for a meaningfully coarse share).
+    // The default is deliberately coarse, so radar refuses to imply a bearing
+    // within A's disclosed neighbourhood-sized cell.
     await expect(shell.locator('#radar-blip')).toBeVisible()
+    await expect(shell.locator('#radar-status')).toContainText(/rough area only/i)
+
+    // A explicitly sharpens their own share. Stop/reopen so the rest of this
+    // spec exercises precise navigation rather than pretending coarse means exact.
+    await shell.locator('.radar-stop').click()
+    await expect(B.locator('#radar-shell')).toHaveCount(0)
+    await setSharePrecision(A, 9)
+    await navBtn.click()
+    await expect(shell).toBeVisible()
 
     // No compass in a Playwright browser → the radar must SAY so and fall back
     // to distance guidance, not invent a bearing (the honesty rule).
