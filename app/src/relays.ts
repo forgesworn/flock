@@ -27,10 +27,16 @@ export const PRIVATE_RELAYS: readonly string[] = ENV_RELAY ? [ENV_RELAY] : ['wss
 /** The `.onion` twin of PRIVATE_RELAYS — same relay(s), reachable over Tor
  *  without ever exposing an IP (docs/plans/2026-07-04-mesh-bridge-goal.md Task
  *  B; DarkFi survey: adopt Tor as a user TOGGLE, not the default — unreliable
- *  on mobile). Empty until a real onion service exists
- *  (docs/plans/2026-07-01-second-no-log-relay.md); override at build time via
- *  VITE_ONION_RELAY once it does. */
-export const ONION_RELAYS: readonly string[] = ENV_ONION_RELAY ? [ENV_ONION_RELAY] : []
+ *  on mobile). This is the v3 onion twin of relay.trotters.cc (stood up
+ *  2026-07-11, verified end-to-end: NIP-11 + a NIP-40-expiring publish/read
+ *  round-trip over a real Tor circuit). Plain `ws://` is deliberate — Tor's
+ *  rendezvous encryption is the transport security, and no CA issues certs
+ *  for `.onion` names we could pin instead. Override at build time via
+ *  VITE_ONION_RELAY. Also bypasses the CDN in front of the clearnet relay,
+ *  so neither the CDN nor the relay host ever sees a member IP. */
+export const ONION_RELAYS: readonly string[] = ENV_ONION_RELAY
+  ? [ENV_ONION_RELAY]
+  : ['ws://gdtkccgtod3om7bvycaygjjske6sj6vnsu3d7csutkofnoa3ylt6haid.onion']
 
 /** Broad public set — for reading public kind:0 profiles only. */
 export const PROFILE_RELAYS: readonly string[] = [

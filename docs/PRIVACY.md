@@ -76,7 +76,7 @@ What it **can** still see is connection metadata, which no relay can avoid handl
 
 | It CAN see | Mitigation |
 |---|---|
-| Your **IP** → geolocation, pattern-of-life | A `.onion` endpoint removes it (Tor). This — not a "provable no-log" relay — is the high-leverage fix |
+| Your **IP** → geolocation, pattern-of-life | A `.onion` endpoint removes it (Tor). This — not a "provable no-log" relay — is the high-leverage fix. **Live since 2026-07-11**: the relay has a v3 onion twin (`ONION_RELAYS` in `app/src/relays.ts`), used via the opt-in Tor toggle |
 | **IP ↔ a pseudonymous inbox** (you subscribe to your own) → group size/shape, active hours | Rotates on reseed; further blunted over Tor |
 | Real **arrival timing + volume** (bursts) | Cadence jitter + low-rate stationary cover traffic (shipped 2026-07-04, narrows the moving-vs-still swing); a `.onion` endpoint remains the fix for IP-level correlation |
 | **Stored ciphertext history** — every retained wrap is decryptable by a *future* key compromise | Every wrap carries a NIP-40 `expiration`: one **uniform 16-day** window for all types (a per-type window would be a type-tell), derived from the backdated `created_at` (so the tag adds zero information). Epoch rotation bounds exposure forwards; this bounds it **backwards** to ~2 weeks |

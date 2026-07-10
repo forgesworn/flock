@@ -166,6 +166,18 @@ and shipped (release `0294b8c` live on flock.forgesworn.dev).
   deliberately deferred (ratchet crypto deserves its own focused session).
   **Not yet deployed** — the 6-word invite format should ship as a coordinated
   site + APK pair. Audit: `docs/research/2026-07-04-relay-privacy-audit.md`.
+- [x] **Onion relay endpoint live** (2026-07-11): a v3 hidden service on the
+  relay.trotters.cc host now fronts the relay
+  (`ws://gdtkccgtod3om7bvycaygjjske6sj6vnsu3d7csutkofnoa3ylt6haid.onion`,
+  `ONION_RELAYS` default), with a dedicated `access_log off` nginx vhost —
+  the onion path bypasses both the CDN and IP logging entirely. Verified
+  end-to-end over a real Tor circuit: NIP-11, WebSocket 101, and a
+  NIP-40-expiring publish/read round-trip. The Tor toggle (off by default,
+  fail-loud) is no longer inert; remaining gate is the **on-device Orbot
+  test** — Chromium treats cleartext `ws://` from an `https` origin as
+  blockable mixed content and does not exempt `.onion` (Firefox/Tor Browser
+  do), so the Capacitor WebView may need `android.allowMixedContent: true`
+  before the route works in the APK. Decide on evidence, not pre-emptively.
 
 ## Lost phone ("back of a taxi")
 

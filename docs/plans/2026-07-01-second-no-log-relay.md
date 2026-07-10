@@ -65,6 +65,10 @@ relays in the same DC is not redundancy; a host or network outage would take bot
 reach it **without exposing an IP** — this is the highest-leverage privacy move and
 it is cheap (a Tor daemon + `HiddenServicePort`). Add the onion to `PRIVATE_RELAYS`
 alongside the clearnet URL, or offer it as an opt-in in settings.
+**DONE for relay #1 (2026-07-11):** relay.trotters.cc has a v3 onion twin
+(dedicated no-log nginx vhost, verified NIP-11 + NIP-40 round-trip over Tor);
+flock's `ONION_RELAYS` now defaults to it. Relay #2 should get its own onion
+at stand-up per this same recipe.
 
 **Advertise intent.** NIP-11 relay-info doc stating no-logging + contact; a
 **warrant canary** on a predictable URL. These are trust *signals*, not proofs —
