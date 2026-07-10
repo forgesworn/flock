@@ -32,6 +32,11 @@ fun buildBeaconWrapJson(
     geohash: String,
     precision: Int,
     nowSec: Long,
+    // The `t`-tag: "beacon" for a real disclosure, "cover" for a low-rate decoy
+    // (signals.ts SIGNAL_TYPES). Everything else about the wrap is identical, so a
+    // cover is observationally indistinguishable from a beacon on the wire. Placed
+    // before `rand` so the trailing-lambda call sites keep binding the lambda to it.
+    signalT: String = "beacon",
     rand: () -> Double,
 ): String {
     val identityKeys = Keys(SecretKey.parse(identitySkHex))
@@ -43,7 +48,7 @@ fun buildBeaconWrapJson(
     val rumor = EventBuilder(Kind(SIGNAL_KIND.toUShort()), content)
         .tags(listOf(
             Tag.parse(listOf("d", "ssg/${groupIdHash(circleId)}")),
-            Tag.parse(listOf("t", "beacon")),
+            Tag.parse(listOf("t", signalT)),
         ))
         .customCreatedAt(Timestamp.fromSecs(nowSec.toULong()))
         .build(identityKeys.publicKey())

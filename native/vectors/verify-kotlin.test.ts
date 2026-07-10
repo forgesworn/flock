@@ -19,7 +19,7 @@ describe.skipIf(!existsSync(WRAPS))('kotlin-built wraps decrypt via the JS pipel
     const v = JSON.parse(readFileSync(VECTORS, 'utf8'))
     const wraps = JSON.parse(readFileSync(WRAPS, 'utf8')) as {
       wrapJson: { pubkey: string; content: string; kind: number; tags: string[][] }
-      expect: { geohash: string; precision: number }
+      expect: { geohash: string; precision: number; t?: string }
     }[]
     expect(wraps.length).toBeGreaterThan(0)
     const inboxSk = fromHex(v.inbox.skHex)
@@ -30,7 +30,12 @@ describe.skipIf(!existsSync(WRAPS))('kotlin-built wraps decrypt via the JS pipel
       expect(rumor, 'giftUnwrap returned null — NIP-44 or seal mismatch').not.toBeNull()
       expect(rumor!.kind).toBe(20078)
       expect(rumor!.pubkey).toBe(v.identityPkHex)
-      expect(rumor!.tags).toEqual([['d', `ssg/${v.groupIdHash}`], ['t', 'beacon']])
+      const t = w.expect.t ?? 'beacon'
+      expect(rumor!.tags).toEqual([['d', `ssg/${v.groupIdHash}`], ['t', t]])
+      // A cover decoy carries only encrypted random filler — a receiver matches no
+      // handler for t=cover and drops it WITHOUT decrypting (signals.ts), so we
+      // don't decryptBeacon it here either (the filler isn't a valid geohash).
+      if (t === 'cover') continue
       const payload = await decryptBeacon(beaconKey, rumor!.content)
       expect(payload.geohash).toBe(w.expect.geohash)
       expect(payload.precision).toBe(w.expect.precision)

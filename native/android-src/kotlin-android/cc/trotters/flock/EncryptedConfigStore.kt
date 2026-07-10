@@ -43,7 +43,7 @@ class EncryptedConfigStore(context: Context) : ConfigStore {
     fun clearConfig() {
         synchronized(this) {
             val editor = prefs.edit().remove("config")
-            for (key in prefs.all.keys) if (key.startsWith("cadence.")) editor.remove(key)
+            for (key in prefs.all.keys) if (key.startsWith("cadence.") || key.startsWith("cover.")) editor.remove(key)
             editor.apply()
         }
     }
@@ -65,6 +65,12 @@ class EncryptedConfigStore(context: Context) : ConfigStore {
                 .putLong("cadence.$circleId.at", cadence.lastSentAt)
                 .apply()
         }
+    }
+
+    override fun getCoverAt(circleId: String): Long = prefs.getLong("cover.$circleId.at", 0)
+
+    override fun setCoverAt(circleId: String, at: Long) {
+        synchronized(this) { prefs.edit().putLong("cover.$circleId.at", at).apply() }
     }
 
     override fun appendJournal(entryJson: String) {

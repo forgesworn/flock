@@ -6,10 +6,13 @@ import kotlin.test.assertTrue
 
 private class FakeStore(var config: String?) : ConfigStore {
     val cadences = HashMap<String, BeaconCadence>()
+    val covers = HashMap<String, Long>()
     val journal = ArrayList<String>()
     override fun getConfigJson() = config
     override fun getCadence(circleId: String) = cadences[circleId] ?: BeaconCadence(null, 0)
     override fun setCadence(circleId: String, cadence: BeaconCadence) { cadences[circleId] = cadence }
+    override fun getCoverAt(circleId: String) = covers[circleId] ?: 0L
+    override fun setCoverAt(circleId: String, at: Long) { covers[circleId] = at }
     override fun appendJournal(entryJson: String) { journal.add(entryJson) }
 }
 
@@ -82,7 +85,29 @@ class PublisherTest {
         p1.onFix(51.5007, -0.1246, 10.0, 0)
         val p2 = publisher(store, relays, now = 1_751_700_100) // 100 s later, same cell, < 300 s heartbeat
         p2.onFix(51.5007, -0.1246, 10.0, 0)
-        assertEquals(1, relays.published.size)
+        // The real beacon is suppressed, but a low-rate cover decoy fills the gap
+        // (100 s ≥ the 90 s cover interval): one real send + one cover on the wire.
+        assertEquals(2, relays.published.size)
+        // The cover records neither beacon cadence (stays the first cell) nor a pub
+        // journal entry — it is pure timing hygiene, not a disclosure.
+        assertEquals("gcpuvp", store.getCadence(v.getString("circleId")).lastGeohash)
+        assertEquals(1, store.journal.count { it.contains("\"t\":\"pub\"") })
+    }
+
+    @Test
+    fun `cover holds off inside its own interval`() {
+        val store = FakeStore(config()); val relays = FakeRelays(1)
+        publisher(store, relays, now = 1_751_700_000).onFix(51.5007, -0.1246, 10.0, 0) // real send, coverAt := T
+        publisher(store, relays, now = 1_751_700_100).onFix(51.5007, -0.1246, 10.0, 0) // +100 s → cover fires
+        publisher(store, relays, now = 1_751_700_140).onFix(51.5007, -0.1246, 10.0, 0) // +40 s < 90 s → no cover
+        assertEquals(2, relays.published.size)
+    }
+
+    @Test
+    fun `off-grid suppresses cover too`() {
+        val store = FakeStore(config(offGridUntil = 9_999_999_999)); val relays = FakeRelays(1)
+        publisher(store, relays).onFix(51.5, -0.12, 10.0, 0)
+        assertEquals(0, relays.published.size) // neither a beacon nor a cover leaves an off-grid phone
     }
 
     @Test

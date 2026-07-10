@@ -20,6 +20,16 @@ fun shouldEmitBeacon(
     return now - prev.lastSentAt >= heartbeatSeconds
 }
 
+/** Low-rate cover-decoy gate (app/src/cadence.ts `shouldEmitCover` twin): fires
+ *  when nothing has gone out yet, or `intervalSeconds` (± jitter) has elapsed since
+ *  the last cover/real send. Consulted only while the real beacon gate is
+ *  suppressing, so a stationary phone still drips traffic and the moving-vs-still
+ *  cadence gap a relay could read stays narrow. */
+fun shouldEmitCover(lastCoverAt: Long, now: Long, intervalSeconds: Long, jitterFraction: Double, rand: Double): Boolean {
+    if (lastCoverAt == 0L) return true
+    return now - lastCoverAt >= jitteredSeconds(intervalSeconds, jitterFraction, rand)
+}
+
 fun jitteredSeconds(baseSeconds: Long, jitterFraction: Double, rand: Double): Long {
     val r = min(1.0, max(0.0, rand))
     val fraction = min(1.0, max(0.0, jitterFraction))

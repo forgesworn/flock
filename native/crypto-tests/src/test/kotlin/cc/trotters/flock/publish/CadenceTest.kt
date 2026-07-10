@@ -25,6 +25,12 @@ class CadenceTest {
     @Test fun `clock skew reads as too soon`() =
         assertFalse(shouldEmitBeacon("gcpuvq", BeaconCadence("gcpuvp", 2000), 1000, 45, 300))
 
+    @Test fun `cover fires when nothing has been sent yet`() = assertTrue(shouldEmitCover(0, 1000, 90, 0.2, 0.5))
+
+    @Test fun `cover suppressed inside the interval`() = assertFalse(shouldEmitCover(1000, 1050, 90, 0.2, 0.5))
+
+    @Test fun `cover fires once the interval elapses`() = assertTrue(shouldEmitCover(1000, 1090, 90, 0.2, 0.5))
+
     @Test fun `jitter midpoint reproduces the base`() = assertEquals(45, jitteredSeconds(45, 0.2, 0.5))
 
     @Test fun `jitter bounds hold and clamp`() {

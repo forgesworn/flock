@@ -23,8 +23,17 @@ class EmitWrapsTest {
             ) { rng.nextDouble() }
             out.put(JSONObject()
                 .put("wrapJson", JSONObject(json))
-                .put("expect", JSONObject().put("geohash", geohash).put("precision", precision)))
+                .put("expect", JSONObject().put("geohash", geohash).put("precision", precision).put("t", "beacon")))
         }
+        // A cover decoy: t=cover, filler "geohash", otherwise the identical wrap —
+        // the JS side confirms it unwraps and decrypts with zero special-casing.
+        val coverJson = buildBeaconWrapJson(
+            v.getString("identitySkHex"), v.getString("seedHex"), v.getString("circleId"),
+            "deadbeef", 6, System.currentTimeMillis() / 1000, "cover",
+        ) { rng.nextDouble() }
+        out.put(JSONObject()
+            .put("wrapJson", JSONObject(coverJson))
+            .put("expect", JSONObject().put("geohash", "deadbeef").put("precision", 6).put("t", "cover")))
         File("../vectors/kotlin-wraps.json").writeText(out.toString(2) + "\n")
     }
 }
