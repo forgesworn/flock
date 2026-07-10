@@ -3633,8 +3633,25 @@ function syncWatch(): void {
     resetSampleCadence()
     const onErr = (msg: string, kind: svc.GeoErrorKind): void => {
       if (kind === 'denied') {
-        // The one failure the user must fix by hand: keep the toggle honest
-        // (sharing reverts) and explain HOW on a persistent card, not a toast.
+        // In the native shell the WebView's navigator.geolocation reports
+        // 'denied' the instant sharing arms — BEFORE the runtime-location dialog
+        // (raised by the background watcher) has been answered. Treating that as
+        // terminal is the auto-share race: a fresh install would start sharing,
+        // immediately self-revert, and sit Private behind the "can't see your
+        // location" card even once the user grants permission. The AUTHORITATIVE
+        // denial in the shell is the background watcher's NOT_AUTHORIZED
+        // (startBgWatch's onDenied), which reverts sharing only on a genuine
+        // refusal. So here: tear the dead foreground watch down so a later
+        // syncWatch (dialog dismissed → visibilitychange) re-arms it, but leave
+        // `sharing` on and show no card.
+        if (isNativeShell()) {
+          stopWatch?.()
+          stopWatch = null
+          return
+        }
+        // PWA: geolocation permission is the only permission, so a denial is
+        // authoritative — keep the toggle honest (sharing reverts) and explain
+        // HOW on a persistent card, not a toast.
         geoIssue = 'denied'
         sharing = false
         syncWatch()
@@ -3673,6 +3690,28 @@ function maybeAutoShare(): void {
 function startSharing(): void {
   if (sharing) return
   sharing = true
+  render() // reflect "Locating…" straight away; arming continues async below
+  void armSharing()
+}
+
+/** Arm the location sources behind `sharing`. In the native shell this first
+ *  settles location permission ONCE and awaits it, so the foreground watch and
+ *  the background watcher never race a runtime permission request — the collision
+ *  that made a fresh install auto-share, then immediately self-revert to Private
+ *  behind the "can't see your location" card (both requesters fired at once, the
+ *  loser got an instant NOT_AUTHORIZED). With permission settled first, both fix
+ *  sources start cleanly; a genuine refusal reverts sharing and shows the card. */
+async function armSharing(): Promise<void> {
+  if (isNativeShell()) {
+    const granted = await (await import('../../native/background')).ensureLocationPermission().catch(() => true)
+    if (!sharing) return // user hit "Go private" while the permission dialog was up
+    if (!granted) {
+      geoIssue = 'denied'
+      sharing = false
+      render()
+      return
+    }
+  }
   syncWatch()
   void startBgWatch()
   // Locked-screen sharing needs the Doze exemption — ask now (once), and keep
@@ -3887,6 +3926,15 @@ async function drainNativeJournal(): Promise<void> {
 function onFix(f: svc.Fix): void {
   fix = f
   geoIssue = null // any successful fix clears the location-trouble card
+  // Foreground-only publishing. While the app is hidden the native background
+  // pipeline (FlockLocationService → FlockPublisher, itself guarded on
+  // !isAppForegrounded) is the SOLE publisher; if JS also emitted here — from a
+  // still-alive WebView fed by the background-geolocation watcher — the relay
+  // would carry ~2× the beacons for one walk (measured on stock Android, whose
+  // WebView isn't suspended as promptly as GrapheneOS's). JS owns the
+  // foreground, native owns the background; the resume-time journal drain
+  // adopts whatever native published while we were away.
+  if (hidden) return
   if (sharing) void autoEmit()
   else refresh()
 }

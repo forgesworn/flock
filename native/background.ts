@@ -14,6 +14,7 @@
 // (decoy) and stop-sharing tear it down.
 
 import { registerPlugin } from '@capacitor/core'
+import type { PermissionState } from '@capacitor/core'
 
 /** Mirrors app/src/services.ts `Fix` (at = unix seconds). */
 export interface BgFix { lat: number; lon: number; accuracy: number; at: number }
@@ -33,9 +34,35 @@ interface BackgroundGeolocationPlugin {
     callback: (location?: BgLocation, error?: BgError) => void,
   ): Promise<string>
   removeWatcher(options: { id: string }): Promise<void>
+  // Capacitor auto-generates these from the plugin's @Permission("location")
+  // alias (ACCESS_COARSE/FINE_LOCATION). Used to settle permission ONCE, up
+  // front, before any watcher arms — see ensureLocationPermission.
+  checkPermissions(): Promise<{ location: PermissionState }>
+  requestPermissions(): Promise<{ location: PermissionState }>
 }
 
 const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation')
+
+/**
+ * Settle foreground/coarse location permission ONCE and await the result, so the
+ * foreground `navigator.geolocation` watch and the background watcher don't both
+ * race a runtime permission request. That collision is what made a fresh install
+ * auto-share and then instantly self-revert: whichever requester loses the race
+ * gets an immediate NOT_AUTHORIZED (the OS won't show two location dialogs at
+ * once) and reverts sharing before the user has even answered. Resolves `true`
+ * once permission is granted (already-granted returns without a prompt), `false`
+ * on a genuine refusal. A shell whose plugin predates checkPermissions resolves
+ * `true` so the watchers still get their chance (the pre-existing behaviour).
+ */
+export async function ensureLocationPermission(): Promise<boolean> {
+  try {
+    let state = await BackgroundGeolocation.checkPermissions()
+    if (state.location !== 'granted') state = await BackgroundGeolocation.requestPermissions()
+    return state.location === 'granted'
+  } catch {
+    return true
+  }
+}
 
 /**
  * Start the background watcher. Fixes flow to `onFix`; a permission failure
