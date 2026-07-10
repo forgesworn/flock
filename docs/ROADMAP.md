@@ -127,7 +127,7 @@ and shipped (release `0294b8c` live on flock.forgesworn.dev).
 ## Chat-led Home & reliability (2026-07-04 pm)
 
 - [x] **Map-led scrollable Home**: hero map → presence **member strip** →
-  **circle chat** — one Signal-style thread per circle (mine right-aligned,
+  **circle chat** — one focused thread per circle (mine right-aligned,
   senders named, times shown), quick actions as composer preset chips, all
   persisted (`store.chats`, capped, deduped against relay replays by the
   rumor's `(from, at, text)` triple). **PMs are full 1:1 thread sheets** and
@@ -650,7 +650,7 @@ Two halves that compose into one feature:
     decrypted on the relay, GPS ticking at 5 s throughout). Nothing native left to prove;
     see "Native background publish" above for the full measurements.
 - [x] **Inbound alerts (app closed) — SHIPPED via Option A, validated on the A32
-  (2026-07-04).** Signal-parity notifications: a message/buzz/alert lands on a
+  (2026-07-04).** Notification behaviour: a message/buzz/alert lands on a
   **locked screen while flock is fully closed**. Implemented as a **location-free
   foreground service** (`native/android/StayReachableService.java` +
   `StayReachablePlugin.java`, injected by `patch-android.mjs`; `specialUse` type —
@@ -675,7 +675,7 @@ Two halves that compose into one feature:
   *Notifications differentiated (2026-07-04, validated):* `native/notify.ts` posts
   on distinct Android channels — **Direct messages** (1:1), **Group messages**
   (buzz/notes), **Safety alerts** (lost-phone), **General** — separately tunable,
-  high-importance (heads-up), Signal-style stacked per conversation, headed by the
+  high-importance (heads-up), stacked per conversation, headed by the
   sender (DM) or circle (group). Channels created at boot in
   `ensureNotifyPermission`; immutable once made → a later change needs a new
   channel id (`-vN` suffix).

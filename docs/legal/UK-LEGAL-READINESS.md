@@ -17,8 +17,8 @@ or emergency response. The facts, proportionality, and reassessment triggers
 for that position are recorded in `docs/legal/POC-POSTURE.md`.
 
 Do not weaken that line to “13+”, “with parental permission”, or
-“parent/guardian-supervised”. Signal's 13+ term is not a safe analogue for a
-product whose core feature is persistent geolocation. The ICO treats child
+“parent/guardian-supervised”. A generic messenger's age term is not a safe
+analogue for a product whose core feature is persistent geolocation. The ICO treats child
 geolocation as particularly sensitive and expects child-facing location sharing
 to be off by default, obvious while active, and normally reset to off after each
 session.
@@ -194,7 +194,6 @@ Re-audit these facts before every material policy update or deployment.
 
 ## Primary sources checked
 
-- Signal legal structure (pattern only): https://signal.org/legal/
 - ICO, information a privacy notice must provide:
   https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/individual-rights/the-right-to-be-informed/what-privacy-information-should-we-provide/
 - ICO, children and the UK GDPR:

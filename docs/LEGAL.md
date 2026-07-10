@@ -42,37 +42,14 @@ monitored contact channels, applicable address requirements, scope decisions,
 and accountable approvals remain open. The pages must not be described as
 counsel-approved or a guarantee of compliance.
 
-## What Signal's public posture tells us
+## Notice design
 
-Signal's public source and legal pages are useful as a pattern, not text to copy.
-The relevant buckets are:
-
-- repo-level licence, copyright, warranty, and liability notices
-- a cryptography/export-control notice
-- user terms that say the service is provided as-is, may be unavailable, and is
-  not an emergency-services provider
-- privacy wording that distinguishes encrypted content from technical metadata
-  needed to operate the service
-- trademark guidance that separates use of open-source code from use of the
-  Signal brand
-
-Current flock position:
-
-- flock is MIT licensed and currently does not import Signal client, server, or
-  libsignal source code.
-- If Signal source is copied or modified later, treat that as an AGPLv3 event:
-  publish the corresponding source, preserve notices, provide attribution, and
-  do not use Signal trademarks, logos, domains, or product names in a way that
-  implies endorsement.
-- References to Signal in docs or UI must be nominative only. Use plain
-  comparisons such as "like a messenger app" where the brand is not needed.
+Flock's public notices are written for Flock's own product and deployment. They
+do not copy another service's wording, assume another service's legal status, or
+borrow another project's licence, trademark, export, or privacy claims.
 
 Primary references checked:
 
-- https://github.com/signalapp/Signal-Android/wiki
-- https://signal.org/legal/
-- https://signal.org/brand/
-- https://signal.org/brand/trademarks/
 - https://www.gnu.org/licenses/agpl-3.0.html
 - UK/EU follow-up references checked:
   - https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/lawful-basis/a-guide-to-lawful-basis/
@@ -159,8 +136,8 @@ to exclude liability for death or personal injury caused by negligence.
 
 ### Cryptography and export/import law
 
-flock includes cryptographic software. Do not copy Signal's ECCN or export
-classification onto flock unless an export reviewer confirms it. Users,
+flock includes cryptographic software. Do not publish an ECCN or export
+classification for flock unless an export reviewer confirms it. Users,
 distributors, and operators are responsible for complying with applicable export,
 import, sanctions, and local encryption laws. Do not distribute or use flock where
 doing so would be unlawful.
@@ -168,9 +145,9 @@ doing so would be unlawful.
 ### Trademark and affiliation
 
 flock, ForgeSworn, and related project names should be presented as our marks.
-Signal is a trademark of Signal Technology Foundation. flock is not affiliated
-with, sponsored by, or endorsed by Signal. If a third-party mark is referenced,
-use it only to identify that third-party product or protocol.
+Do not imply sponsorship, endorsement, or affiliation by a third party. If a
+third-party mark is genuinely needed, use it only to identify that product or
+protocol.
 
 ## UK/EU POC guardrails
 
