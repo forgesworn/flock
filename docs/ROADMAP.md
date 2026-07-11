@@ -166,18 +166,24 @@ and shipped (release `0294b8c` live on flock.forgesworn.dev).
   deliberately deferred (ratchet crypto deserves its own focused session).
   **Not yet deployed** — the 6-word invite format should ship as a coordinated
   site + APK pair. Audit: `docs/research/2026-07-04-relay-privacy-audit.md`.
-- [x] **Onion relay endpoint live** (2026-07-11): a v3 hidden service on the
-  relay.trotters.cc host now fronts the relay
+- [x] **Onion relay endpoint live + native route fixed** (2026-07-11, shipped
+  `release/51e7647`): a v3 hidden service on the relay.trotters.cc host now
+  fronts the relay
   (`ws://gdtkccgtod3om7bvycaygjjske6sj6vnsu3d7csutkofnoa3ylt6haid.onion`,
-  `ONION_RELAYS` default), with a dedicated `access_log off` nginx vhost —
-  the onion path bypasses both the CDN and IP logging entirely. Verified
-  end-to-end over a real Tor circuit: NIP-11, WebSocket 101, and a
-  NIP-40-expiring publish/read round-trip. The Tor toggle (off by default,
-  fail-loud) is no longer inert; remaining gate is the **on-device Orbot
-  test** — Chromium treats cleartext `ws://` from an `https` origin as
-  blockable mixed content and does not exempt `.onion` (Firefox/Tor Browser
-  do), so the Capacitor WebView may need `android.allowMixedContent: true`
-  before the route works in the APK. Decide on evidence, not pre-emptively.
+  `ONION_RELAYS` default), with a dedicated `access_log off` nginx vhost;
+  the clearnet relay vhost was tightened to match (access_log off, X-Real-IP
+  dropped). The onion path bypasses both the CDN and IP logging entirely.
+  Verified end-to-end over a real Tor circuit: NIP-11, WebSocket 101, and a
+  NIP-40-expiring publish/read round-trip. **Native mixed-content gate
+  resolved on-device (emulator WebView):** Chromium blocks cleartext `ws://`
+  from the `https` origin at the WebSocket *constructor* and does not exempt
+  `.onion`, so the fix is `android.allowMixedContent` (renderer) + a
+  network-security-config that RE-BLOCKS cleartext for every host except
+  `.onion` (network layer), plus https-only avatars so nothing else can
+  downgrade. Proven by probe: post-fix, clearnet `ws://` →
+  `ERR_CLEARTEXT_NOT_PERMITTED` while `.onion` passes cleartext policy. Only
+  a live Orbot beacon on real GrapheneOS hardware remains (emulated ARM ANRs
+  under Tor+VPN+WebView; emulator also lacks raw GPS).
 
 ## Lost phone ("back of a taxi")
 
