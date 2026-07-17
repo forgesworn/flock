@@ -3,7 +3,7 @@ import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSha
 // Messaging: the circle chat (one Signal-style thread, its own Chat tab, shared
 // inbox like a buzz) and private 1:1 threads (gift-wrapped to one member's
 // personal inbox — only they can read it; the thread sheet lives behind people,
-// PMs under You). Everything goes over the live relay, so the OTHER person's
+// PMs under You). Everything goes over the selected relay, so the OTHER person's
 // screen proves the transport.
 test.describe('messaging — circle chat & private 1:1 threads', () => {
   test('Home is the full-screen map; Chat is its own tab with the composer', async ({ browser }) => {

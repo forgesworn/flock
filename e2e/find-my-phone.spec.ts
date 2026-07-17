@@ -4,7 +4,7 @@ import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz
 // exact location. A remotely-triggered disclosure is only legitimate when every
 // consent gate holds: the owner pre-authorised THIS circle, the phone is flagged
 // lost, the ask is aimed at it — then a cancel window before it answers. This
-// proves the full consent path end to end over the live relay: the ask reaches
+// proves the full consent path end to end over the selected relay: the ask reaches
 // the lost phone, its cancel banner shows, and (uncancelled) its exact beacon
 // lands back on the asker. The gate logic itself is exhaustively unit-tested
 // (app/src/findping.test.ts); here we prove the wire round-trip + the UX.

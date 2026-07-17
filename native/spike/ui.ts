@@ -12,7 +12,7 @@ function clock(t: number): string {
 }
 
 function passChip(v: boolean | null): string {
-  if (v == null) return '<span class="chip muted">—</span>'
+  if (v === null) return '<span class="chip muted">—</span>'
   return v ? '<span class="chip ok">PASS</span>' : '<span class="chip bad">FAIL</span>'
 }
 
@@ -56,7 +56,7 @@ export function render(root: HTMLElement): void {
       <div class="row"><span class="k">#1 cadence ≤60 s while moving</span>${passChip(m.pass.cadence)}</div>
       <div class="row"><span class="k">#2 breach detected ≤90 s</span>${passChip(m.pass.breach)}</div>
       <div class="row"><span class="k">#3 gaps &gt; 5 min (judge w/ your walk log)</span><span class="v">${m.gapsOver5min.length}</span></div>
-      ${m.breaches.length ? `<div class="row"><span class="k">breach latency</span><span class="v">${m.breaches.map((b) => (b.detectionSec == null ? '?' : b.detectionSec + 's')).join(', ')}</span></div>` : ''}
+      ${m.breaches.length ? `<div class="row"><span class="k">breach latency</span><span class="v">${m.breaches.map((b) => (b.detectionSec === null ? '?' : b.detectionSec + 's')).join(', ')}</span></div>` : ''}
     </section>
 
     <section class="card">

@@ -87,12 +87,12 @@ export function computeMetrics(s: SpikeSession): SpikeMetrics {
   const sortedM = [...movingIntervals].sort((a, b) => a - b)
   const breaches = s.breaches.map((b) => ({
     firstOutsideT: b.firstOutsideT,
-    detectionSec: b.lastInsideT == null ? null : Math.round((b.firstOutsideT - b.lastInsideT) / 1000),
+    detectionSec: b.lastInsideT === null ? null : Math.round((b.firstOutsideT - b.lastInsideT) / 1000),
   }))
 
   const movingP90 = quantile(sortedM, 0.9)
   const worstBreach = breaches.reduce<number | null>(
-    (m, b) => (b.detectionSec == null ? m : m == null ? b.detectionSec : Math.max(m, b.detectionSec)),
+    (m, b) => (b.detectionSec === null ? m : m === null ? b.detectionSec : Math.max(m, b.detectionSec)),
     null,
   )
 
@@ -109,7 +109,7 @@ export function computeMetrics(s: SpikeSession): SpikeMetrics {
     pass: {
       // null = not enough evidence yet (didn't move / no breach recorded) — judge by hand.
       cadence: sortedM.length ? movingP90 <= CADENCE_MAX_S : null,
-      breach: worstBreach == null ? null : worstBreach <= BREACH_MAX_S,
+      breach: worstBreach === null ? null : worstBreach <= BREACH_MAX_S,
     },
   }
 }

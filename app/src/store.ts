@@ -147,7 +147,7 @@ export interface Persisted {
   authMethod?: AuthMethod
   /** Local secret from which circle seeds are deterministically derived (nsec-tree). */
   circleRootHex?: string
-  /** Helper hints: a master switch + per-hint dismissals. Absent = all on. */
+  /** Helper hints: a master switch + per-hint dismissals. Absent = off. */
   hints?: Hints
   /** "Hide flock" (decoy view) — present = armed. The phrase-derived sealing
    *  key + its salt, computed once at enable time so the hide itself is

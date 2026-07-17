@@ -20,7 +20,8 @@ test.describe('remove member — cut someone off (3 people)', () => {
     // …and C's receive path is demonstrably live (it gets a buzz on the shared key).
     await gotoTab(C, 'circle')
     await expect(C.locator('.buzz-banner')).toBeVisible()
-    await C.click('[data-action="dismiss-buzz"]') // clear it — the assertion below must see only post-removal traffic
+    await settle(C) // let concurrent first-contact roster updates finish rerendering
+    await C.locator('[data-action="dismiss-buzz"]').click() // clear it — the assertion below must see only post-removal traffic
 
     // A sees both others (this also covers the concurrent-roster-update path).
     await openAdvanced(A)
@@ -46,7 +47,7 @@ test.describe('remove member — cut someone off (3 people)', () => {
     await expect(B.locator('.buzz-banner')).toContainText('new key check')
 
     // …C (removed, stranded on the old key) never does — even though its receive
-    // path was live moments ago. That's the cut-off, proven over the live relay.
+    // path was live moments ago. That's the cut-off, proven over the relay.
     await settle(C, 2000)
     await expect(C.locator('.buzz-banner')).toHaveCount(0)
   })

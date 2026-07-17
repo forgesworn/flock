@@ -58,14 +58,14 @@ describe('word-code invite — speakable code, secret never in the code', () => 
     expect(s1).toMatch(/^[0-9a-f]{64}$/)
     expect(s1).toBe(s1again)
     expect(s1).not.toBe(s2)
-  })
+  }, 30_000)
 
   it('tag is stable per seed and differs across seeds (so two codes never collide on the relay)', async () => {
     const s1 = await deriveWordCodeSeed(wordCodeFromEntropy(Uint8Array.from([1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6])))
     const s2 = await deriveWordCodeSeed(wordCodeFromEntropy(Uint8Array.from([5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10])))
     expect(wordInviteTag(s1)).toBe(wordInviteTag(s1))
     expect(wordInviteTag(s1)).not.toBe(wordInviteTag(s2))
-  })
+  }, 30_000)
 })
 
 // Audit F4: the parked, code-protected event no longer carries the circle's
@@ -92,13 +92,13 @@ describe('buildWordInviteRef / readWordInviteRef — the reference, not the seed
 
     const wrongSeed = await deriveWordCodeSeed(wordCodeFromEntropy(Uint8Array.from([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])))
     await expect(readWordInviteRef(wrongSeed, ev)).rejects.toThrow()
-  })
+  }, 30_000)
 
   it('rejects a malformed reference payload', async () => {
     const seed = await deriveWordCodeSeed(wordCodeFromEntropy(Uint8Array.from([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7])))
     const ev = await buildWordInviteRef(seed, 'not-hex', 1_000_000)
     await expect(readWordInviteRef(seed, ev)).rejects.toThrow()
-  })
+  }, 30_000)
 })
 
 describe('wordInviteParkKey — deterministic delete-on-fetch signing key', () => {

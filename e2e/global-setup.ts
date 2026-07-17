@@ -1,9 +1,9 @@
 import { chromium } from '@playwright/test'
 import { BASE_URL } from '../playwright.config'
 
-// Warm the Vite dev server (compile the app + lazy chunks) and the relay
-// DNS/TLS once, so the first real test isn't racing a cold compile against a
-// live-relay round-trip. Without this, run #1 is slow and occasionally flaky
+// Warm the Vite dev server (compile the app + lazy chunks) and establish the
+// selected relay connection once, so the first real test isn't racing a cold
+// compile against its first relay round-trip. Without this, run #1 is slow and occasionally flaky
 // while every subsequent run is fast.
 export default async function globalSetup(): Promise<void> {
   const browser = await chromium.launch()

@@ -1,7 +1,7 @@
 // Shared e2e helpers: spin up an isolated "person" (a fresh browser context =
 // a fresh device + identity), and drive the real UI by the same data-action
 // hooks the app wires. Everything two people do to each other goes through the
-// live relay, so assertions on the *other* person's screen prove the transport.
+// selected relay, so assertions on the *other* person's screen prove the transport.
 
 import { test as base, expect, type Browser, type Page } from '@playwright/test'
 import { BASE_URL } from '../playwright.config'

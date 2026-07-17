@@ -4,7 +4,6 @@
 import * as store from './store'
 import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
-import { login as signetLogin, restoreSession as signetRestore, logout as signetLogout } from 'signet-login'
 import { buildSignInOptions } from './signin'
 import { PRIVATE_RELAYS, ONION_RELAYS, parseRelayList, unknownRelays, effectiveRelays } from './relays'
 import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
@@ -117,7 +116,6 @@ let focusGeohash: string | null = null // a one-off PM location share's cell —
 
 let stopInviteSub: (() => void) | null = null
 let inviteSubKey = ''
-let awaitingInvite = false
 let pendingInviteNpub: string | null = null // a scanned invite-key link, prefilled into the send form
 let showInviteLinkText = false // clipboard copy failed — render the link as selectable text instead
 let showInvite = false // Circle page: the top "Invite" button reveals the QR + link panel
@@ -2091,7 +2089,7 @@ function wireOnboard(): void {
       else if (a === 'join') { onboardStep = 'join'; rerenderOnboard() }
       else if (a === 'restore') { onboardStep = 'restore'; rerenderOnboard() }
       else if (a === 'do-restore') void doRestore()
-      else if (a === 'back') { onboardStep = 'intro'; awaitingInvite = false; rerenderOnboard() }
+      else if (a === 'back') { onboardStep = 'intro'; rerenderOnboard() }
       else if (a === 'ob-ttl') {
         // Update in place too, for the same reason as ob-mode.
         ttlMode = (node as HTMLElement).dataset.ttl as 'ongoing' | 'today' | 'custom'
@@ -2553,7 +2551,8 @@ async function doSignetLogin(): Promise<void> {
     // The picker offers Signet, a browser extension (NIP-07), Amber, and any
     // NIP-46 bunker / NostrConnect — every one keeps the key in the signer.
     // nsec-paste is deliberately excluded (see signin.ts).
-    const session = await signetLogin(buildSignInOptions('flock', [...PRIVATE_RELAYS]))
+    const { login } = await import('signet-login')
+    const session = await login(buildSignInOptions('flock', [...PRIVATE_RELAYS]))
     if (!session) { toast('Sign-in cancelled'); return }
     // Gift-wrap seals are nip44-encrypted, so a signer without NIP-44 can't
     // drive flock at all — reject it here rather than fail on the first signal.
@@ -2573,7 +2572,8 @@ async function doSignetLogin(): Promise<void> {
 async function restoreSignet(): Promise<void> {
   if (persisted.authMethod !== 'signet' || signetSigner) return
   try {
-    const session = await signetRestore({ defaultRelay: PRIVATE_RELAYS[0] })
+    const { restoreSession } = await import('signet-login')
+    const session = await restoreSession({ defaultRelay: PRIVATE_RELAYS[0] })
     if (session) { signetSigner = makeSignetSigner(session.signer); render() }
   } catch { /* leave unsigned; user can re-auth */ }
 }
@@ -2656,7 +2656,6 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
     }
     upsertCircle(joined, true)
     announceJoin(joined) // the inviter expected me, but the REST of the circle didn't
-    awaitingInvite = false
     onboardStep = 'intro'
     adding = false
     tab = 'home'
@@ -3356,7 +3355,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'add-circle': adding = true; onboardStep = 'intro'; render(); break
     case 'go-invite': tab = 'circle'; showInvite = true; render(); break
     case 'toggle-invite': showInvite = !showInvite; spokenCode = null; render(); break
-    case 'toggle-share': sharing ? stopSharing() : startSharing(); break
+    case 'toggle-share': if (sharing) stopSharing(); else startSharing(); break
     case 'geo-retry': geoIssue = null; sharing = false; startSharing(); break
     case 'festival-start': startFestival(Number(node.dataset.hours ?? '3')); break
     case 'festival-stop': stopFestival(); break
@@ -3493,7 +3492,6 @@ function doCreate(): void {
   }
   upsertCircle(store.createCircle(name, 'nightout', persisted.identity.pk, persisted.circleRootHex, expiresAt), true)
   onboardStep = 'intro'
-  awaitingInvite = false
   adding = false
   ttlMode = 'ongoing'
   tab = 'circle' // land where inviting people is front-and-centre
@@ -3504,7 +3502,6 @@ function doCreate(): void {
 function doJoinRemote(): void {
   persisted.identity ??= store.createIdentity()
   store.save(persisted)
-  awaitingInvite = true
   awaitSince = Date.now()
   onboardStep = 'await'
   render()
@@ -4462,7 +4459,9 @@ function wireMemberStrip(wrap: HTMLElement): void {
 /** Full reset: sign out, wipe local state and every circle on this device. */
 function resetDevice(): void {
   closeRadar() // nothing may keep beeping or sampling past a reset
-  if (persisted.authMethod === 'signet') { try { void signetLogout() } catch { /* ignore */ } }
+  if (persisted.authMethod === 'signet') {
+    void import('signet-login').then(({ logout }) => logout()).catch(() => { /* ignore */ })
+  }
   signetSigner = null
   store.reset()
   store.disarmRest()
@@ -4478,7 +4477,6 @@ function resetDevice(): void {
   inviteSubKey = ''
   if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = 0 }
   sharing = false
-  awaitingInvite = false
   adding = false
   disbandConfirm = false
   resetConfirm = false

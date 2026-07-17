@@ -1,13 +1,12 @@
 # flock CI — the fast gates that must pass before every deploy: lint → typecheck →
-# build (lib + PWA) → unit tests. A separate `native` job runs the Kotlin publish
+# build (lib + PWA) → unit tests with coverage. A separate `native` job runs the Kotlin publish
 # pipeline's JVM suite (JDK 21, no Android SDK) — it holds the JS↔Kotlin wire-format
 # parity, incl. the reverse gift-wrap check that proves Kotlin-built wraps decrypt
 # through the untouched JS path. Action refs pinned by SHA, as across ForgeSworn.
 #
-# The two-person Playwright e2e suite runs LOCALLY, not here: `npm run test:e2e`
-# before a deploy (docs/DEPLOY.md). It needs a live Vite dev server + a live Nostr
-# relay, so it belongs on the developer's machine — running it on every push would
-# hammer the production relay and burn Actions minutes on a private repo.
+# The two-person Playwright suite gets a fresh, RAM-only Nostr relay in CI. An
+# explicit FLOCK_E2E_RELAY can still run the same suite against a production-
+# shaped relay before deployment without making production traffic a push gate.
 #
 # Publishing (anvil) is deliberately absent: @forgesworn/flock is private and
 # unpublished — wire forgesworn/anvil here if the library ever ships to npm.
@@ -33,12 +32,12 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run build:app
-      - run: npm test
+      - run: npm run test:coverage
 
   # Kotlin native publish pipeline — golden-vector parity against the JS impl,
   # incl. the reverse stage (native/vectors/verify-kotlin.test.ts consumes the
-  # kotlin-wraps.json this emits). JDK 21 only; no Android SDK. Mirrors the
-  # `npm run test:native` script (gradlew invoked directly to stay Node-free).
+  # kotlin-wraps.json this emits). JDK 21 only; no Android SDK. Kotlin and JS
+  # run in this same job so the gitignored generated wraps cannot be skipped.
   native:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -50,5 +49,24 @@ jobs:
           java-version: '21'
           cache: gradle
           cache-dependency-path: native/crypto-tests/**/*.gradle*
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - run: ./gradlew --console=plain test
         working-directory: native/crypto-tests
+      - run: npx vitest run native/vectors/verify-kotlin.test.ts
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

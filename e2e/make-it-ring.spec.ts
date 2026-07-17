@@ -6,7 +6,7 @@ import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz
 // buzz; the LOST phone escalates it on receipt (app/src/ring.ts). The native
 // alarm channel can't be driven in a browser, so we assert the observable in-app
 // proof — the loud "being rung" card appears on the lost phone the moment the
-// finder rings it, over the live relay.
+// finder rings it, over the selected relay.
 test.describe('make it ring — a lost phone sounds when a member rings it', () => {
   test("B flags A lost then rings it → A's phone goes to a 'ringing' card; A clears it → the card + flag drop", async ({ browser }) => {
     const A = await newPerson(browser)

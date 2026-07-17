@@ -3,7 +3,7 @@ import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz
 // Lost phone — a peer flags a member's device (left in a taxi); every screen
 // shows it, and the phone itself addresses whoever finds it. Anyone can clear
 // it, including the owner from the phone — proving mark AND clear round-trip
-// through the live relay.
+// through the selected relay.
 test.describe('lost phone — a peer flags it, anyone clears it', () => {
   test("B reports A's phone lost → A shows the finder card; A clears it → B's flag drops", async ({ browser }) => {
     const A = await newPerson(browser)
