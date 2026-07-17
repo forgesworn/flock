@@ -1,10 +1,14 @@
 # FLOCK Protocol
 
-**Status:** Draft · **Version:** 0.2 · **Date:** 2026-07-02
+**Status:** Draft · **Version:** 0.3 · **Date:** 2026-07-17
 
 Coercion-resistant family & friends safety and privacy-preserving location
 sharing. FLOCK is a thin application layer over **canary-kit** (which extends
 **spoken-token**), adding location to the existing group + duress machinery.
+
+The protocol describes the wider library surface. The current hosted 18+ app
+ships the `nightout`/trusted-peer coordination subset; family/guardian flows and
+several safety signals remain library-complete but parked from the UI.
 
 ## 1. Layering
 
@@ -372,7 +376,8 @@ Grounded in the feasibility research (`docs/research/2026-06-30-feasibility-rese
 ## 7. Open items
 
 - Formal geo-indistinguishability (planar-Laplace) for night-out beacons.
-- Background delivery on GrapheneOS without Google APIs — **unproven**, must be
-  prototyped before the native path is locked (see DESIGN Phase 0).
+- Android outbound background delivery is shipped and hardware-verified on
+  GrapheneOS. Still open: locked-phone radar and live Orbot-route field passes,
+  broader Stay reachable battery/device evidence, and any native iOS path.
 - A registered/parameterised Nostr application profile (NIP-FLOCK), analogous to
   canary-kit's NIP-CANARY.

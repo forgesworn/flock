@@ -7,6 +7,10 @@ night-out sharing over Nostr.
 
 **Private repo — `forgesworn/flock`.** Owned by us; full push access.
 
+Detailed competitor/market comparisons must stay outside this repository even
+while it is private: Git history would survive a later public visibility change.
+Only product requirements and Flock's own threat-model decisions belong here.
+
 ## Read first
 
 - `docs/VISION.md` — the goal: why this exists, who it's for, the non-negotiable design principles, and what "done" looks like.
@@ -16,17 +20,21 @@ night-out sharing over Nostr.
 - `docs/PRIVACY.md` — relay threat model + privacy-by-architecture; no-report zones, off-grid mode, multi-group.
 - `docs/ROADMAP.md` — the tracked feature backlog (single source of truth; full features, no bugs).
 - `FLOCK.md` — protocol spec (event kinds, payloads, privacy invariants).
-- `docs/plans/DESIGN.md` — architecture + phased roadmap.
+- `docs/plans/DESIGN.md` — original 2026-06-30 build plan, retained as
+  historical decision context; do not use it for current feature state.
 - `docs/research/2026-06-30-feasibility-research.md` — the cited feasibility research.
 
 ## Commands
 
 - `npm run build` — compile the library (`src/` → `dist/`)
-- `npm test` — run library tests (vitest)
-- `npm run test:e2e` — two-person Playwright e2e over a live relay; **runs locally, not
-  in CI** (needs a live dev server + relay — see `docs/DEPLOY.md`). Playwright self-starts
-  the dev server; target one spec with `-- e2e/<file>.spec.ts` (full suite is >10 min).
-- `npm run typecheck` / `npm run lint` — library type-check / lint (`src/` only)
+- `npm test` — run the complete Vitest suite
+- `npm run test:e2e` — two-person Playwright e2e over the configured relay. Local
+  runs default to the production-shaped relay; CI starts a fresh RAM-only local
+  relay. Use `FLOCK_E2E_RELAY=wss://…` for an explicit pre-deploy relay smoke pass;
+  target one spec with `-- e2e/<file>.spec.ts` (the full suite is >10 min).
+- `npm run typecheck` — strict library TypeScript project
+- `npm run lint` — all project TypeScript/JavaScript
+- `npm run test:coverage` — complete Vitest suite + enforced 80% coverage gates
 - `npm run smoke` — build + run the Nostr transport round-trip smoke test
   (in-process; set `FLOCK_RELAY=wss://…` to also round-trip via a live relay)
 - `npm run dev` — Vite dev server for the PWA (`app/`)
@@ -43,7 +51,9 @@ night-out sharing over Nostr.
 - `policy.ts` — disclosure-on-event decision: `withhold | coarse | full` by mode/trigger/breach
 - `signals.ts` — `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078 events
 - `nightout.ts` — ephemeral groups (NIP-40), presence ("still out / gone home"), separation ("lost")
-- `index.ts` — barrel; re-exports the full `canary-kit` + `canary-kit/nostr` surface plus flock additions
+- `joined.ts` / `lost.ts` / `findping.ts` / `radar.ts` — current app support
+- `index.ts` — barrel; re-exports the full `canary-kit` + `canary-kit/nostr`
+  surface plus nineteen Flock additions
 
 ### PWA (`app/`) — vanilla TS + Vite
 
@@ -59,10 +69,11 @@ Background geofencing on Android/GrapheneOS (no Google APIs). `npm run apk` /
 `npm run apk:release` build a sideloadable APK (`native/build-apk.sh`); the
 generated `android/` project is gitignored — all native config lives in the
 committed scripts (`patch-android.mjs`, `native/assets/`). The background
-watcher (fix capture) is tied to the sharing toggle and torn down on
-reset/hide — see below for how a backgrounded fix is actually turned into a
-publish. Reliability measurement on real hardware is still gated by the
-Phase 0 spike (`docs/plans/2026-06-30-phase0-graphene-spike.md`).
+watcher (fix capture) and native publish mirror are tied to the sharing toggle
+and torn down on reset/hide. Locked walking and stationary deep-Doze outbound
+publishing are hardware-measured green on GrapheneOS. Separate open evidence
+rows remain for locked radar, live Orbot routing, and broader inbound battery/
+device coverage; see `docs/ROADMAP.md`.
 
 Background publish is native (Kotlin, `native/android-src/kotlin*`): while the
 app is backgrounded the fix→policy→gift-wrap→relay pipeline runs without the
@@ -96,4 +107,5 @@ Be extra careful when modifying:
 - **TDD** — failing test first, then implement. Library modules stay pure (return new state, no mutation).
 - **Geohash encoding + encryption stay at the edge** — the library decides policy and builds events; it does not encode geohashes or own transport (mirrors `canary-kit`).
 - **Git:** `type: description` commits. **No `Co-Authored-By` lines.**
-- Library gates (`build`/`test`/`lint`) cover `src/` only; the PWA (`app/`) is built by Vite.
+- The strict TypeScript build covers the library; lint and Vitest cover the
+  wider project, and the PWA (`app/`) is built by Vite.

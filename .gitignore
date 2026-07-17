@@ -53,5 +53,9 @@ CLAUDE.local.md
 # Local dev scratch (relay watchers, device screenshots) — never committed
 scratchpad/
 
+# Detailed market/competitor reports stay outside repository history.
+docs/**/*competitor*
+docs/private/
+
 # Local deploy config — real host/user, never committed
 deploy/deploy.local.sh

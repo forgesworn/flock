@@ -2,18 +2,17 @@
 
 ## THE GOAL
 
-**A phone in a pocket, screen off, tracks and alerts exactly as reliably as
-one held in your hand, open, staring at it.** Right now it doesn't — that's
-the single biggest thing standing between flock and what it's for. Everything
-else in this document is context for why that's the goal and what it's in
-service of; it is not a substitute for it.
+**Trusted adults can find and help each other when it matters, without creating
+a provider-readable movement history or a permanent remote-tracking
+relationship.** A phone in a pocket, screen off, must be as useful as one held
+open — and every disclosure must remain explicit, minimal, and defensible under
+the coercion threat model.
 
-Concretely, right now: fix background publish (see
-[`docs/plans/2026-07-05-native-background-publish.md`](plans/2026-07-05-native-background-publish.md)) —
-move the fix→beacon→publish pipeline into native code so it keeps working
-when Android suspends the WebView's JS in the background. That is the
-literal next thing to build. Everything below is why it matters and what it
-has to be consistent with while we build it.
+Android outbound background publishing now meets that core requirement: the
+Kotlin pipeline is shipped and hardware-measured while locked, walking, and in
+stationary deep Doze on GrapheneOS. That does not mean “all native work is
+done”. Locked-phone radar, the live Orbot route, inbound battery/device breadth,
+and any future iOS native path retain their own evidence gates in the roadmap.
 
 ## One line
 
@@ -27,12 +26,13 @@ current status; `ARCHITECTURE.md` is the stack; `FLOCK.md` is the protocol;
 
 ## The problem
 
-Every mainstream location-sharing product (Life360, Find My, Google's
-Timeline, Snap Map) makes the same trade: convenience for a permanent,
-centralised record of where you and the people you love have been. That
-record is a single company's to keep, to monetise, to hand to a subpoena, to
-lose in a breach, or — the case that matters most — to hand to an abuser who
-has your login, your court order, or your child's phone.
+Many location-sharing products make convenience depend on an account, a
+central relationship graph, provider-readable location, or retained movement
+history. Those are different risks and not every product makes every trade:
+some mainstream systems now protect live location end-to-end or limit its
+retention. Flock's narrower claim is architectural and testable: its service
+and relays do not receive plaintext circle location, there is no Flock account,
+and precision/lifetime are controlled at the sending device.
 
 Two groups are underserved by that trade-off in opposite directions:
 
@@ -45,17 +45,14 @@ Two groups are underserved by that trade-off in opposite directions:
   deniable if a phone is searched.
 - **People who need occasional, low-friction coordination, not a standing
   surveillance relationship.** A festival friend group wants to find each
-  other in a crowd for one night and never again. A family wants to know a
-  teenager left school safely without keeping a permanent map of their whole
-  life. These groups are currently forced into the SAME always-on,
-  everything-logged-forever product as the first group, because that's what
-  the market offers.
+  other in a crowd for one night and never again. The product should make that
+  temporary purpose easier than creating an always-on tracking relationship.
 
 flock's bet: **one architecture can serve both**, because the right default
 for both is the same — *disclosure is a deliberate, momentary act, never a
 standing state* — and the same privacy machinery that protects a domestic-
 abuse survivor also happens to be exactly what a privacy-conscious friend
-group or family wants, whether they'd use that language for it or not.
+group wants, whether they'd use that language for it or not.
 
 ## Who this is for
 
@@ -64,9 +61,9 @@ group or family wants, whether they'd use that language for it or not.
   where everyone is, find each other in a crowd, know if someone's phone
   died or they went home early — without any of it living anywhere after
   the fact.
-- **A family** wanting to know a child got somewhere safely, or an elderly
-  relative is where they should be, without an always-on tracker and
-  without trusting a US ad-tech company with a minor's movement history.
+- **Trusted adults supporting one another** — including an elderly relative who
+  chooses to join — without an always-on tracker. The current hosted preview is
+  18+ and must not be used to track children; see `docs/LEGAL.md`.
 - **Someone in a coercive relationship** who needs a way to signal for help
   that looks identical to normal use, an app that can be searched by a
   controlling partner and reveal nothing, and a "stop sharing" that can
@@ -96,10 +93,11 @@ rather than spec, because every feature decision gets checked against them:
    pipes that see opaque ciphertext from rotating throwaway keys; anyone can
    run their own relay; anyone can self-host the whole thing. There is no
    "flock account" to subpoena.
-4. **Reuse proven cryptography; invent as little as possible.** flock adds
+4. **Reuse established cryptography; invent as little as possible.** flock adds
    *zero* new cryptographic primitives on top of `canary-kit`/`spoken-token`
    — group lifecycle, beacon/duress encryption, NIP-44/NIP-59 transport are
-   all reused, audited, and battle-tested elsewhere. The places we *have*
+   reused rather than reimplemented. That is a smaller review surface, not a
+   substitute for named audit evidence (`SECURITY.md`). The places we *have*
    built new things (the disclosure policy engine, geofencing, night-out
    presence, the word-code invite hardening) are pure, unit-tested, and kept
    as small as the job allows.
@@ -129,62 +127,47 @@ breach, SOS/duress, dead-man's-switch check-ins, breadcrumb trails, no-report
 zones, rendezvous/meeting points, off-grid mode, spoken pick-up verification
 — all pure, all tested, all ready for the app UI to grow back into as it
 matures past MVP. The shipped app (`app/`) currently focuses the whole
-feature set down to **live location sharing with one group of friends**, and
-tonight's live field test (a real event, real phones, real friends, screen
-locked and unlocked) validated a lot of it working exactly as intended:
+feature set down to **private coordination across trusted adult circles**:
 
-- Circle creation, QR/word-code/remote invites, and the precision slider
-  (region → exact spot) all worked correctly on real hardware.
-- Circle chat, private 1:1 threads, and quick actions (Check in / Come to me
-  / Where are you? / Call me / On my way) all delivered correctly over the
-  live relay in both directions.
-- Lost-phone flagging, ringing, and the pre-authorised remote-exact-ping
-  consent flow all worked as designed.
-- **Foreground behaviour is solid.** Every explicit, in-the-app action —
-  toggling sharing, responding to a roll-call, sending a message — worked
-  instantly and correctly, every time, all night.
+- multiple circles with ongoing/today/custom lifetimes;
+- QR, link, six-word, and remote-signer invitations;
+- explicit default-off live sharing with region-to-exact precision;
+- group chat, private threads, roll-call and direct quick actions;
+- temporary exact festival mode, lost/ring/find, and foreground radar;
+- backup/reseed/remove/disband, offline maps, Tor/onion routing, App Lock, and
+  a decoy view;
+- native Android background publish plus opt-in app-closed reachability.
+
+The July field passes covered real phones, real relays, screen-off walking,
+stationary deep Doze, circle messaging, invitations, lost/find flows, and the
+native outbound round trip. Tests distinguish unit, e2e, JVM parity, and
+hardware evidence; the roadmap names the remaining field-only checks instead
+of treating “built” as “proven everywhere”.
 
 ## The evidence behind THE GOAL
 
-Tonight, live, at a real event: a phone locked and carried while walking
-produced one location jump instead of continuous tracking; Android's own
-location indicator went dark the moment the app left the foreground; a
-"your phone was reported lost" alert only appeared once the recipient
-reopened the app, never as a background notification — even with every
-relevant permission and battery setting confirmed correct.
+The first live event test exposed the actual failure: Android could keep a
+foreground location service alive, but the WebView stopped running the
+JavaScript policy/encryption/publish pipeline reliably after lock. The fix was
+architectural, not a battery-setting instruction: move the complete outbound
+pipeline into native code.
 
-The root cause is now understood precisely (see the plan doc linked above):
-native GPS sampling keeps working via the foreground service — **now measured,
-not assumed (see below)** — but delivering that fix into JavaScript, and
-everything downstream of it (cadence gating, encryption, gift-wrap, publish),
-depends on the WebView actually executing JS, which Android throttles or
-suspends while backgrounded. The fix isn't a setting; it's moving that pipeline
-into native code, sharing infrastructure with the existing (also not-yet-built)
-plan for receiving alerts in the background
-([`docs/plans/2026-06-30-background-inbound.md`](plans/2026-06-30-background-inbound.md)).
-
-**Confirmed by measurement (2026-07-05).** A standalone native probe
-(`native/gps-probe/` — a `location` foreground service on the raw
-`LocationManager`, no WebView, no JS) on a **GrapheneOS Pixel 10 Pro** (API 37)
-logged **46 fixes at ~10 s cadence, longest gap 10 s**, screen locked and
-carried on a walk, the foreground service never killed. So the platform half is
-proven: GrapheneOS *does* deliver GPS to a locked background service. The
-remaining failure is entirely the WebView-JS seam — so moving the pipeline
-native **will** close THE GOAL's gap, not merely might. (Still to run: a
-stationary deep-Doze pass.)
+That work is now shipped. The standalone probe first measured locked GPS fixes
+on a GrapheneOS Pixel 10 Pro. The production Kotlin publisher then passed
+locked walking and stationary deep-Doze round trips through the real relay and
+decrypt path. Shared golden vectors and CI protect the JavaScript/Kotlin wire
+boundary. This closes the original outbound gap while leaving inbound battery
+breadth, locked radar, the live Orbot route, and iOS as separate claims.
 
 ## Roadmap shape
 
-**Near-term (blocking the core promise):**
-- Native background publish (the design doc above) — the single biggest
-  unlock, closing the gap between "works when I'm watching" and "works when
-  I'm not."
-- Re-run a proper Phase 0-style measurement with split native/JS instrumentation
-  once the native pipeline exists, so a future regression can tell "GPS sampling
-  stopped" from "JS delivery stalled" apart. **The native-side half is already
-  measured green (2026-07-05, `native/gps-probe/`)** — GPS delivery to a locked
-  GrapheneOS service is confirmed; what remains is instrumenting the JS side once
-  the pipeline lands.
+**Near-term evidence and reliability:**
+- Complete the real-hardware locked-phone radar pass.
+- Complete the live GrapheneOS/Orbot onion-route beacon pass.
+- Measure Stay reachable battery/reconnect behaviour across the target Android
+  and GrapheneOS device matrix.
+- Keep the native Kotlin→JavaScript reverse-vector gate and 80% coverage gate
+  enforced in CI.
 
 **Also on the list, lower urgency:**
 - A genuine movement trail (direction/speed at a glance) for live-sharing
@@ -192,9 +175,8 @@ stationary deep-Doze pass.)
   mechanism, which exists for a narrower, more sensitive purpose; this needs
   its own small design pass on how much history to keep and for how long.
 - Light/dark mode (currently dark-only).
-- A second no-log relay for redundancy (currently opt-in, one relay).
-- BLE-nearby mesh hardware validation on real, co-located devices (built,
-  shipped, not yet measured in the field).
+- Broader BLE-nearby device coverage beyond the completed two-device hardware
+  pass.
 - Adopting `dominion` for circle membership/access control in place of the
   hand-rolled reseed-via-gift-wrap (see `FORGESWORN-TOOLKIT.md`).
 
@@ -203,13 +185,14 @@ stationary deep-Doze pass.)
   default) — the key leaves the app entirely.
 - Re-expanding the app UI back out to the library's full safety surface
   (geofences, SOS, check-ins, rendezvous) once the MVP core is solid.
-- iOS, gated on background reliability answers there being at least as good
-  as Android's.
+- A native iOS path only if its background reliability and privacy model can be
+  evidenced as clearly as Android's.
 
 ## What flock deliberately will not become
 
-- **Not a business that monetises location data.** There is no data to sell;
-  that is the point, not an oversight.
+- **Not a business that monetises location data.** Flock does not receive
+  plaintext circle location and will not sell the connection metadata its
+  infrastructure inevitably processes.
 - **Not a "provable no-log" relay as the headline privacy claim.** The
   honest position is "assume the relay is hostile and architect around it,"
   because a promise nobody can verify isn't a security property.
@@ -222,9 +205,9 @@ stationary deep-Doze pass.)
 
 ## How we'll know this is working
 
-The test isn't "does the demo look good" — it's **does it hold up exactly
-the way tonight's live test held it up**: real friends, a real event, phones
-locked in pockets, screens off, someone actually needing to find someone
-else in a crowd. When background sharing is as reliable as foreground
-sharing already is, and a family could trust it for a child's phone without
-a second thought, flock will be doing the thing it exists to do.
+The test isn't “does the demo look good”. It is: real trusted adults, a real
+event, phones locked in pockets, screens off, poor connectivity, and someone
+actually needing to regroup. Flock is doing the thing it exists to do when the
+same privacy and reliability claims survive that setting across the supported
+device matrix — and when every remaining limitation is visible before anyone
+relies on it.

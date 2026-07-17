@@ -1,6 +1,6 @@
 # Background inbound — receiving alerts with the app closed
 
-**Date:** 2026-06-30 · **Owner:** TBD · **Status:** design; blocked on the Phase 0 spike
+**Date:** 2026-06-30 · **Owner:** flock · **Status:** **OPTION A SHIPPED.** The opt-in, location-free Stay reachable foreground service keeps the existing relay/WebView path alive for app-closed alerts and has a Samsung A32 hardware pass. UnifiedPush remains an unimplemented fallback considered in this historical design. Broader battery/device evidence remains in `../ROADMAP.md`.
 
 ## Why this exists
 

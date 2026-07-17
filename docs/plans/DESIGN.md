@@ -1,4 +1,13 @@
-# flock — Architecture & Build Plan
+# flock — Original Architecture & Build Plan (historical)
+
+> **Status snapshot: 2026-06-30, retained for decision history. Do not use this
+> file for current feature state or architecture.** The shipped system now uses
+> mandatory per-recipient gift wrapping, a Kotlin-native Android background
+> publisher, opt-in Stay reachable inbound relay service, multi-circle MVP,
+> offline maps, Tor/onion routing, lost/find, and radar. Current truth lives in
+> [`../ARCHITECTURE.md`](../ARCHITECTURE.md) and
+> [`../ROADMAP.md`](../ROADMAP.md). UnifiedPush was researched but is not
+> implemented; native iOS remains unbuilt.
 
 Companion to [`../research/2026-06-30-feasibility-research.md`](../research/2026-06-30-feasibility-research.md).
 Read that first for the evidence behind every constraint here.
@@ -52,10 +61,10 @@ a **silent alarm**, not flip a status anyone can see.
 | Ephemeral night-out | kind 30078 group-state + **NIP-40 `expiration`** | auto-expire |
 | Metadata hiding | **NIP-59** gift wrap + **NIP-17**, **NIP-44** | kind 1059 |
 
-**Open design decision:** whether to migrate live beacons/alerts from the current
+**Resolved after this snapshot:** live beacons/alerts migrated from the original
 AES-256-GCM envelope to NIP-59 gift-wrap (hides sender + event kind from relays). The
-research rates this a sound proposal (2-1) but not the shipped path. Likely worth it for
-the family/coercion case; possibly overkill for consensual night-out. Decide per-mode.
+shipped app wraps every sensitive signal per recipient; this is no longer a
+per-mode decision.
 
 ## 4. Platform strategy
 

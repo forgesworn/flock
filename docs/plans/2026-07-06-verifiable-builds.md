@@ -3,6 +3,11 @@
 **Status:** In progress — **APK reproducibility achieved & measured (2026-07-06)** ·
 **Date:** 2026-07-06 · **Owner:** flock
 
+> Repository visibility note (2026-07-17): GitHub currently reports this
+> repository as private. Reproducibility and signed records work for authorised
+> verifiers, but public independent source/tag verification remains gated on an
+> explicit future visibility decision.
+
 > **Measured 2026-07-06.** The unsigned release APK is byte-for-byte reproducible:
 > four independent clean builds produced an identical `app-release-unsigned.apk`.
 > The one non-determinism source in our control (a wall-clock build date) is fixed —
@@ -108,9 +113,10 @@ signed, reproducible, out-of-band-attested binary.
    (`npm run attest`) appends `docs/transparency/RELEASES.jsonl` and mints a signed
    `release/<build>` tag, verifiable with `git verify-tag` against
    `docs/transparency/allowed_signers`. Chain proven (selftest passes; rogue key
-   rejected). Still to do: the first *real* release tag; a Nostr note from the project
-   key as the second fully-independent channel; repo made public so the tags are
-   externally visible. See `docs/transparency/README.md`.
+   rejected), and real releases are now tagged/attested. Still to do: a Nostr
+   note from the project key as the second independent channel. GitHub remains
+   private as of 2026-07-17, so public source/tag verification is a future
+   visibility decision. See `docs/transparency/README.md`.
 4. **Independent mirror.** Host the signed release APK on at least one channel we don't
    operate (a mirror, IPFS/CID, or a well-known third party) so "download" and "verify"
    are not both answered by the same server.

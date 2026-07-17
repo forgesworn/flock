@@ -3,31 +3,32 @@
 Single source of truth so we ship **full features with no bugs**. Live preview:
 **https://flock.forgesworn.dev/**. The privacy-by-architecture foundation (Phase A;
 see `PRIVACY.md`) is in place, the coercion-resistance set (Phase J + the decoy
-view + the App lock) is **complete**, and the **native background-publish gate is
-now closed** — background beacons keep flowing while the phone is locked on
+view + the App lock) is **complete**, and the **native outbound background-publish gate is
+closed** — background beacons keep flowing while the phone is locked on
 GrapheneOS (built, hardware-measured GREEN, and shipped 2026-07-05 as release
-`0294b8c`; see "Native background publish" below and Phase G). The only standing
-items that need things code can't provide are Darren-side: **relay #2** (runbook
-ready — `docs/runbooks/second-relay.md`, blocked only on a host) and **publishing
-`keystore-kit` to npm**. Native validation is now **complete**: the outdoor walk
-**and** the stationary deep-Doze pass are both **MEASURED GREEN (2026-07-06; see
-"Native background publish")** — a motionless, locked, screen-off phone pinned in
-deep Doze keeps publishing fresh location. Nothing native is left to prove.
+`0294b8c`; see "Native background publish" below and Phase G). The outdoor walk
+and stationary deep-Doze outbound passes are both **MEASURED GREEN (2026-07-06)**.
+That closes the outbound claim only. Locked-phone radar, a live Orbot-route
+beacon, and broader Stay reachable battery/device evidence remain explicit
+native field gates below. Operator-side work also includes relay #2 (runbook:
+`docs/runbooks/second-relay.md`) and publishing `keystore-kit` to npm.
 
 ## MVP scope (2026-07)
 
-The app was **refocused to a single MVP** (2026-07-03): privacy-preserving **live
-location sharing with one group of friends** — circle set up in advance, QR/remote
-invites, a per-person **geohash precision slider** (3–9: whole region, e.g.
+The app was **refocused to one MVP job** (2026-07-03): privacy-preserving live
+location coordination across one or more trusted-adult circles — set up in
+advance with QR/link/six-word/remote-signer invites and a per-person **geohash
+precision slider** (3–9: whole region, e.g.
 Mallorca → exact spot; the map shows exactly what the circle sees of you, with a
 dashed would-see preview while not sharing) driving
 the emission pipeline (`decideEmission` coarse override; sampling tier follows the
 slider — ≥7 uses GPS, coarser polls low-power), and front-page **"buzz the circle"
-quick actions** (Check in · Come to me · Where are you? · Call me · On my way).
-**"Come to me"** sends the buzz plus a confirmed **one-shot exact beacon**
-(precision 9, plain `beacon` on the wire, cadence untouched, slider unchanged;
-no-report zones still cap it). Family/night-out modes collapsed to one persistent
-share-live mode (invite wire format unchanged).
+quick actions**. "Check in" is a group roll-call; Come to me / Where are you? /
+Call me / On my way are private-thread actions. **"Come to me"** sends a
+confirmed one-shot exact inner beacon (precision 9) inside the mandatory
+per-recipient kind-1059 wrap; cadence and the slider stay unchanged, and
+no-report zones still cap it. Family/night-out modes collapsed to one
+share-live UI model (invite wire format unchanged).
 
 **Privacy default restored (2026-07-10, superseding 2026-07-09):** sharing is
 off at boot/create/join and requires a deliberate tap. New circles start at
@@ -54,8 +55,8 @@ not highly effective age assurance.
 tested and exported:** SOS/duress (incl. stand-down, covert holds, breadcrumb
 trail), pick-me-up + spoken verification, take-a-break/off-grid, safe places /
 geofence breach, the no-report-zone editor (the policy cap still applies to any
-legacy zones), the periodic check-in dead-man's-switch, rendezvous + meeting
-points, and the offline-map save control (its area source was the zone editor).
+legacy zones), the periodic check-in dead-man's-switch, and rendezvous + meeting
+points. Offline-map area saving has since returned through the current map flow.
 Their roadmap entries below stand as the post-MVP backlog — annotated, not
 deleted. The e2e suite was trimmed to the MVP subset at the same time (see the
 coverage note below).
@@ -356,9 +357,24 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
 - **Mobile-first** — phone-shaped, large touch targets, one-handed, installable PWA, offline-tolerant.
 - **Uber privacy** — the relay is untrusted; minimise all metadata (see `PRIVACY.md`).
 - **Minimal footprint (north star)** — flock must be nearly *free to run*: negligible **battery**, negligible **relay traffic**, negligible **metadata**. These are one idea, not three — disclosure-on-event (share only what a moment needs) is the same discipline as sample/emit-only-when-needed. The clean tell: **coarse sharing should use coarse, low-power location** (network/cell, not GPS) — a battery win that is *also* a privacy win (hardware that can't over-collect). Tracked in **Phase H**.
-- **Full e2e tests** — Playwright drives **two real browser contexts (two identities)** that talk to each other through `relay.trotters.cc`, so every assertion is on the *other* person's screen — the gift-wrap → relay → unwrap → decrypt → render path, proven between people. **No feature is "done" without an e2e.**
-  - ✅ **Covered** (`e2e/` — **trimmed to the MVP subset 2026-07-03**: the flows below marked with removed features now live in git history only; new `precision` and `quick-action` specs cover the slider and buzz quick actions. Historic full-suite snapshot follows): onboarding + behaviour/lifetime/invite-landing, invite **both ways** (in-person code + remote gift-wrap), **SOS** A→B, **pick-up** (full disclosure) A→B, **share-live** coarse A→B, **geofence breach** (A leaves a safe place → B alerted with A's location), **no-report cap** end-to-end (SOS over a Private place fires but withholds the address), **check-in** arm + **dead-man's-switch miss** (B's clock fast-forwarded past cadence+grace) + **custom cadence** + **self-reminder** (due-soon → overdue on A's own card) + **acknowledge** (3-person: miss → B "I've got this" → C sees "on it") + a **dying battery** riding the check-in (stubbed API → B reads "battery critical"), the **breadcrumb trail** (A moves under a fast-forwarded clock → SOS → B gets the alert + trail), the **decoy view** (hide → a fresh app that stays silent under B's buzz → a wrong phrase gets the genuine fresh-install error → the right one restores the circle; plus the decoy proven fully usable with reset-inside-decoy preserving the hidden state), the **app lock** (ciphertext at rest → grace-expired cold boot gated by the PIN → wrong PIN refused → unlock and B's live buzz still decrypts → grace reload skips the PIN; plus the lock × decoy composition — no PIN screen in the decoy, unhide → one-tap re-lock), **reseed** (rotate key → A's next alert still reaches B), **remove-member** (3-party: A removes C → A+B keep talking on the new key, C is cut off), **buzz** banner A→B, **petname**, **off-grid** pre-announce + come-back A→B, **disband** tombstone A→B, **multi-circle** background-alert surfacing, the **map** (safe/private-place add-flow **and** a disclosed location rendering as A's pin on B's map), **rendezvous** (A map-picks a meeting point → B receives the flag pin **and** a live ticking countdown), and the **meeting point** end-to-end (A proposes → B **opts in** with a coarse spot → A's device computes a fair midpoint **on-device** → the pick lands on B as a rendezvous), plus its **Slice 3** enrichments — a **named venue** upgrade (Overpass mocked for determinism), the **fairness** toggle re-ranking in place, contributor **cells + the venue pin** on the proposer's map, and a **per-person exact** share reaching the proposer alone as a crisp dot while the group stays coarse. Harness: `e2e/fixtures.ts` (two-person helpers) + a global warmup; geolocation-move + Playwright clock control where flows need them; relay overridable via `FLOCK_E2E_RELAY`.
-  - ✅ **Regression backbone** — the security-critical `decideEmission` core has an **exhaustive truth-table** (`src/policy.matrix.test.ts`): every one of the 216 permutations of mode × trigger × off-grid × position × geofence × no-report, checked against a differential oracle **and** standalone safety invariants (an SOS always fires; nothing emits without a position; off-grid never silences a trigger; a no-report zone never pins a sensitive address). 579 unit tests total.
+- **Evidence matches the feature** — Playwright drives separate browser identities
+  through a Nostr relay for user-visible cross-device flows. CI uses a fresh
+  RAM-only local relay; explicit pre-deploy smoke runs use the production-shaped
+  target. Pure policy uses
+  unit/matrix tests; Kotlin/JavaScript compatibility uses golden vectors; device
+  lifecycle claims require hardware. “Built”, “e2e green”, and “hardware green”
+  are not interchangeable.
+  - ✅ **Current relay e2e suite:** onboarding, backup/reset, QR/link/word
+    invitations and join assistance/notices, sharing/precision, map, messaging
+    and typing, buzz/quick actions, temporary festival mode, lost/ring/find,
+    foreground radar, lock/decoy, reseed/remove/disband, permissions, and hints.
+    It is a CI gate against the isolated relay; the same suite can target an
+    explicit live relay before deployment. Removed SOS/geofence/check-in/
+    rendezvous UI specs remain in Git history only and are not current coverage.
+  - ✅ **Regression backbone** — the security-critical `decideEmission` core has
+    an exhaustive 216-case truth table plus standalone safety invariants. The
+    complete Vitest suite has **863 tests as of 2026-07-17** and CI enforces 80%
+    coverage thresholds; command output is authoritative as the suite grows.
   - 🐛 **Bug the e2e caught & fixed**: the 3-party test surfaced a roster-update race — `ensureMember` trusted a circle snapshot captured before an `await`, so two first-contact signals arriving together would let the later write clobber the earlier one, silently dropping a member (who'd then be skipped by reseeds and lists). Fixed to re-read the live roster.
   - 🐛 **Bug the e2e *missed* — and the guard that now catches it**: the map rendered **blank** on the live site. maplibre tags `#map` with `.maplibregl-map{position:relative}`, which (equal specificity, loaded later) beat the app's `.map-canvas{position:absolute;inset:0}` and collapsed the container to **height 0** — yet tiles still loaded and the canvas stayed "visible", so the e2e's visibility check passed while the map showed nothing. Fixed with a higher-specificity selector; `map.spec.ts` now asserts `#map` has real height. **And a release bug it exposed:** the service worker was serving returning users a **stale cached `index.html`** (pinning old hashed assets), so deploys silently didn't land — fixed by cache-busting the SW (`{ cache: 'reload' }` navigations + cache-name bump) and `Cache-Control: no-cache` on `index.html`. *Lesson: "canvas visible" ≠ "content rendered" — assert real dimensions.*
 - **ForgeSworn toolset** — use the real tools, don't hand-roll (see `FORGESWORN-TOOLKIT.md`).
@@ -374,7 +390,11 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   - [ ] **Per-circle personas** — sign each circle's seals under a distinct (heartwood/nsec-tree) persona so a member in two of your circles can't link them to one npub. The generic NIP-46 path is the enabler; deeper lift.
 - [x] **nsec-tree circle keys** — circle seeds derived `circleRoot → circleId → epoch` (`keys.ts`); reseed = epoch+1 (deterministic, recoverable from one root, per-circle/per-root unlinkable). Tested. Per-circle *publishing* personas still to come with gift-wrap-everything.
 - [x] **Gift-wrap everything** (`giftwrap.ts`) — every signal is NIP-59 wrapped to a rotating nsec-tree group-inbox key (`deriveInbox`); the relay sees only `kind:1059` from random keys to an opaque inbox — no real pubkeys, types, or roster. Tested in-process + live (`#p` round-trip on relay.trotters.cc). **Bonus:** a wrap is self-contained opaque bytes → flock is now **transport-agnostic** (ready for the LoRa path below).
-- [~] **Relay strategy** (adopted from `pallasite/src/credits.ts` → `app/src/relays.ts`): sensitive flock traffic → our **no-log relay only** (`relay.trotters.cc`); the broad public set (`PROFILE_RELAYS`) is reserved for reading **kind:0 profiles**. Full multi-relay fan-out of sensitive traffic waits for gift-wrap-everything (spraying before then would leak metadata to public relays). **Gift-wrap-everything is now done → fan-out is unblocked** (a go-live hardening step; see Phase G).
+- [x] **Relay strategy** (`app/src/relays.ts`): sensitive Flock traffic fans out
+  only across the configured private relay set; the broad public
+  `PROFILE_RELAYS` set is reserved for opt-in kind-0 profile reads. The live
+  onion twin is an opt-in route. Delivery fails loudly if no sensitive relay
+  accepts the event.
 
 ## Phase B — Group lifecycle
 
@@ -629,19 +649,20 @@ Two halves that compose into one feature:
 
 ## Phase G — Platform & release
 
-- [~] **Capacitor native shell** — background location. Shell ships and
+- [~] **Capacitor Android application** — shell and native services ship;
   **background *publish* is done and measured GREEN** (2026-07-05 — beacons flow
   while locked, see above). Background **geofence-*breach*** alerting is not yet
   wired into the native pipeline (the MVP parks breach; add it — and validate with
   the outdoor walk — when breach returns to the app).
   - [x] **Android APK ships (2026-07-03)** — `npm run apk` / `npm run apk:release`
     (`native/build-apk.sh`: generate → native-mode web build → manifest patch →
-    icons → Gradle → zipalign/apksigner). The shell is a thin layer: the background
-    watcher (`native/background.ts`, LocationManager + foreground service, **no
-    Google APIs** → GrapheneOS-compatible) forwards fixes into the app's normal
-    `onFix → autoEmit` pipeline, so policy/no-report/off-grid/cadence are identical
-    to foreground; it is tied to the **sharing toggle** and torn down on
-    stop/reset/**hide** (the notification must never be a decoy tell). Native builds
+    icons → Gradle → zipalign/apksigner). `native/background.ts` still handles
+    permission and forwards fixes while JavaScript is alive, but the authoritative
+    hidden/locked publisher is `FlockLocationService` + the pure Kotlin
+    `FlockPublisher`: fix → policy → encrypt → gift-wrap → relay without the
+    WebView. Configuration and service lifetime remain tied to the sharing toggle
+    and are cleared on stop/reset/**hide** (the notification must never be a decoy
+    tell). Native builds
     point the privacy proxies at flock.forgesworn.dev (`app/.env.native`); Caddy
     gained the CORS headers the shell's `https://localhost` origin needs
     (`deploy/Caddyfile` — **manual conf.d re-drop needed on the host**).
@@ -665,8 +686,10 @@ Two halves that compose into one feature:
     walk** (two-phone, moving pin through a locked/pocketed screen) and the **stationary
     deep-Doze pass** (device pinned in forced deep `IDLE` — screen off, OS-unplugged, no
     maintenance windows — still published three exact beacons at the ~300 s cadence, all
-    decrypted on the relay, GPS ticking at 5 s throughout). Nothing native left to prove;
-    see "Native background publish" above for the full measurements.
+    decrypted on the relay, GPS ticking at 5 s throughout). This closes the
+    **outbound background-publish** claim; it does not close the separate radar,
+    Orbot, inbound battery/device, or iOS rows. See "Native background publish"
+    above for the full measurements.
 - [x] **Inbound alerts (app closed) — SHIPPED via Option A, validated on the A32
   (2026-07-04).** Notification behaviour: a message/buzz/alert lands on a
   **locked screen while flock is fully closed**. Implemented as a **location-free
@@ -783,13 +806,12 @@ Two halves that compose into one feature:
     PIN encrypts the whole persisted blob at rest; the in-app caveat copy now
     points at the lock. Signet sign-in remains the stronger path (key never in
     flock at all).
-- [~] **Release CI** — GitHub Actions gates live (`.github/workflows/ci.yml`: lint/
-  typecheck/build/unit + the Kotlin native JVM parity suite, SHA-pinned actions).
-  The **two-person e2e suite runs locally**, not in CI (`npm run test:e2e` before a
-  deploy; see `docs/DEPLOY.md`) — it needs a live dev server + live relay, so running
-  it on every push would hammer the production relay and burn Actions minutes on a
-  private repo. anvil publishing deliberately omitted while the library is
-  private/unpublished.
+- [x] **Release CI** — GitHub Actions gates lint/typecheck/build, bundle budgets,
+  80% coverage, same-job Kotlin→JavaScript reverse-vector parity, and the
+  two-person Playwright suite against a fresh RAM-only relay. Actions are
+  SHA-pinned; production-relay smoke remains explicit and production receives no
+  push-test traffic. anvil publishing is deliberately omitted while the library
+  is private/unpublished.
 - [~] **Verifiable builds — the compelled-update defence** (plan:
   `docs/plans/2026-07-06-verifiable-builds.md`; procedure: `docs/verify-apk.md`).
   The one court order that bypasses E2E is a compelled **targeted backdoored build**
@@ -813,8 +835,10 @@ Two halves that compose into one feature:
     to the forge and **all four channels verified to agree at the edge**: the downloadable
     `downloads/flock.apk` re-hashes to the attested signed hash, `flock.apk.unsigned.sha256`
     == the reproducible anchor, `apk.json` == build `dfaa8a9`, and the off-host signed tag +
-    ledger carry the same record. Remaining: a project-key **Nostr note** as channel #2;
-    **repo made public** so outsiders can see the tags. See `docs/transparency/README.md`.
+    ledger carry the same record. Remaining: a project-key **Nostr note** as channel #2.
+    The GitHub repository is currently **private**; public independent tag/source
+    verification therefore remains gated on an explicit future visibility decision.
+    See `docs/transparency/README.md`.
   - [ ] **Gradle dependency locking** — pin transitive artefacts against far-future
     drift.
   - [ ] **PWA tamper-evidence** — signed asset manifest + SRI, honest ceiling stated;
@@ -867,10 +891,11 @@ hardware cost to what we actually disclose. (Ordered biggest-win-first.)
   holds so a still member never falsely reads "gone home"). Family's continuous watch is
   deliberately untouched (safety line), and any alert — mine, failed, incoming, check-in,
   breach — restores full cadence. Pure logic TDD'd in `cadence.test.ts`.
-- [ ] **Real validation needs hardware** — the functional path builds and tests in the
-  emulator, but true battery / Doze behaviour is a **Tier-2 (real GrapheneOS)**
-  measurement, gated exactly like the native background work (Phase 0 / no test devices
-  yet). Ship the foreground PWA wins now; measure on-device when hardware lands.
+- [ ] **Broader battery validation needs hardware** — outbound walking and forced
+  deep-Doze publication are already green on a GrapheneOS Pixel 10 Pro, and
+  app-closed inbound alerts are green on a Samsung A32. What remains is measured
+  battery cost and reconnect behaviour across the supported device/ROM matrix,
+  especially with Stay reachable, radar, Tor, and BLE enabled independently.
 
 ## Phase I — Product-audit hardening (2026-07-02)
 
@@ -990,10 +1015,11 @@ modes**. Plan with designs, decisions, and per-slice tests:
   stand-down calms A's screen while B stays alarmed.
 - [x] **Slice 12 — helper hints + settings switch** 🟠 — `hint(id, text)` component
   (`.tip`, per-hint ✕), persisted `{on, dismissed[]}` via pure `hintShown`/
-  `withHintDismissed`, "Show helper tips" switch (default on) + "Bring all tips back"
+  `withHintDismissed`, "Show helper tips" switch (**off by default**) + "Bring all tips back"
   on You. Placed: start-watch (mode-aware what/why), SOS/pick-up pair, remote invite,
-  pick-up check, delivery servers. E2e: default-on → dismiss one → global off →
-  back on remembers the dismissal → reset restores.
+  pick-up check, delivery servers. The current MVP later changed the default to
+  off: e2e proves opt-in → dismiss one → off/on preserves the dismissal → reset
+  deliberately brings all tips back.
 - [x] **Slice 13 — jargon & copy pass** 🟠 — npub → "invite key" (+ friendly error
   copy), reseed → "Reset this circle's security", dead-man's-switch → "Automatic
   check-in", "Nostr relays" → "Delivery servers", transient → temporary, Rendezvous
@@ -1009,12 +1035,12 @@ modes**. Plan with designs, decisions, and per-slice tests:
   card consolidation deferred — meeting/rendezvous cards are already mutually
   exclusive in practice.)*
 
-## Phase J — Safety-loop features (from the 2026-07-02 competitive audit) — ✅ COMPLETE
+## Phase J — Safety-loop library features (2026-07-02) — ✅ LIBRARY COMPLETE, UI PARKED
 
-Gaps identified by auditing flock against the safety-app landscape (Kitestring,
-GetHomeSafe, bSafe, Life360, GrapheneOS duress PIN). All four fit the
-coercion-resistant, disclosure-on-event ethos — they trigger on *inaction or
-duress*, never on continuous tracking. **All four shipped 2026-07-02.**
+Four disclosure-on-event primitives were completed in the library on
+2026-07-02. They trigger on inaction or duress rather than continuous tracking.
+Their historical app UI was removed during the focused MVP pass; “complete” in
+this phase means library implementation/tests, not current user-facing support.
 
 - [x] **Check-in self-reminders + escalation-until-acknowledged.** Shipped:
   `selfCheckInStatus` (local-only nudge: due-soon → overdue → missed; a reminder
@@ -1066,8 +1092,8 @@ duress*, never on continuous tracking. **All four shipped 2026-07-02.**
   decoy deliberately shows no PIN screen (a lock gate on a "brand new" app
   would be the tell).
 
-**Explicit non-goals** (competitor features that conflict with the ethos —
-their absence is positioning, not a gap): crash/driving detection (continuous
+**Explicit non-goals** (these conflict with the ethos; their absence is a
+positioning decision, not an implementation gap): crash/driving detection (continuous
 sensor sampling), crowdsourced area-safety maps (creates the location-linked
 metadata pool we exist to avoid), professional monitoring dispatch (a
 centralised, subpoenable custodian).

@@ -4,8 +4,15 @@
 **Method:** Deep-research harness — 6 search angles, 25 sources fetched, 118 claims
 extracted, 25 adversarially verified (3-vote, need 2/3 to refute). 24 confirmed, 1
 refuted, 0 unverified.
-**Scope:** technical feasibility (primary), privacy & threat model, competitive
-landscape, protocol & data model on top of `canary-kit` / `spoken-token`.
+**Scope:** technical feasibility, privacy/threat model, and protocol/data model
+on top of `canary-kit` / `spoken-token`.
+
+> **Historical research snapshot.** Its PWA platform constraint still holds,
+> but its “GrapheneOS unproven” status was superseded: the shipped Kotlin
+> publisher passed locked walking and stationary deep-Doze hardware tests.
+> Flock chose a persistent Stay reachable relay service for opt-in app-closed
+> inbound alerts; UnifiedPush remains research, not an implemented feature.
+> See `../ROADMAP.md` and `../ARCHITECTURE.md` for current state.
 
 ---
 
@@ -141,19 +148,11 @@ These warrant different defaults — treat as two modes, not one.
 
 ---
 
-## 3. Competitive landscape *(weaker evidence — flagged)*
+## 3. Market comparison
 
-> **Honesty note:** these claims were **dropped during budget-limited verification**, so
-> they come from fetched sources but were **not** adversarially confirmed. Treat as leads,
-> and run a dedicated verification pass before using in any pitch.
-
-- **Life360** was reported **selling precise user (incl. children's) location data** (The
-  Markup, 2021; lawsuit, 2023) — the core "family-safety app betrays families" narrative
-  to differentiate against.
-- **Apple / Google Find My** are E2EE but centralised on their own closed networks.
-- A Techlore community thread shows **active demand for an E2EE private alternative to
-  Life360** — a real pull signal.
-- **No decentralised / Nostr family-safety product surfaced** → likely greenfield.
+Detailed competitor research is intentionally maintained outside this
+repository. Product requirements below stand on Flock's threat model and user
+needs rather than public comparative claims.
 
 ---
 
@@ -193,7 +192,6 @@ NIP-40 expiry.
   down was refuted. Prototype early.
 - **Plugin licensing/maintenance:** transistorsoft's native geofencing needs a paid Android
   licence; confirm both plugins' Capacitor-version compatibility and maintenance.
-- **Competitive landscape is unverified** (see §3).
 
 ## 6. Open questions (carry into Phase 0)
 
@@ -201,9 +199,7 @@ NIP-40 expiry.
    Play Services** (raw GPS + foreground service + local point-in-polygon, ± microG/UnifiedNlp).
 2. Precise current (2026) background limits of an installed PWA on **iOS Safari** — is the
    Capacitor wrapper mandatory on iOS from day one?
-3. Competitive data practices (Life360 sales, Find My, Jiobit, AngelSense, bSafe, Noonlight,
-   Family Link) and whether any Nostr/decentralised family-safety product exists.
-4. Concrete construction for **"withheld-until-event"** location that still permits local
+3. Concrete construction for **"withheld-until-event"** location that still permits local
    geofence evaluation, *and* interacts correctly with the requirement that withholding
    must not be an observable "tell".
 
@@ -229,10 +225,7 @@ NIP-40 expiry.
   NIP-01 — https://github.com/nostr-protocol/nips/blob/master/01.md ·
   NIP-EE — https://github.com/nostr-protocol/nips/blob/master/EE.md
 
-**Secondary / forum / blog (competitive & push):**
-- Life360 data sales — https://themarkup.org/privacy/2023/06/01/life360-sued-for-selling-location-data · https://thecapitolforum.com/life360-family-safety-app-selling-datasets-based-on-users-personal-information-2/
-- E2EE Life360 alternatives — https://discuss.techlore.tech/t/are-there-any-e2ee-private-alternatives-to-life360-location-sharing-app/11748
-- Find My privacy — https://www.idownloadblog.com/2025/04/28/google-find-my-device-network-apple-find-my-privacy/
+**Secondary / forum / blog (push/platform constraints):**
 - GrapheneOS UnifiedPush — https://discuss.grapheneos.org/d/8503-notifications-without-google-services-unifiedpush
 - iOS PWA limits — https://www.magicbell.com/blog/pwa-ios-limitations-safari-support-complete-guide
 - Nostr push proposal — https://github.com/nostr-protocol/nips/issues/257

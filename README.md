@@ -3,24 +3,28 @@
 > Experimental, non-commercial location sharing for adult friends and trusted groups.
 
 **Status:** 🛠️ Personal, free, non-commercial proof of concept live at
-**https://flock.forgesworn.dev/** for invited adult testers. **The app is
-now a focused MVP** (2026-07): privacy-preserving **live location sharing with
-one group of friends** — set the circle up in advance, invite by QR code, and
-each member controls how closely the others see them with a **geohash precision
-slider** (a whole region, e.g. Mallorca → exact spot), plus one-tap "buzz the circle" quick actions
-(Check in · Come to me · Where are you? · Call me · On my way). Built on a
-**shipped privacy-by-architecture foundation** (gift-wrap-everything, nsec-tree
-personas/epochs, multi-circle, app lock + decoy view — see
-[`docs/PRIVACY.md`](docs/PRIVACY.md)). The wider safety set (SOS/duress,
+**https://flock.forgesworn.dev/** for invited adult testers. The focused MVP is
+privacy-preserving live location coordination for trusted circles of friends.
+Set up one or more circles in advance; invite by QR, link, or six spoken words;
+chat; and let each member choose how closely the others see them with a
+**geohash precision slider** (a whole region, e.g. Mallorca → exact spot).
+Temporary exact "Find each other" mode, lost-phone ring/find, and foreground
+radar help people regroup without enabling permanent remote tracking.
+
+The shipped privacy foundation includes per-recipient gift wrapping, nsec-tree
+personas/epochs, multi-circle support, app lock, and a decoy view — see
+[`docs/PRIVACY.md`](docs/PRIVACY.md). The wider safety set (SOS/duress,
 pick-me-up, geofences, dead-man's-switch, rendezvous/meeting points, off-grid,
-spoken verification) is **parked post-MVP**: it lives on fully tested in the
-`@forgesworn/flock` library (see the table below) but is no longer wired into
-the app UI. **Delivery with the app closed now works:** the Android shell
-publishes location natively (Kotlin) while the phone is locked and in deep Doze —
-hardware-measured GREEN on GrapheneOS and shipped (see `docs/ROADMAP.md`). The
-release **APK is the verifiable artefact**: it is reproducible from a tagged
-commit and its hash is attested off-host in a signed transparency log, so a
-targeted backdoored build is detectable — see
+spoken verification) is **parked post-MVP**: it remains tested in the
+`@forgesworn/flock` library but is not wired into the current app UI. The UI's
+**Check in** quick action is a circle roll-call, not that parked
+dead-man's-switch.
+
+**Delivery with the app closed works on Android:** the shell publishes location
+natively in Kotlin while the phone is locked and in deep Doze, hardware-measured
+GREEN on GrapheneOS and shipped. The release **APK is the verifiable artefact**:
+it is reproducible from a tagged commit and its hash is attested off-host in a
+signed transparency log, so a targeted backdoored build is detectable — see
 [`docs/verify-apk.md`](docs/verify-apk.md) and [`SECURITY.md`](SECURITY.md).
 Start with
 [`docs/VISION.md`](docs/VISION.md) (the goal — why this exists, who it's for,
@@ -28,20 +32,20 @@ the design principles that aren't up for negotiation),
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the stack & why),
 [`docs/LEGAL.md`](docs/LEGAL.md) (legal and safety notices),
 [`docs/FORGESWORN-TOOLKIT.md`](docs/FORGESWORN-TOOLKIT.md) (how flock uses the
-ForgeSworn freedom-tech toolset), [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md),
+ForgeSworn freedom-tech toolset), the [original historical build plan](docs/plans/DESIGN.md),
 the protocol spec [`FLOCK.md`](FLOCK.md), the tracked backlog
 [`docs/ROADMAP.md`](docs/ROADMAP.md), [`llms.txt`](llms.txt) (AI-facing summary
 + exact API signatures), the runnable
 [`examples/quickstart.ts`](examples/quickstart.ts), and the
-[feasibility research](docs/research/2026-06-30-feasibility-research.md).
+[historical feasibility research](docs/research/2026-06-30-feasibility-research.md).
 
 `flock` extends [`canary-kit`](https://github.com/forgesworn/canary-kit) (which itself
 extends `spoken-token`) into location-aware sharing and safety tooling. The **app MVP**
 serves one audience:
 
-- **A group of adult friends** (e.g. a trip to Mallorca) who want to see roughly where each
-  other are — **without handing readable movements to the service operator**. The group is set
-  up in advance, people join by QR code, and each person deliberately taps **Share**.
+- **Adult friends** (e.g. a trip to Mallorca) who want to see roughly where each
+  other are — **without handing readable movements to the service operator**. Circles are set
+  up in advance, people join by QR/link/words, and each person deliberately taps **Share**.
   Sharing is visible and can be stopped with **Go private**; in the Android app a started
   share continues while the phone is locked. A per-person **precision slider** decides how
   closely the others see them (a whole region … the exact spot). Minimise tracking by design:
@@ -53,9 +57,11 @@ The **library** additionally retains the experimental wider safety capability se
 post-MVP app phases and other ForgeSworn tools. The hosted preview is 18+ and must
 not be used to track children; see [`docs/LEGAL.md`](docs/LEGAL.md).
 
-All transport is **decentralised over Nostr**. Each device evaluates its own geofence
-**locally** and only ever broadcasts **encrypted** alerts. No server holds plaintext
-location.
+All sensitive transport is **decentralised over Nostr** and per-recipient
+gift-wrapped. Relays receive opaque outer kind-1059 events; authorised devices
+unwrap the inner application signal (normally kind 20078). Each device evaluates
+its own geofence locally. No Flock service or relay receives plaintext location,
+although relays and network providers can still observe connection and timing metadata.
 
 ## ⚠️ The make-or-break constraint
 
@@ -69,23 +75,22 @@ doesn't work at all.
 buzz quick actions, the map while open). **True background operation requires the
 native Capacitor wrapper.** PWA-first, native-fallback — by necessity, not preference.
 
-| Capability | iOS PWA | Android PWA | GrapheneOS | Native (Capacitor) |
-|---|:--:|:--:|:--:|:--:|
-| Foreground location | ✅ | ✅ | ✅ | ✅ |
-| **Background location sharing** | ❌ | ❌ | ❌ | ✅ **only path** |
-| Push notifications | ✅¹ | ✅ | ⚠️ UnifiedPush | ✅ |
-| Live sharing + buzz (app open) | ✅ | ✅ | ✅ | ✅ |
-
-¹ Installed PWA only (iOS 16.4+). No background location.
+| Capability | iOS PWA | Android/GrapheneOS PWA | Android APK |
+|---|:--:|:--:|:--:|
+| Live sharing, chat, buzz (app open) | ✅ | ✅ | ✅ |
+| **Background location sharing** | ❌ | ❌ | ✅ hardware-verified on GrapheneOS |
+| App-closed inbound Nostr alerts | ❌ | ❌ | ✅ opt-in **Stay reachable** service |
+| Locked-phone radar guide | ❌ | ❌ | 🧪 built/JVM-tested; hardware pass pending |
 
 ## Targets
 
-iOS · Android · **GrapheneOS** (de-Googled — no Google Play Services, no FCM, no Google
-geofencing APIs). De-Googled push uses **UnifiedPush** or a persistent Nostr relay socket.
-
-> **Biggest unproven risk:** reliable background location wake-ups on **GrapheneOS without
-> Google APIs** could not be confirmed by the research and **must be prototyped on a real
-> device first** (Phase 0). Do not lock the architecture until this spike passes.
+iOS foreground PWA · Android PWA/APK · **GrapheneOS APK** (de-Googled — no
+Google Play Services, FCM, or Google geofencing APIs). The shipped Android
+inbound path is an explicit foreground service with a persistent Nostr relay
+socket; Flock does not currently implement UnifiedPush. Outbound locked/deep-Doze
+publishing is hardware-verified on GrapheneOS. Remaining native evidence is
+tracked precisely in [`docs/ROADMAP.md`](docs/ROADMAP.md), including locked-phone
+radar and live Orbot-route validation.
 
 ## Library modules (`src/`)
 
@@ -110,17 +115,22 @@ encryption stay at the edge.
 | `disband` | Circle dissolution signal | ✅ tested |
 | `offgrid` | Deliberate "going dark" — pre-announced; never suppresses help/pickup | ✅ tested |
 | `spokenverify` | Face-to-face pick-up verification words + silent duress word + candidate-risk estimate | ✅ tested |
-| `app/` (PWA) | **MVP UI** — onboarding, status orb, live sharing with a **precision slider** (geohash 3–9, region → exact spot; the map previews what the circle sees of you), "buzz the circle" quick actions incl. a confirmed one-shot exact **"Come to me"**, QR + remote invites, presence map, reseed/remove; decoy view under compelled unlock; app lock (state encrypted at rest behind a PIN). SOS/pick-me-up, geofences, check-ins, rendezvous/meeting, off-grid: **parked post-MVP** (library retains all of it) | ✅ MVP |
-| `native/` (Capacitor) | Background location sharing + UnifiedPush — APK ships; reuses the same policy/transport. Outbound background publish (Kotlin) built — golden-vector verified both directions ([design](docs/plans/2026-07-05-native-background-publish-design.md)); hardware round-trip verification pending ([runbook](docs/runbooks/native-background-publish-test.md)) | 🧱 shell |
+| `joined` | Encrypted member-joined notice | ✅ tested |
+| `lost` | Lost-phone flag and encrypted ring request | ✅ tested |
+| `findping` | Consent-gated remote exact-ping request for a flagged-lost device | ✅ tested |
+| `radar` | Distance, bearing, freshness, uncertainty, and cue decisions | ✅ tested |
+| `app/` (PWA) | Multi-circle MVP: live precision control, map/chat/DMs, QR/link/word invites, temporary exact mode, lost/ring/find, foreground radar, backup/reseed/remove/disband, offline maps, Tor toggle, app lock and decoy. SOS, geofences, dead-man's-switch, rendezvous/meeting, and off-grid remain parked from the UI | ✅ MVP |
+| `native/` (Capacitor) | Android APK with Kotlin background publish, opt-in Stay reachable inbound relay service, native notifications, Tor/Orbot routing, and a built locked-phone radar guide. Outbound publish is hardware-verified; radar/Orbot evidence still has explicit pending rows in the roadmap | ✅ Android; 🧪 field checks |
 
-**Library:** `npm run build` · `npm test` · `npm run typecheck` · `npm run lint`
-**PWA:** `npm run dev` (localhost) · `npm run build:app` (→ `dist-app/`) · `npm run preview:app`
+**Gates:** `npm run build` · `npm run test:coverage` · `npm run typecheck` · `npm run lint`
+
+**PWA:** `npm run dev` (localhost) · `npm run build:app` (→ `dist-app/`, including bundle budgets) · `npm run preview:app`
 
 The PWA is vanilla TS + Vite, fonts self-hosted (Fraunces + Hanken Grotesk — no
-Google CDN), installable (manifest + service worker). It signs and publishes real
-kind-20078 signals via `nostr-tools` and reads them back, decrypting beacons/
-alerts with the flock library. Foreground only — background geofencing needs the
-native shell (Phase 2).
+Google CDN), installable (manifest + service worker). It builds inner kind-20078
+signals, then encrypts and gift-wraps one outer kind-1059 event per recipient
+before publishing. Recipients unwrap and decrypt locally. The web app is
+foreground-only; the Android shell owns background publishing and reachability.
 
 ## Built on canary-kit
 
@@ -128,21 +138,24 @@ native shell (Phase 2).
 
 | Need | Reuse | New |
 |---|---|---|
-| Trusted-group lifecycle | `createGroup`, `addMember`, `removeMember`, `reseed`, kind 30078 | role tags |
+| Trusted-group lifecycle | `createGroup`, `addMember`, `removeMember`, `reseed` | encrypted invite/reseed app flow; draft kind-30078 protocol state is not published publicly by the PWA |
 | Withheld / coarse location beacon | `encryptBeacon`, `deriveBeaconKey`, `BeaconPayload {geohash, precision, timestamp}` | emission **policy** layer |
 | "I need help / SOS" | `buildDuressAlert` / `encryptDuressAlert` (precision-11, scope) | UI panic trigger |
 | Breach / pick-me-up | `buildSignalEvent` (kind 20078, `t`=type) | two signal types |
-| Ephemeral night-out group | kind 30078 + NIP-40 `expiration` | auto-dissolve |
-| Metadata-hiding transport | NIP-59 gift wrap / NIP-17, NIP-44 | wrap live beacons (proposal) |
+| Ephemeral night-out group | local/invite expiry; draft kind 30078 + NIP-40 protocol form | auto-dissolve |
+| Metadata-hiding transport | NIP-59 gift wrap / NIP-17, NIP-44 | mandatory per-recipient wrapping for every sensitive signal |
 
-See [`docs/plans/DESIGN.md`](docs/plans/DESIGN.md) for the full mapping and phased build.
+See the [original historical build plan](docs/plans/DESIGN.md) for the initial
+mapping; current delivery status lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Deploy
 
-Static PWA, HTTPS required, **self-hostable**, captures **no logs/data**. Canonical
-host is `flock.forgesworn.dev` (Hetzner + Caddy, access logs off). The relay and
-map tiles are build-time configurable (`VITE_DEFAULT_RELAY`, `VITE_TILE_URL`) so a
-self-hoster points at their own. `npm run deploy` builds + rsyncs. See
+Static PWA, HTTPS required, **self-hostable**. The canonical host is
+`flock.forgesworn.dev` (Hetzner + Caddy, access logs disabled). Flock has no
+central plaintext location database, but the host, relays, network providers,
+and any online tile/proxy service can still process connection metadata. The
+relay and map tiles are configurable so a self-hoster can point at their own;
+offline saved maps avoid tile requests while in use. `npm run deploy` builds + rsyncs. See
 [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## Conventions

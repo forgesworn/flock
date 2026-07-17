@@ -7,7 +7,7 @@ separate from the hosting/deploy view in `docs/ARCHITECTURE.md`.
 
 | Layer | Technology | Where it is used | Role in flock |
 |---|---|---|---|
-| Public package | `@forgesworn/flock` | `src/`, `package.json` exports | Pure TypeScript location-safety library: geofences, policy, signals, check-ins, trails, buzzes, all-clear, rendezvous, meetings, spoken verification, and related signal types. |
+| Public package | `@forgesworn/flock` | `src/`, `package.json` exports | Private/unpublished pure TypeScript location-safety package: nineteen Flock modules covering geofences, policy, signals, safety state, lost/find, radar, rendezvous, meetings, and spoken verification. |
 | Safety/crypto foundation | `canary-kit` | `src/index.ts`, `src/signals.ts`, `src/*` signal modules | Re-exported by flock; provides groups, beacons, duress, spoken-verification risk estimates, Nostr signal builders, NIP-59/NIP-44 helpers, and sync envelopes. |
 | Root word primitive | `spoken-token` | via `canary-kit` | Underlying HMAC-counter-to-words primitive used by canary-style verification and duress words. |
 | Recovery primitive present in graph | `@forgesworn/shamir-words` | transitive dependency of `canary-kit` | Installed as part of the canary stack, but flock has not wired it into a user-facing circle recovery flow yet. |
@@ -30,7 +30,8 @@ flowchart TB
     geofence["geofence + noreport\ncontainment and privacy zones"]
     policy["policy\ndisclosure decision"]
     signals["signals + buzz + allclear + joined + lost + findping\nbeacons and circle signals"]
-    safety["checkin + trail + offgrid + disband\nsafety workflows"]
+    safety["nightout + checkin + trail + offgrid + disband\nsafety workflows"]
+    radar["radar\ndistance, bearing, freshness, cues"]
     meeting["rendezvous + meeting\nwhen and where to regroup"]
     spoken["spokenverify\npickup word, duress word, risk budget"]
   end

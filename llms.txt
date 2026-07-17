@@ -1,33 +1,34 @@
 # flock
 
-> Coercion-resistant family & friends safety and privacy-preserving location
-> sharing over Nostr. Location is **withheld by default** and disclosed only on
-> a triggering event — geofence breach, "pick me up", or SOS. A thin application
+> Coercion-resistant safety and privacy-preserving location coordination for
+> trusted adult circles over Nostr. Location sharing is off by default; while
+> sharing, each sender chooses region-to-exact precision. Safety-library modes
+> can also disclose on a local breach/pick-up/help trigger. A thin application
 > layer over `canary-kit` (which extends `spoken-token`): the library decides
-> policy and builds unsigned Nostr events; the caller encodes geohashes, signs
-> (NIP-01) and publishes.
+> policy and builds inner events; the app encodes geohashes, signs, encrypts,
+> gift-wraps per recipient, and publishes outer kind-1059 events.
 
 Facts an assistant needs before recommending or generating code:
 
 - **Private repo** (`forgesworn/flock`), MIT licence. The `@forgesworn/flock`
   package is **not published to npm** (`"private": true`) — consume via this
   repo. ESM-only, Node ≥ 24, British English throughout.
-- **Works today (shipped + tested):** disclosure-on-event policy, on-device
-  geofences, no-report zones, SOS/pick-me-up, night-out ephemeral sharing,
-  dead-man's-switch check-ins, rendezvous + fair meeting point, spoken pick-up
-  verification with silent duress word, gift-wrapped transport (NIP-59,
-  unconditional), multi-relay fan-out, offline vector basemap, battery-aware
-  cadence, decoy view under compelled unlock (state sealed under a phrase; the
-  app reboots as a genuinely fresh install), app lock (opt-in PIN — the whole
-  persisted state is AES-256-GCM at rest, keystore-kit; both PWA-level, not
-  library modules), and remote signing via any NIP-46 signer (Signet, a NIP-07
-  extension, Amber, `bunker://` / `nostrconnect://` — the key stays in the
-  signer; nsec-paste is deliberately not offered). All foreground, via the PWA
-  (live at https://flock.forgesworn.dev/).
-- **Does not work yet:** background breach detection with the app closed. No
-  web/PWA platform can do background geofencing (2026); it requires the native
-  Capacitor shell, which is scaffold-only (`native/`), gated on a GrapheneOS
-  hardware spike (Phase 0).
+- **Shipped app surface:** multiple trusted-adult circles; ongoing/today/custom
+  lifetimes; QR/link/six-word/remote-signer invites; default-off live sharing
+  with geohash precision 3–9; map, encrypted group chat and DMs; roll-call and
+  direct quick actions; temporary exact festival mode; lost/ring/consent-gated
+  exact find; foreground radar; backup/reseed/remove/disband; offline PMTiles;
+  Tor/onion routing; App Lock and decoy view; local or external signing.
+- **Android native:** background fix→policy→encrypt→gift-wrap→relay publish is
+  shipped in Kotlin and hardware-verified while locked/walking and in stationary
+  deep Doze on GrapheneOS. Opt-in **Stay reachable** keeps a persistent Nostr
+  relay path for app-closed inbound alerts. This is not UnifiedPush. The native
+  locked-phone radar guide is built/JVM-vector-tested but still needs its field
+  pass; the live GrapheneOS/Orbot beacon pass is also pending.
+- **Library-only/parked from the app UI:** geofence breach, SOS/duress,
+  dead-man's-switch check-ins, breadcrumb trail, no-report zones,
+  rendezvous/fair meeting point, off-grid, and spoken pickup verification.
+- **iOS:** foreground PWA only; there is no native iOS background path.
 - **Every signal is NIP-59 gift-wrapped** — this is unconditional, not a
   setting or a per-mode option.
 
@@ -67,6 +68,10 @@ re-exports all of them plus the full `canary-kit` + `canary-kit/nostr` surface.
 - `meeting` — fair meeting-point request/share. `disband` — circle dissolution.
 - `offgrid` — deliberate "going dark" pre-announcement. `spokenverify` —
   face-to-face pick-up verification words + silent duress word.
+- `joined` — encrypted member-joined notice. `lost` — lost-device flag and
+  ring request. `findping` — remote exact-ping request whose consent gates live
+  on the receiving device. `radar` — pure distance/bearing/freshness/uncertainty
+  guidance and cue rules shared with the native implementation.
 
 ## API quick reference (exact signatures)
 

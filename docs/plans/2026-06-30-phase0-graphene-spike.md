@@ -1,6 +1,6 @@
 # Phase 0 — GrapheneOS background-location spike
 
-**Date:** 2026-06-30 · **Owner:** TBD · **Status:** Layer-B GPS delivery **MEASURED GREEN** on a GrapheneOS Pixel 10 Pro (API 37), 2026-07-05 (`native/gps-probe/`) — locked + walking; deep-Doze stationary run still pending. Full Capacitor harness scaffolded (`native/spike/`).
+**Date:** 2026-06-30 · **Owner:** flock · **Status:** **HISTORICAL / CLOSED for Android outbound.** GPS delivery, the production Kotlin publish round trip, locked walking, and stationary forced deep Doze are measured green on a GrapheneOS Pixel 10 Pro. This file preserves the original spike protocol; current remaining native evidence is in `../ROADMAP.md`.
 
 ## Why this exists
 

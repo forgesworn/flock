@@ -1,6 +1,6 @@
 # Decoy view — "hide flock" under a compelled unlock
 
-Phase J item 4 (competitive audit, 2026-07-02). If a coercer compels an unlock,
+Phase J item 4 (safety-loop audit, 2026-07-02). If a coercer compels an unlock,
 flock itself is evidence: circles, members, safe places, past alerts, a trail.
 The decoy view lets the owner make flock look — and behave — like a freshly
 installed app, and come back with a phrase, leaving nothing for a coercer to

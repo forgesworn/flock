@@ -1,17 +1,19 @@
 # flock — architecture & stack
 
-The whole thing, and *why* each piece is what it is.
+How the shipped system is divided, what each layer owns, and where its trust
+boundaries sit. Feature state is current as of 2026-07-17;
+`docs/ROADMAP.md` tracks remaining hardware and product work.
 
 ## The layered stack
 
 ```
 ┌─ PWA (app/) ──────────── vanilla TypeScript + Vite ─────────────────┐
-│  render-on-state UI · maplibre map · self-hosted fonts              │
-│  store · services · invite · map · app (controller)                │
+│  circles · map/chat · invites · precision · lost/find · radar       │
+│  offline maps · lock/decoy · signer · relay transport               │
 └───────────────┬─────────────────────────────────────────────────────┘
                 │ imports
 ┌───────────────▼─ @forgesworn/flock (src/) ── pure, tested TS lib ───┐
-│  geofence · policy · signals · nightout · checkin                  │
+│  policy/fences · signals · safety state · lost/find · radar         │
 └───────────────┬─────────────────────────────────────────────────────┘
                 │ extends
 ┌───────────────▼─ canary-kit ────────────────────────────────────────┐
@@ -22,10 +24,10 @@ The whole thing, and *why* each piece is what it is.
 │  HMAC-counter → words derivation (the root primitive)              │
 └──────────────────────────────────────────────────────────────────────┘
 
-transport ▶ Nostr (nostr-tools) → relay.trotters.cc   kinds 20078 / 30078 / 1059
-identity  ▶ local nsec (today) → signet-login SignetSigner (planned, pluggable)
-native    ▶ Capacitor shell (scaffold) → true background geofencing
-host      ▶ Hetzner + Caddy → flock.forgesworn.dev (auto-TLS, no logs)
+transport ▶ Nostr relays; sensitive traffic is outer kind 1059
+identity  ▶ local key or external Signet/NIP-07/Amber/NIP-46 signer
+native    ▶ shipped Android: background publish, reachability, BLE, Tor, radar
+host      ▶ static PWA; canonical Caddy access logging is disabled
 ```
 
 ## What & why, layer by layer
@@ -35,52 +37,65 @@ host      ▶ Hetzner + Caddy → flock.forgesworn.dev (auto-TLS, no logs)
   envelopes (`deriveGroupKey`/`encryptEnvelope`), and the Nostr event builders +
   NIP-59 gift-wrap transport all come from `canary-kit`, which extends
   `spoken-token`'s HMAC-counter→words derivation.
-- **Why:** flock = "canary-kit + location". Security-critical crypto must be
-  battle-tested, not hand-rolled — **flock adds zero new crypto primitives.** It
-  composes existing, audited ones (and where it needed an envelope for check-ins,
-  it reused `canary-kit/sync`'s rather than writing its own).
+- **Why:** flock = "canary-kit + location". Flock adds no new cipher or
+  key-exchange primitive. It composes the existing dependencies and reuses
+  `canary-kit/sync` envelopes instead of creating a new construction. Reuse is
+  not itself proof of an audit; `SECURITY.md` records the review and release
+  evidence that can actually be substantiated.
 
 ### flock library — `@forgesworn/flock` (`src/`)
-- **What:** five pure modules — `geofence` (point-in-polygon + haversine),
-  `policy` (the disclosure-on-event decision), `signals` (alert/beacon builders),
-  `nightout` (ephemeral groups, presence, separation), `checkin` (dead-man's-switch).
+- **What:** nineteen Flock additions: location policy (`geofence`, `noreport`,
+  `policy`, `signals`); group safety state (`nightout`, `checkin`, `trail`,
+  `buzz`, `allclear`, `fences`, `rendezvous`, `meeting`, `disband`, `offgrid`,
+  `spokenverify`); and current app support (`joined`, `lost`, `findping`, `radar`).
 - **Why pure + framework-free:** the library *decides policy* and *builds events*;
   it never owns transport, persistence, or encoding. Geohash encoding and
   encryption stay at the edge (mirroring `canary-kit`). That makes it fully
-  testable (70 tests, ~96% coverage), portable, and reusable by a native shell or
-  any other consumer.
-- **Tooling:** TypeScript (Node16 modules, ES2022), **vitest** (+ v8 coverage 80%
-  gates), type-aware **eslint**. Matches `canary-kit`'s conventions exactly.
+  testable, portable, and reusable by a native shell or any other consumer.
+- **Tooling:** TypeScript (Node16 modules, ES2022), **vitest** with enforced V8
+  coverage thresholds of 80%, and type-aware **eslint** for the library. The
+  full suite contains 863 tests as of 2026-07-17; command output is
+  authoritative. PWA/native/scripts/e2e code is also
+  linted with an appropriate non-library configuration.
 
 ### Transport — Nostr
-- **What:** events over relays (`relay.trotters.cc`). Kind **20078** ephemeral
-  signals (beacon/breach/pickup/help/checkin), kind **30078** replaceable group +
-  geofence state, kind **1059** NIP-59 gift wraps (invites/reseed), **NIP-44**
-  encryption throughout, **NIP-40** expiration for ephemeral night-out groups.
-- **Why:** no central server ever holds plaintext location. Each device evaluates
-  its own geofence locally and broadcasts only *encrypted* alerts. Decentralised,
-  self-hostable, and a fundamentally different (smaller) privacy threat surface
-  than a Life360-style central database.
+- **What:** application semantics live in **inner** events, normally ephemeral
+  kind 20078. Before publish, the app encrypts each sensitive inner event and
+  creates one NIP-59 **outer kind-1059 gift wrap per recipient**. The relay sees
+  the random outer author, opaque content, expiry/route tags, timing, volume, and
+  connection metadata — not the inner type, location, real author, or roster.
+- **Group state:** the current PWA does not publish public kind-30078 circle
+  membership state. Membership and seeds travel in encrypted invite/reseed
+  messages and are evaluated on-device.
+- **Why:** no central server receives plaintext location. Each device evaluates
+  its own geofence locally. Multi-relay delivery, rotating inbox identities,
+  timing hygiene, and optional Tor reduce trust and metadata; they do not make
+  connection metadata disappear.
 - **Library:** `nostr-tools` (signing, relay pool, NIP-59 / NIP-46 / NIP-19).
 
 ### Identity / signing
-- **Today:** a local Nostr keypair (`nostr-tools`) in `localStorage`. Works, but
-  the nsec sits in browser storage — flagged in-app, fine for preview only.
-- **Planned:** `signet-login`'s **`SignetSigner`** (NIP-46 bunker / Sign-in-with-
-  Signet / NIP-07 / Amber) — the key lives in the signer, **never in flock**.
-  Introduced behind a **pluggable `Signer` interface** (`signEvent` + `nip44`),
-  so `LocalSigner` and `SignetSigner` are interchangeable. Even gift-wrapped
-  invites work: the seal's NIP-44 + signing run on the remote signer; only the
-  throwaway outer-wrap key is local.
+- **Local path:** a generated Nostr keypair stored with app state. Without App
+  Lock the browser profile can read local state; with App Lock the persisted
+  state is encrypted behind the configured PIN.
+- **External path:** the shipped `signet-login` integration supports NIP-46
+  bunker/Signet, NIP-07, Amber, `bunker://`, and `nostrconnect://`. The long-term
+  key stays in the signer. Even gift-wrapped invites work: NIP-44 and seal
+  signing run remotely; only the disposable outer-wrap key is local.
 - **Why:** remote signing keeps the private key out of the app entirely — the
   correct hardening for a coercion-aware safety tool.
 
 ### App — PWA (`app/`)
-- **What:** vanilla **TypeScript + Vite**, a small render-on-state controller.
-- **Why vanilla (no React/Svelte):** smallest possible bundle (**~36 KB gzip**
-  main; maplibre lazy-loaded only on the Map tab), instant install, no framework
-  lock-in, and it matches `canary-kit`'s own app. A safety PWA must load fast on
-  any phone.
+- **What:** vanilla **TypeScript + Vite**, a render-on-state controller. The
+  shipped surface includes multiple circles, QR/link/six-word invites, explicit
+  default-off sharing, precision control, map/chat/DMs, temporary exact mode,
+  lost/ring/find, foreground radar, offline maps, Tor controls, App Lock, and
+  the decoy view.
+- **Why vanilla (no React/Svelte):** no framework lock-in and direct control of
+  lifecycle and privacy-sensitive state. The 2026-07-17 production build
+  measures about 322 KiB raw / 109 KiB gzip for the main chunk after moving the
+  163 KiB external-signer stack behind its sign-in/restore actions. MapLibre is
+  still material at about 1.0 MiB raw / 271 KiB gzip because it powers the
+  default Home map; both main and MapLibre chunks have enforced build budgets.
 - **Map:** **maplibre-gl** with OpenStreetMap tiles. Why not Google/Mapbox:
   open-source, no API-key lock-in, and the tile source is build-time configurable
   so self-hosters avoid leaking the viewport to a third party.
@@ -91,27 +106,37 @@ host      ▶ Hetzner + Caddy → flock.forgesworn.dev (auto-TLS, no logs)
   navigations so updates land) + web manifest — no plugin, precise control.
 
 ### Platform reach
-- **PWA** covers the *foreground* on iOS / Android / **GrapheneOS** — no app
-  store, instant. But no web platform can do **background** geofencing in 2026
-  (the make-or-break finding).
-- **Capacitor native shell** (scaffolded) is the *only* path to true background
-  breach detection. It wraps the **same** PWA and reuses the **same** flock
-  policy + transport; the free `@capacitor-community/background-geolocation`
-  plugin uses raw `LocationManager` (no Google APIs) so it runs on GrapheneOS.
-- **De-Googled push:** UnifiedPush or a persistent relay socket (no FCM on Graphene).
+- **PWA:** foreground operation on iOS, Android, and GrapheneOS. Web platforms
+  still cannot provide the required locked/background location execution.
+- **Android APK:** the shipped `FlockLocationService` owns the background
+  fix → cadence/movement policy → encryption → per-recipient gift wrap → relay
+  publish path in Kotlin, independent of WebView execution. Locked walking and
+  stationary deep-Doze publishing are hardware-measured green on GrapheneOS.
+- **Inbound:** the opt-in **Stay reachable** foreground service keeps the relay
+  path available for app-closed Nostr alerts. Flock does not currently implement
+  UnifiedPush.
+- **Radar/Tor:** locked-phone radar is built and JVM/vector-tested but still
+  needs its real-hardware pass. The live onion route is implemented; its final
+  GrapheneOS/Orbot beacon pass remains separately tracked.
+- **iOS:** there is no native iOS application; iPhone is foreground PWA only.
 
 ### Hosting / deploy
 - **flock.forgesworn.dev** on the Hetzner box behind **Caddy**
   (automatic Let's Encrypt TLS, **access logging off**).
-- **Why:** own the whole stack, capture no logs/data, and stay self-hostable —
-  the relay and map tiles are build-time configurable (`VITE_DEFAULT_RELAY`,
-  `VITE_TILE_URL`) so anyone can run their own instance against their own infra.
+- **Why:** own the stack and stay self-hostable. Flock has no central plaintext
+  location database and no analytics, but “no data anywhere” would be false:
+  hosts, relays, network providers, optional online map/proxy services, and each
+  local device process some state or metadata. Relay and tile configuration,
+  offline maps, and the onion route let an operator/user reduce those exposures.
 
 ## The themes that drive every choice
 
-1. **Reuse proven crypto** — `spoken-token`/`canary-kit`, never hand-rolled.
+1. **Reuse established primitives** — `spoken-token`/`canary-kit`; record actual
+   review evidence rather than treating dependency reuse as an audit.
 2. **Decentralised, no central trust** — Nostr; the host/relay never sees plaintext location.
-3. **Privacy by default** — disclosure-on-event, self-hosted fonts/tiles, no analytics, no logs.
+3. **Privacy by default** — disclosure-on-event, self-hosted fonts, offline tile
+   option, no analytics, and explicit residual metadata.
 4. **Own-your-stack / self-hostable** — Hetzner + Caddy, configurable relay/tiles.
-5. **Lightweight & portable** — vanilla TS + Vite, tiny bundle, PWA-first, native only where it must be.
+5. **Portable, with measured cost** — vanilla TS + Vite, PWA-first, native only
+   where it must be, and bundle size treated as a budget rather than a slogan.
 6. **Layered & pure** — spoken-token → canary-kit → flock lib → app; each lower layer pure and independently testable.

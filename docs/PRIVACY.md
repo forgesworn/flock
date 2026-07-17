@@ -249,7 +249,7 @@ for high-risk users). Auto-resumes when the window ends.
 ### Multiple groups, different lifetimes
 A user belongs to **many circles at once**:
 - **Transient** — "just tonight" (NIP-40 expiry, auto-dissolve).
-- **Long-lived** — family.
+- **Long-lived** — an ongoing trusted-adult circle.
 Each circle is a **distinct nsec-tree persona** (unlinkable). flock state becomes a
 list of circles with a switcher/overview, not a single circle.
 
@@ -261,9 +261,9 @@ tag for invites/reseeds, and multi-relay fan-out — is implemented and deployed
 Cadence jitter + low-rate stationary cover traffic shipped 2026-07-04 (the audit's
 F1), alongside a word-invite hardening pass (6 words, costlier scrypt,
 reference-not-seed, delete-on-fetch — F4) and the dead bare-20078
-`subscribeSignals`/`publishEvent` paths' removal (F5). What remains is the
-**residual connection metadata** (IP, pseudonymous graph), addressed by a
-`.onion` relay endpoint (see `docs/plans/2026-07-04-mesh-bridge-goal.md` Task B)
-and off-relay transport (BLE-nearby, active — see
-`docs/plans/2026-07-04-ble-nearby-transport.md`), plus a broader
-silence-vs-activity cover-traffic mode.
+`subscribeSignals`/`publishEvent` paths' removal (F5). The optional v3 onion
+relay endpoint is live and removes the public-IP-to-relay link when Tor/Orbot is
+actually in use. BLE-nearby has a completed two-device hardware pass. Residual
+metadata still includes timing, volume, and the pseudonymous inbox graph; Tor is
+optional, BLE is range/convergence limited, and a broader silence-vs-activity
+cover mode remains future work.

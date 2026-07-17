@@ -74,6 +74,23 @@ git tag and the published anchor. Full procedure in
 At-risk users should prefer the **APK** — a signed, reproducible binary — over the
 web app, which is served from a host that can be compelled.
 
+## Known build-tool audit exception
+
+As of 2026-07-17, `npm audit --omit=dev` reports zero vulnerabilities. The full
+development/build graph reports **eight** findings (six high, two moderate)
+through `@capacitor/assets@3.0.5` and its nested legacy Capacitor CLI/project
+tooling (`tar`, `minimatch`, and `uuid` paths). npm currently offers no complete
+upgrade fix for the direct `@capacitor/assets` branch.
+
+This tooling is used only during APK asset generation from committed local
+assets; it is not shipped as browser or Android runtime code and the build does
+not feed it untrusted archives or user-controlled paths. That reduces exposure
+but does not erase supply-chain risk in the trusted release process. Keep the
+exception visible in release review, remove or replace `@capacitor/assets` when
+a maintained path is available, and do not expand its inputs to untrusted data.
+Reproducible APK verification limits undetected output drift; it is not a fix
+for a compromised build environment.
+
 ## Scope
 
 In scope: this repository (the flock app and `@forgesworn/flock` library). Out of

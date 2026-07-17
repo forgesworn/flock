@@ -2,13 +2,14 @@
 
 flock's PWA is a static bundle (`dist-app/`). It needs **HTTPS** (service worker,
 geolocation, install, and later Web Push all require a secure context). The host
-only ever serves static files — **no user data flows through it**. The sensitive
-path (location) goes peer-to-peer through the configured **Nostr relay**, not the
-web host.
+does not receive plaintext circle messages or location and has no account or
+location database. It does serve the app and proxy optional map/search requests,
+so connection and request metadata still reach it. Sensitive circle traffic goes
+through the configured **Nostr relay** as per-recipient ciphertext.
 
 ## Privacy posture
 
-flock is designed so the host (and we) capture nothing:
+flock is designed to minimise what the host processes:
 
 - **No analytics, no third-party scripts.** Fonts are self-hosted; nothing phones home.
 - **Access logging is off** in the provided Caddy config.
@@ -42,23 +43,26 @@ npm run build:app
 
 ## Before you deploy — run the checks locally
 
-CI (`.github/workflows/ci.yml`) runs the fast gates on every push — lint, typecheck,
-build, unit tests, and the Kotlin native parity suite. The **two-person Playwright
-e2e suite is not in CI**: it drives two real identities through a **live Nostr relay**
-and needs a **live Vite dev server**, so it runs on your machine before a deploy,
-where that infra is at hand (and where it can't hammer the production relay or burn
-Actions minutes on a private repo).
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, library/PWA builds, bundle
+budgets, the complete Vitest suite with coverage, Kotlin/native reverse-vector
+parity, and the **two-person Playwright suite**. CI starts a fresh RAM-only local
+Nostr relay, so the browser flows are deterministic and never write test events to
+the production relay. A pre-deploy run against the real target remains a separate
+operator smoke check.
 
 ```sh
-npm test              # unit (vitest) — fast
+npm run test:coverage # complete Vitest suite + enforced 80% thresholds
+npm run test:e2e:ci   # two-person e2e with a fresh local RAM-only relay
 npm run test:e2e      # two-person e2e; Playwright self-starts the dev server
                       #   (webServer + reuseExistingServer — playwright.config.ts).
                       #   Targeted spec (the full suite is >10 min):
                       #   npm run test:e2e -- e2e/quick-action.spec.ts
 ```
 
-Uses `relay.trotters.cc` by default; override with `FLOCK_E2E_RELAY` to point at a
-local relay. Don't edit source mid-run — Vite HMR reloads the app under the test.
+Local `npm run test:e2e` uses `relay.trotters.cc` by default. Override with
+`FLOCK_E2E_RELAY` to point at any explicit target; `npm run test:e2e:ci` starts
+the isolated test relay automatically. Don't edit source mid-run — Vite HMR
+reloads the app under the test.
 
 ## Canonical deploy — flock.forgesworn.dev (Hetzner + Caddy)  ✅ LIVE
 
