@@ -30,7 +30,13 @@ import { openRadar, closeRadar, radarBeaconLanded } from './radarMode'
 import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
-import { createMeshBuffer, remember as rememberMeshWrap, liveEntries as liveMeshEntries, type MeshBufferState } from './meshBuffer'
+import {
+  createMeshBuffer,
+  liveMeshFrames,
+  rememberMeshFrame,
+  type MeshBufferState,
+  type RetainedMeshFrame,
+} from 'mesh-kit'
 import { classifyScan, shouldOfferAppHandoff } from './joinassist'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -219,7 +225,16 @@ function markWrapSeen(id: string): boolean {
   if (seenWrapIds.size > 1000) seenWrapIds.delete(seenWrapIds.values().next().value as string)
   return true
 }
-// Mesh v2 store-and-forward (app/src/meshBuffer.ts): wraps seen in crowd-mesh
+const BUFFERED_WRAP_KIND = 'flock-gift-wrap'
+function retainedWrap(id: string, data: string) {
+  return { id, frame: { kind: BUFFERED_WRAP_KIND, payload: data } }
+}
+function retainedWrapData(entry: RetainedMeshFrame): string | null {
+  return entry.frame.kind === BUFFERED_WRAP_KIND && typeof entry.frame.payload === 'string'
+    ? entry.frame.payload
+    : null
+}
+// Mesh v2 store-and-forward (mesh-kit): wraps seen in crowd-mesh
 // mode are RETAINED (200 wraps / 15 min TTL) and re-offered to later-arriving
 // peers on the next mesh (re)start — today a frame floods only to peers
 // connected at that instant, so a phone walking into range a minute later got
@@ -611,7 +626,10 @@ async function syncBle(): Promise<void> {
       // the test-plan doc). Best-effort; a peer who already has an entry just
       // dedups it (markWrapSeen on their side).
       if (bleMode === 'mesh') {
-        for (const entry of liveMeshEntries(meshBuffer, nowSec())) void ble.broadcastBle(entry.data)
+        for (const entry of liveMeshFrames(meshBuffer, nowSec())) {
+          const data = retainedWrapData(entry)
+          if (data !== null) void ble.broadcastBle(data)
+        }
       }
     } else if (bleActive || ble.bleRunning()) {
       await ble.stopBle()
@@ -702,7 +720,7 @@ function onBleFrame(data: string): void {
   // Mesh v2 store-and-forward: retain it (mesh mode only — discreet stays
   // single-hop) so a peer who walks into range after this instant still gets
   // it on the next mesh (re)start (see syncBle's re-flood, above).
-  if (bleMode === 'mesh') meshBuffer = rememberMeshWrap(meshBuffer, { id: ev.id, data }, nowSec())
+  if (bleMode === 'mesh') meshBuffer = rememberMeshFrame(meshBuffer, retainedWrap(ev.id, data), nowSec())
   const wrap = { pubkey: ev.pubkey, content: ev.content, id: ev.id }
   for (const c of persisted.circles) void dispatchWrap(c.id, wrap, deriveInbox(c.seedHex).sk)
   // BRIDGE: a wrap that reached me over Bluetooth may have come from a phone
@@ -4556,7 +4574,7 @@ async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: s
   if (bleActive && bleMode === 'mesh' && wrap.id && persisted.circles.some((x) => festivalActive(x))) {
     const id = wrap.id
     const frame = JSON.stringify({ id, pubkey: wrap.pubkey, content: wrap.content })
-    meshBuffer = rememberMeshWrap(meshBuffer, { id, data: frame }, nowSec())
+    meshBuffer = rememberMeshFrame(meshBuffer, retainedWrap(id, frame), nowSec())
     try { const ble = await import('../../native/ble'); await ble.broadcastBle(frame) } catch { /* best-effort */ }
   }
   await dispatchWrap(circleId, wrap, inboxSk)

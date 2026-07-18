@@ -45,7 +45,7 @@ yet, strong fit · 🤔 candidate / explore · 🔒 private repo (confirm scope)
 | flock need | Tool | Status / action |
 |---|---|---|
 | Decentralised relay transport | **Nostr** (via `nostr-tools`) | ✅ Using (kinds 20078/30078/1059). |
-| Offline / no-relay / LAN delivery | **mesh-kit** (transport-agnostic `MeshTransport`, Noise_XX) + **mesh-webrtc-lan** | 🔜 A pluggable transport seam so alerts work with no internet (dead zones, festivals, disasters). flock's transport should be Nostr **or** mesh. |
+| Offline / no-relay / LAN delivery | **mesh-kit** (transport-agnostic `MeshTransport`, reliability, Noise_XX) + **mesh-webrtc-lan** | ✅ The canonical mesh-kit buffer now owns bounded store-and-forward retention and reconciliation; Flock retains hop, discovery and safety-routing policy. The full pluggable native transport remains the next layer. |
 | Zero-dep geohash | **geohash-kit** | ✅ Using. |
 
 ## Meeting & location
