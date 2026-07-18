@@ -1,15 +1,41 @@
 import { describe, it, expect } from 'vitest'
 import {
   createMeshBuffer,
-  remember,
-  prune,
-  liveEntries,
-  manifestOf,
-  reconcile,
-  entriesFor,
+  rememberMeshFrame,
+  pruneMeshBuffer,
+  liveMeshFrames,
+  meshManifest,
+  reconcileMeshManifests,
+  meshFramesFor,
   MESH_BUFFER_DEFAULTS,
+  type MeshBufferOptions,
   type MeshBufferState,
-} from './meshBuffer'
+} from 'mesh-kit'
+
+const testFrame = (data: string) => ({ kind: 'flock-gift-wrap', payload: data })
+const remember = (
+  state: MeshBufferState,
+  entry: { id: string; data: string },
+  now: number,
+  options?: MeshBufferOptions,
+) => rememberMeshFrame(state, { id: entry.id, frame: testFrame(entry.data) }, now, options)
+const prune = (state: MeshBufferState, now: number, options?: MeshBufferOptions) =>
+  pruneMeshBuffer(state, now, options)
+const liveEntries = (state: MeshBufferState, now: number, options?: MeshBufferOptions) =>
+  liveMeshFrames(state, now, options).map((entry) => ({
+    id: entry.id,
+    data: entry.frame.payload,
+    storedAt: entry.storedAt,
+  }))
+const manifestOf = (state: MeshBufferState, now: number, options?: MeshBufferOptions) =>
+  meshManifest(state, now, options)
+const reconcile = reconcileMeshManifests
+const entriesFor = (state: MeshBufferState, ids: readonly string[]) =>
+  meshFramesFor(state, ids).map((entry) => ({
+    id: entry.id,
+    data: entry.frame.payload,
+    storedAt: entry.storedAt,
+  }))
 
 const OPTS = { maxEntries: 3, ttlSeconds: 900 }
 
