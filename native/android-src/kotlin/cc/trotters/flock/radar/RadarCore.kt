@@ -1,4 +1,4 @@
-// Radar guidance core — a pure Kotlin port of src/radar.ts, so locked-phone
+// Radar guidance core — a pure Kotlin port of @forgesworn/flock/radar, so locked-phone
 // guidance obeys the SAME tested honesty rules as the foreground tracker:
 // a coarse share never yields a precise pointer, a stale target never sounds
 // confident, arrival silences. Parity with the TS module is held by golden
@@ -14,7 +14,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
-// Tuning constants — mirror src/radar.ts RADAR exactly.
+// Tuning constants — mirror @forgesworn/flock/radar RADAR exactly.
 object Radar {
     const val FRESH_SECONDS = 60.0
     const val STALE_SECONDS = 600.0
@@ -87,7 +87,7 @@ fun classifyFreshness(ageSeconds: Double): String = when {
     else -> "stale"
 }
 
-/** The guidance decision — the src/radar.ts honesty order, verbatim. */
+/** The guidance decision — the @forgesworn/flock/radar honesty order, verbatim. */
 fun radarGuidance(input: RadarInput): RadarGuidance {
     val none = RadarGuidance("unavailable", null, null, null, null, null, false, null)
     val t = input.target ?: return none
@@ -122,7 +122,7 @@ fun radarGuidance(input: RadarInput): RadarGuidance {
 
 private const val SPARSE_TONE_HZ = 330
 
-/** Guidance → one cadence step of the beep grammar (src/radar.ts cueFor). */
+/** Guidance → one cadence step of the beep grammar (@forgesworn/flock/radar cueFor). */
 fun cueFor(g: RadarGuidance): RadarCue = when (g.state) {
     "unavailable", "no-fix" -> RadarCue("sparse", 4000, SPARSE_TONE_HZ, longArrayOf(30))
     "stale" -> RadarCue("sparse", 3500, SPARSE_TONE_HZ, longArrayOf(30))
@@ -153,7 +153,7 @@ fun cueFor(g: RadarGuidance): RadarCue = when (g.state) {
 
 data class PositionObservation(val position: LatLng, val uncertaintyMetres: Double)
 
-/** Did the target genuinely move? (src/radar.ts targetMoved.) */
+/** Did the target genuinely move? (@forgesworn/flock/radar targetMoved.) */
 fun targetMoved(prev: PositionObservation?, next: PositionObservation): Boolean {
     if (prev == null) return false
     val d = haversineMetres(prev.position, next.position)

@@ -6,7 +6,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-// Ports of src/geofence.ts containment (accuracy-aware, fail-safe toward
+// Ports of @forgesworn/flock/geofence containment (accuracy-aware, fail-safe toward
 // "possibly inside") and geohash-kit's planar polygon predicates, restricted to
 // what the no-report cap needs. Must behave identically to the JS.
 
@@ -81,10 +81,10 @@ private fun uncertaintyBounds(p: LatLng, accuracyMetres: Double): Bounds {
     return Bounds(p.lat - dLat, p.lat + dLat, p.lon - dLon, p.lon + dLon)
 }
 
-/** Is the uncertainty disc confidently outside this fence? (src/geofence.ts fenceContainment) */
+/** Is the uncertainty disc confidently outside this fence? (@forgesworn/flock/geofence fenceContainment) */
 private fun fullyOutside(point: LatLng, accuracyMetres: Double, fence: Geofence): Boolean = when (fence) {
     is Geofence.Circle -> {
-        // Mirror src/geofence.ts classifyContainment: fullyInside is checked FIRST,
+        // Mirror @forgesworn/flock/geofence classifyContainment: fullyInside is checked FIRST,
         // so an exact boundary tie (d == radius at accuracy 0) reads as inside —
         // the fail-safe direction for a no-report zone.
         val d = haversineMetres(point, fence.centre)
@@ -100,7 +100,7 @@ private fun fullyOutside(point: LatLng, accuracyMetres: Double, fence: Geofence)
 
 /**
  * Strictest suppression among the zones the fix is POSSIBLY inside, or null
- * when confidently outside them all (src/noreport.ts noReportPolicyAt).
+ * when confidently outside them all (@forgesworn/flock/noreport noReportPolicyAt).
  */
 fun noReportPolicyAt(point: LatLng, zones: List<NoReportZone>, accuracyMetres: Double): String? {
     var strictest: String? = null

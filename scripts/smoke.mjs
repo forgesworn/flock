@@ -20,7 +20,7 @@ import {
   deriveDuressKey,
   decryptDuressAlert,
   hashGroupId,
-} from '../dist/index.js'
+} from '@forgesworn/flock'
 import { finalizeEvent, verifyEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { wrapEvent, unwrapEvent } from 'nostr-tools/nip59'
 

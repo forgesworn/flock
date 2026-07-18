@@ -198,7 +198,7 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   "on the map · within ~X · last seen HH:MM" plus a 📍 **see-on-map** jump that
   frames the member's whole disclosed cell. Pure UI over the presence cache.
 - [x] **Peer "mark as lost"** (2026-07-03): anyone in the circle flags a
-  member's phone lost (`t=lost` signal, `src/lost.ts`, FLOCK.md §3.3 —
+  member's phone lost (`t=lost` signal, `@forgesworn/flock/lost`, FLOCK.md §3.3 —
   group-envelope encrypted, latest-per-member wins). Everyone's roster shows a
   "phone lost" pill, the pin/square turns alert-red, and the phone itself shows
   a loud finder card on Home ("found this phone? please help it home") with
@@ -235,7 +235,7 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   device-local, never synced), so the disclosure still originates from the
   device's own settings. Full gate stack (the strict model): **pre-auth +
   flagged-lost + cancel window + one-shot + rate-limit**. The ask is a new
-  `findreq` signal (`src/findping.ts`) — deliberately distinct from a buzz (a
+  `findreq` signal (`@forgesworn/flock/findping`) — deliberately distinct from a buzz (a
   targeted buzz already *rings* a lost phone); the answer is a plain `beacon@9`
   (no-report zones still cap it). Pure gate `shouldAnswerFindPing`
   (`app/src/findping.ts`, +10 unit) + lib round-trip (+5 unit); a per-circle
@@ -270,7 +270,7 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   time-boxed. Goal/design:
   `docs/plans/2026-07-09-radar-navigation-goal.md`.
   - [x] **Slice 1 — pure guidance core + foreground tracker (2026-07-09).** The
-    library module `src/radar.ts` owns every decision (distance/bearing, angular
+    library module `@forgesworn/flock/radar` owns every decision (distance/bearing, angular
     error, freshness, the coarse/stale/private degraded states, the beep-grammar
     cue, target-movement classification, GPS-course fallback), unit-tested with
     the honesty invariants held: a coarse share never yields a precise pointer,
@@ -489,7 +489,7 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   (**off by default** — fetching tells public relays which pubkeys you're looking
   up). Inline nickname edit on the Circle screen; settings toggle. Shown
   everywhere (members, alerts, buzz, rendezvous).
-- [x] **canary spoken-verify — "is this really my parent, and are they safe?"** (`src/spokenverify.ts`,
+- [x] **canary spoken-verify — "is this really my parent, and are they safe?"** (`@forgesworn/flock/spokenverify`,
   Circle screen). A **face-to-face, on-device, zero-relay** pick-up identity check: both phones derive the
   same rotating word from the shared circle seed + a time-based counter (canary `getCounter`, flock-fixed at
   a **1 h rotation, ±1 tolerance** in one audited `SPOKEN_VERIFY` block), so the collector reads a word aloud
@@ -604,7 +604,7 @@ Two halves that compose into one feature:
     don't), with per-person ETAs + **fairness score** (`min_max` / `min_total` /
     `min_variance`). A real engine (Valhalla/ORS) can slot behind the same seam
     later — **opt-in, never a silent fallback**.
-  - **Slice 2 — the flow** (`src/meeting.ts` lib + Circle UI, +6 unit tests). New
+  - **Slice 2 — the flow** (`@forgesworn/flock/meeting` + Circle UI, +6 unit tests). New
     protocol signals **`mtg-req`** (a proposal: mode + time budget) and **`mtg-loc`**
     (a member's **opt-in, coarse** contribution — a neighbourhood **geohash-6 cell**,
     never an exact fix), both group-envelope encrypted like rendezvous. Flow:
@@ -930,7 +930,7 @@ modes**. Plan with designs, decisions, and per-slice tests:
   only, so a guardian's safe place did nothing on the child's phone. Shipped in three
   sub-slices: **3a** — fences move onto the `Circle` (per-circle), legacy device-global
   sets migrated into every circle (behaviour-preserving; 4 unit tests); **3b** — new
-  lib module `src/fences.ts` (`t:'fences'`, group-envelope, gift-wrapped like every
+  lib module `@forgesworn/flock/fences` (`t:'fences'`, group-envelope, gift-wrapped like every
   signal): idempotent **full-replacement set, latest-wins** (`updatedAt`, equal-clock
   tie-break on the smaller `by` → convergent; echoes are no-ops; **empty set is valid**
   so deletes sync; strict re-validation on decrypt so a malformed set can never
@@ -1053,8 +1053,8 @@ this phase means library implementation/tests, not current user-facing support.
   **custom check-in cadence** (5 min–24 h input alongside the presets). E2e:
   custom-cadence arm A→B, self-reminder due-soon→overdue (clock), and a
   3-person miss → B acks → C sees "on it" + its own ack button gone. 15 new
-  unit tests (`src/checkin.test.ts`).
-- [x] **Pre-SOS breadcrumb trail.** Shipped: `src/trail.ts` — `pushCrumb`
+  unit tests (`flock-kit/src/checkin.test.ts`).
+- [x] **Pre-SOS breadcrumb trail.** Shipped: `@forgesworn/flock/trail` — `pushCrumb`
   (pure rolling buffer: ≥60 s spacing, ≤15 min age, ≤12 crumbs) +
   `buildTrailSignal`/`decryptTrail` under the **duress key** (trail exists only
   because a trigger fired — never the beacon/envelope domain). PWA: buffer fed

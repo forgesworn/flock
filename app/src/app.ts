@@ -79,7 +79,7 @@ const COARSE_MIN_INTERVAL = 45 // never faster than this
 const COARSE_HEARTBEAT = 300 //  …but re-affirm presence every 5 min when still
 // Timing hygiene (audit F1): jitter softens the exact 45s/300s periods; cover
 // traffic narrows the ~6x moving-vs-still swing with a low-rate decoy publish
-// that fills the quiet stretch between heartbeats (src/signals.ts `cover` type
+// that fills the quiet stretch between heartbeats (@forgesworn/flock/signals `cover` type
 // — wire-identical, discarded unread by every receiver). Math.random() here
 // mirrors giftwrap.ts's own NIP-59 timing blur (non-secret, purely obfuscating
 // a fixed schedule).

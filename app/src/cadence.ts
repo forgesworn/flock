@@ -134,7 +134,7 @@ export interface CoverOptions {
  * sends (standing still, inside the heartbeat window), this decides when to
  * fire a wire-identical DECOY publish instead — narrowing the moving-vs-still
  * cadence gap without ever carrying real information (the payload is random
- * filler; see `src/signals.ts`'s `cover` signal type — receivers discard it
+ * filler; see `@forgesworn/flock/signals`'s `cover` signal type — receivers discard it
  * unconditionally, wire-indistinguishable from any other signal). Independent
  * of the real beacon cadence: call it only when the real gate just said no.
  */

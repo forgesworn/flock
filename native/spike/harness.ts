@@ -9,7 +9,7 @@ import { Preferences } from '@capacitor/preferences'
 import { Geolocation } from '@capacitor/geolocation'
 // Import the module under test directly (not the public barrel) so nothing but
 // geofence.ts influences the breach decision we're measuring.
-import { isBreach, type CircleGeofence } from '../../src/geofence'
+import { isBreach, type CircleGeofence } from '@forgesworn/flock/geofence'
 import type { SpikeSession, SpikeFix } from './metrics'
 
 // --- background-geolocation plugin (capacitor-community: LocationManager + a

@@ -92,11 +92,14 @@ publishing is hardware-verified on GrapheneOS. Remaining native evidence is
 tracked precisely in [`docs/ROADMAP.md`](docs/ROADMAP.md), including locked-phone
 radar and live Orbot-route validation.
 
-## Library modules (`src/`)
+## Shared library modules (`@forgesworn/flock`)
 
-The library is framework-free and pure (like `canary-kit`): it builds/evaluates,
-it does not own transport, persistence, or lifecycle. Geohash encoding and
-encryption stay at the edge.
+The canonical library source and compatibility vectors live in the private
+[`forgesworn/flock-kit`](https://github.com/forgesworn/flock-kit) repository.
+This app pins an immutable `flock-kit` commit and consumes its
+`@forgesworn/flock` package. The library is framework-free and pure (like
+`canary-kit`): it builds/evaluates, but does not own transport, persistence, or
+lifecycle. Geohash encoding and encryption stay at the edge.
 
 | Module | What it does | Status |
 |---|---|:--:|
@@ -122,7 +125,7 @@ encryption stay at the edge.
 | `app/` (PWA) | Multi-circle MVP: live precision control, map/chat/DMs, QR/link/word invites, temporary exact mode, lost/ring/find, foreground radar, backup/reseed/remove/disband, offline maps, Tor toggle, app lock and decoy. SOS, geofences, dead-man's-switch, rendezvous/meeting, and off-grid remain parked from the UI | ✅ MVP |
 | `native/` (Capacitor) | Android APK with Kotlin background publish, opt-in Stay reachable inbound relay service, native notifications, Tor/Orbot routing, and a built locked-phone radar guide. Outbound publish is hardware-verified; radar/Orbot evidence still has explicit pending rows in the roadmap | ✅ Android; 🧪 field checks |
 
-**Gates:** `npm run build` · `npm run test:coverage` · `npm run typecheck` · `npm run lint`
+**App gates:** `npm run build` · `npm run test:coverage` · `npm run typecheck` · `npm run lint` · `npm run test:e2e`
 
 **PWA:** `npm run dev` (localhost) · `npm run build:app` (→ `dist-app/`, including bundle budgets) · `npm run preview:app`
 

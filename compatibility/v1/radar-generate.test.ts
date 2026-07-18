@@ -17,7 +17,7 @@ import {
   targetMoved,
   courseFromFixes,
   type RadarInput,
-} from '../../src/radar'
+} from '@forgesworn/flock'
 
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), 'radar-vectors.json')
 
@@ -43,7 +43,7 @@ const FRESHNESS_CASES = [0, 60, 61, 300, 600, 601, 5000]
 const target = (lat: number, u = 2.4, age = 5): NonNullable<RadarInput['target']> =>
   ({ position: { lat, lon: 0 }, uncertaintyMetres: u, ageSeconds: age })
 
-// One case per guidance state and cue tier (see src/radar.test.ts for the
+// One case per guidance state and cue tier (see flock-kit/src/radar.test.ts for the
 // behavioural intent of each).
 const GUIDANCE_CASES: RadarInput[] = [
   { me: { lat: 0, lon: 0 }, headingDeg: 0, target: null },

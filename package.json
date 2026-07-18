@@ -1,103 +1,15 @@
 {
-  "name": "@forgesworn/flock",
+  "name": "flock-app",
   "version": "0.0.0",
   "description": "Experimental, non-commercial location sharing for adult friends and trusted groups. Built on canary-kit over Nostr.",
   "homepage": "https://flock.forgesworn.dev/",
   "type": "module",
   "private": true,
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "sideEffects": false,
   "engines": {
     "node": ">=24"
   },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./geofence": {
-      "types": "./dist/geofence.d.ts",
-      "import": "./dist/geofence.js"
-    },
-    "./noreport": {
-      "types": "./dist/noreport.d.ts",
-      "import": "./dist/noreport.js"
-    },
-    "./policy": {
-      "types": "./dist/policy.d.ts",
-      "import": "./dist/policy.js"
-    },
-    "./signals": {
-      "types": "./dist/signals.d.ts",
-      "import": "./dist/signals.js"
-    },
-    "./nightout": {
-      "types": "./dist/nightout.d.ts",
-      "import": "./dist/nightout.js"
-    },
-    "./checkin": {
-      "types": "./dist/checkin.d.ts",
-      "import": "./dist/checkin.js"
-    },
-    "./trail": {
-      "types": "./dist/trail.d.ts",
-      "import": "./dist/trail.js"
-    },
-    "./buzz": {
-      "types": "./dist/buzz.d.ts",
-      "import": "./dist/buzz.js"
-    },
-    "./allclear": {
-      "types": "./dist/allclear.d.ts",
-      "import": "./dist/allclear.js"
-    },
-    "./fences": {
-      "types": "./dist/fences.d.ts",
-      "import": "./dist/fences.js"
-    },
-    "./rendezvous": {
-      "types": "./dist/rendezvous.d.ts",
-      "import": "./dist/rendezvous.js"
-    },
-    "./meeting": {
-      "types": "./dist/meeting.d.ts",
-      "import": "./dist/meeting.js"
-    },
-    "./disband": {
-      "types": "./dist/disband.d.ts",
-      "import": "./dist/disband.js"
-    },
-    "./offgrid": {
-      "types": "./dist/offgrid.d.ts",
-      "import": "./dist/offgrid.js"
-    },
-    "./spokenverify": {
-      "types": "./dist/spokenverify.d.ts",
-      "import": "./dist/spokenverify.js"
-    },
-    "./joined": {
-      "types": "./dist/joined.d.ts",
-      "import": "./dist/joined.js"
-    },
-    "./lost": {
-      "types": "./dist/lost.d.ts",
-      "import": "./dist/lost.js"
-    },
-    "./findping": {
-      "types": "./dist/findping.d.ts",
-      "import": "./dist/findping.js"
-    },
-    "./radar": {
-      "types": "./dist/radar.d.ts",
-      "import": "./dist/radar.js"
-    }
-  },
-  "files": [
-    "dist/"
-  ],
   "scripts": {
-    "build": "tsc",
+    "build": "vite build && npm run bundle:check",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
@@ -111,7 +23,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report",
     "dev": "vite",
-    "build:app": "vite build && npm run bundle:check",
+    "build:app": "npm run build",
     "bundle:check": "node scripts/check-bundle-size.mjs",
     "build:native": "vite build --mode native",
     "apk": "sh native/build-apk.sh debug",
@@ -148,6 +60,7 @@
     "url": "https://github.com/forgesworn/flock/issues"
   },
   "dependencies": {
+    "@forgesworn/flock": "git+ssh://git@github.com/forgesworn/flock-kit.git#6fb11749ec929823352f848e647884629c242418",
     "canary-kit": "^2.11.0",
     "rendezvous-kit": "^1.21.6"
   },

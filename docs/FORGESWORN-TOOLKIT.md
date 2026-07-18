@@ -37,7 +37,7 @@ yet, strong fit · 🤔 candidate / explore · 🔒 private repo (confirm scope)
 | flock need | Tool | Status / action |
 |---|---|---|
 | Silent duress alarm + location | **canary-kit** duress (`buildDuressAlert`) | ✅ Using. |
-| "Is this *really* my parent picking me up?" | **canary-kit** spoken verification (`deriveVerificationWord`, `verifyWord`, `deriveDirectionalPair`, session) + **spoken-token** | ✅ Shipped — wired to the UI: verification words + silent duress word (`src/spokenverify.ts`, `app/src/app.ts`). |
+| "Is this *really* my parent picking me up?" | **canary-kit** spoken verification (`deriveVerificationWord`, `verifyWord`, `deriveDirectionalPair`, session) + **spoken-token** | ✅ Shipped — wired to the UI: verification words + silent duress word (`@forgesworn/flock/spokenverify`, `app/src/app.ts`). |
 | Encrypted location beacons / envelopes | **canary-kit** beacons + `canary-kit/sync` envelope | ✅ Using (beacons, duress, check-in envelope). |
 
 ## Transport (freedom from the internet)
@@ -52,7 +52,7 @@ yet, strong fit · 🤔 candidate / explore · 🔒 private repo (confirm scope)
 
 | flock need | Tool | Status / action |
 |---|---|---|
-| "Where do we meet to pick you up / regroup?" | **rendezvous-kit** — "fair meeting points for N participants — isochrone intersection, venue search, fairness scoring" | ✅ Shipped (Phase F) — set-rendezvous + fair meeting point with venues + fairness scoring (`src/rendezvous.ts`, `src/meeting.ts`). |
+| "Where do we meet to pick you up / regroup?" | **rendezvous-kit** — "fair meeting points for N participants — isochrone intersection, venue search, fairness scoring" | ✅ Shipped (Phase F) — set-rendezvous + fair meeting point with venues + fairness scoring (`@forgesworn/flock/rendezvous`, `@forgesworn/flock/meeting`). |
 
 ## Trust
 

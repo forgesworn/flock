@@ -15,7 +15,7 @@ PWA) that:
 - starts the free, Google-free watcher
   (`@capacitor-community/background-geolocation` → `LocationManager` + a
   foreground service, no Google APIs),
-- evaluates the **real** flock geofence (`src/geofence.ts` `isBreach`) on every
+- evaluates the **real** flock geofence (`@forgesworn/flock/geofence` `isBreach`) on every
   fix — recording *detection* latency (inside→outside); production adds a
   sub-second relay publish on top, so the spike grades detection (the dominant term),
 - persists the whole session with `@capacitor/preferences` so it **survives the

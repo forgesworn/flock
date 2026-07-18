@@ -91,8 +91,8 @@ files into `native/` before building.
   app-closed inbound alerts. It is not UnifiedPush and has an explicit battery
   cost surfaced in Settings.
 - **`RadarGuideService` / `radarGuide.ts`** — native locked-phone radar loop.
-  Pure decisions match `src/radar.ts` through committed golden vectors and JVM
-  tests; the real-hardware field pass remains open.
+  Pure decisions match `@forgesworn/flock/radar` through committed golden
+  vectors and JVM tests; the real-hardware field pass remains open.
 - **BLE + Tor/Orbot** — native plugins provide the nearby buffer/mesh and the
   `.onion` relay network path. The onion route is implemented; its final live
   GrapheneOS/Orbot beacon check is tracked separately.
