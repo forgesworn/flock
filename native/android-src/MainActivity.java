@@ -2,8 +2,7 @@
 //
 // Registers the app-local plugins: StayReachable (the location-free "stay
 // reachable" foreground service), FlockNotify (message notifications with
-// PUBLIC lock-screen visibility), FlockBle (off-relay phone-to-phone
-// transport), FlockOrbot (the Tor/.onion relay toggle's Orbot reachability
+// PUBLIC lock-screen visibility), FlockOrbot (the Tor/.onion relay toggle's Orbot reachability
 // probe) and FlockPublish (the native background-publish config + journal
 // bridge). The background-geolocation and local-notifications plugins are npm
 // packages and auto-register; a plugin defined in this module must be
@@ -20,7 +19,6 @@ public class MainActivity extends BridgeActivity {
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(StayReachablePlugin.class);
     registerPlugin(FlockNotifyPlugin.class);
-    registerPlugin(FlockBlePlugin.class);
     registerPlugin(FlockOrbotPlugin.class);
     registerPlugin(FlockPublishPlugin.class);
     registerPlugin(RadarGuidePlugin.class);

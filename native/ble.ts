@@ -5,26 +5,15 @@
 // bytes phone-to-phone over Bluetooth LE when circle members are co-located — no
 // relay, no internet. It is STRICTLY ADDITIVE: the app only ever calls this from
 // inside the native shell with the opt-in flag on, and the relay path never
-// depends on it (see app.ts). The native FlockBle plugin (ported from meatchat)
-// does discovery, GATT, chunking and dedup; this is the thin JS seam.
+// depends on it (see app.ts). The shared capacitor-mesh-ble package does
+// discovery, GATT, chunking and dedup; this is Flock's thin policy seam.
 //
 // Discovery identity: the app passes a ROTATING, circle-seed-derived UUID as both
 // `serviceUuid` (advertised) and `room` (so the plugin's room-hash advert bytes
 // also rotate) — nothing static ever hits the air (app/src/bleId.ts).
 
-import { registerPlugin, type PluginListenerHandle } from '@capacitor/core'
-
-interface FlockBlePlugin {
-  start(opts: { room: string; selfId: string; serviceUuid: string; hops?: number }): Promise<void>
-  stop(): Promise<void>
-  broadcast(opts: { data: string }): Promise<{ queuedPeers?: number }>
-  send(opts: { peer: string; data: string }): Promise<void>
-  getStatus(): Promise<Record<string, unknown>>
-  addListener(event: 'frame', cb: (e: { from: string; data: string }) => void): Promise<PluginListenerHandle>
-  addListener(event: 'status', cb: (e: Record<string, unknown>) => void): Promise<PluginListenerHandle>
-}
-
-const FlockBle = registerPlugin<FlockBlePlugin>('FlockBle')
+import { MeshBle } from 'capacitor-mesh-ble'
+import type { PluginListenerHandle } from '@capacitor/core'
 
 let frameHandle: PluginListenerHandle | null = null
 let running = false
@@ -41,10 +30,10 @@ export async function startBle(
   onFrame: (data: string, from: string) => void,
 ): Promise<void> {
   await stopBle()
-  frameHandle = await FlockBle.addListener('frame', (e) => {
+  frameHandle = await MeshBle.addListener('frame', (e) => {
     if (e && typeof e.data === 'string') onFrame(e.data, typeof e.from === 'string' ? e.from : '')
   })
-  await FlockBle.start(opts)
+  await MeshBle.start(opts)
   running = true
 }
 
@@ -53,13 +42,13 @@ export async function stopBle(): Promise<void> {
   running = false
   try { await frameHandle?.remove() } catch { /* already gone */ }
   frameHandle = null
-  try { await FlockBle.stop() } catch { /* not started / older shell */ }
+  try { await MeshBle.stop() } catch { /* not started / older shell */ }
 }
 
 /** Broadcast an opaque wrap to in-range circle members. Best-effort, never throws. */
 export async function broadcastBle(data: string): Promise<void> {
   if (!running) return
-  try { await FlockBle.broadcast({ data }) } catch { /* no peers / adapter off */ }
+  try { await MeshBle.broadcast({ data }) } catch { /* no peers / adapter off */ }
 }
 
 export function bleRunning(): boolean {
