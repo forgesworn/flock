@@ -12,7 +12,7 @@ boundaries sit. Feature state is current as of 2026-07-17;
 │  offline maps · lock/decoy · signer · relay transport               │
 └───────────────┬─────────────────────────────────────────────────────┘
                 │ imports
-┌───────────────▼─ @forgesworn/flock (src/) ── pure, tested TS lib ───┐
+┌───────────────▼─ @forgesworn/flock (flock-kit) ── pure, tested TS ──┐
 │  policy/fences · signals · safety state · lost/find · radar         │
 └───────────────┬─────────────────────────────────────────────────────┘
                 │ extends
@@ -43,7 +43,7 @@ host      ▶ static PWA; canonical Caddy access logging is disabled
   not itself proof of an audit; `SECURITY.md` records the review and release
   evidence that can actually be substantiated.
 
-### flock library — `@forgesworn/flock` (`src/`)
+### Flock library — `@forgesworn/flock` (`forgesworn/flock-kit`)
 - **What:** nineteen Flock additions: location policy (`geofence`, `noreport`,
   `policy`, `signals`); group safety state (`nightout`, `checkin`, `trail`,
   `buzz`, `allclear`, `fences`, `rendezvous`, `meeting`, `disband`, `offgrid`,
