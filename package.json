@@ -87,7 +87,7 @@
     "geohash-kit": "^1.5.1",
     "globals": "^17.7.0",
     "jsqr": "^1.4.0",
-    "keystore-kit": "file:vendor/keystore-kit-0.1.0.tgz",
+    "keystore-kit": "git+ssh://git@github.com/forgesworn/keystore-kit.git#dea195d70db486fccdab4b18d2c610f60ba554cd",
     "maplibre-gl": "^5.20.2",
     "nostr-tools": "^2.23.3",
     "nsec-tree": "^1.5.1",

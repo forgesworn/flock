@@ -528,16 +528,16 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   sealed state, the decoy shows **no PIN screen** (no tell), unhide boots
   plaintext with a one-tap **re-confirm** card that re-wraps our secret even
   over a keystore blob someone replaced inside the decoy. Excluded from
-  backups (device-specific). Consumed as a **vendored tarball**
-  (`vendor/keystore-kit-0.1.0.tgz`) until the kit is published — swap to a
-  version range after `npm publish`. 8 unit tests (`store.rest.test.ts`) +
+  backups (device-specific). Consumed from an immutable canonical provider SHA
+  until the kit is published — swap to a version range after `npm publish`.
+  8 unit tests (`store.rest.test.ts`) +
   2 e2es (PIN gate + live traffic after unlock; the full lock × decoy
   composition). Design: `docs/plans/2026-07-02-app-lock.md`. WebAuthn-PRF
   biometric unlock is wired in the kit but waits for real hardware (Tier 2).
   - [ ] **Publish keystore-kit to npm** (Darren: `npm login && npm publish` in
     the kit repo — its gates are green; consider flipping the repo public to
-    match the sibling kits) → then swap flock's vendored
-    `vendor/keystore-kit-0.1.0.tgz` dep to a version range and delete `vendor/`.
+    match the sibling kits) → then swap Flock's immutable Git dependency to a
+    version range.
 - [x] **BLE-nearby transport** — the first rung of the off-relay ladder (opaque
   `kind:1059` wraps phone-to-phone over Bluetooth LE when circle members are
   co-located; no relay, no cell, no internet). **Strictly additive** — native-only,
