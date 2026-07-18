@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { rotationDue, refreshDue, ROTATION_PERIOD_SEC, ROTATION_STAGGER_SEC, ROTATION_REFRESH_SEC } from './rotation'
+import { rotationDue, refreshDue, ROTATION_PERIOD_SEC, ROTATION_STAGGER_SEC, ROTATION_REFRESH_SEC } from '@forgesworn/roost-kit'
 
 const A = 'a'.repeat(64)
 const B = 'b'.repeat(64)

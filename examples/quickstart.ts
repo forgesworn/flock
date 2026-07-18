@@ -72,7 +72,7 @@ if (plan.action !== 'withhold' && signalType && signalType !== 'help') {
   })
   console.log('unsigned kind-%d breach signal ready', breachEvent.kind)
   // → finalizeEvent(breachEvent, secretKey) with nostr-tools, then NIP-59
-  //   gift-wrap it (MANDATORY — FLOCK.md §3.3; the PWA uses app/src/giftwrap.ts,
+  //   gift-wrap it (MANDATORY — FLOCK.md §3.3; the PWA uses @forgesworn/roost-kit,
   //   external consumers can use nostr-tools' nip59), then publish the wrap.
 }
 

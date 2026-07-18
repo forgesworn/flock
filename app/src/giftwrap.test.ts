@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { generateSecretKey } from 'nostr-tools/pure'
 import { makeLocalSigner } from './signer'
-import { giftWrap, giftUnwrap, rawNip44Decrypt, WRAP_EXPIRY_SECONDS } from './giftwrap'
+import { giftWrap, giftUnwrap, rawNip44Decrypt, WRAP_EXPIRY_SECONDS } from '@forgesworn/roost-kit'
 import { deriveInbox } from './keys'
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')

@@ -3,10 +3,11 @@
 // real, public Nostr identity never lands on the wire. The seal is signed by the
 // member's signer (LocalSigner or Signet), so a key in a bunker works too.
 
-import { giftWrap, giftUnwrap, rawNip44Decrypt } from './giftwrap'
+import { giftWrap, giftUnwrap, rawNip44Decrypt } from '@forgesworn/roost-kit'
 import { personalInboxTag } from './keys'
 import { parseMeetingShare, type MeetingShare } from '@forgesworn/flock'
-import type { FlockSigner, SignedEvent } from './signer'
+import type { SignedEvent } from '@forgesworn/roost-kit'
+import type { FlockSigner } from './signer'
 import type { Mode } from './store'
 
 export interface InvitePayload {
