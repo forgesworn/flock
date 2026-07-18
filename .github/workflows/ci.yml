@@ -35,7 +35,7 @@ jobs:
       - run: npm run test:coverage
 
   # Kotlin native publish pipeline — golden-vector parity against the JS impl,
-  # incl. the reverse stage (native/vectors/verify-kotlin.test.ts consumes the
+  # incl. the reverse stage (compatibility/v1/verify-kotlin.test.ts consumes the
   # kotlin-wraps.json this emits). JDK 21 only; no Android SDK. Kotlin and JS
   # run in this same job so the gitignored generated wraps cannot be skipped.
   native:
@@ -56,7 +56,7 @@ jobs:
       - run: npm ci
       - run: ./gradlew --console=plain test
         working-directory: native/crypto-tests
-      - run: npx vitest run native/vectors/verify-kotlin.test.ts
+      - run: npx vitest run compatibility/v1/verify-kotlin.test.ts
 
   e2e:
     runs-on: ubuntu-latest
