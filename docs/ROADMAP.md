@@ -556,6 +556,11 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
     APK installed both devices). A **NOTIFY** characteristic carries server→client,
     so re-enabled **role arbitration** gives one link per pair (BLE caps ~7 conns).
     A hop-count envelope floods/relays in crowd mode; discreet stays single-hop.
+  - [x] **Shared native transport extraction** — the reusable Android radio,
+    chunking, bounded reassembly, arbitration and relay now come from the
+    immutable `capacitor-mesh-ble` Git dependency. Flock retains only rotating
+    discovery identity, hop policy and opaque gift-wrap integration; the 1,467-line
+    app-local plugin was deleted.
   - [x] **Slice 3 — JS mesh integration** — `syncBle` picks discreet (per-circle
     advertId) vs **crowd mesh** (common daily `meshUuid`) from festival "find each
     other"; `onBleFrame` decrypts across **all** circles; festival↔mesh wired.

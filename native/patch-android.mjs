@@ -18,7 +18,7 @@
 //    in the browser. autoVerify checks the site's /.well-known/assetlinks.json
 //    (shipped in app/public, so every deploy serves it) against the APK's
 //    signing cert; native/deeplink.ts feeds the arriving URL to the app.
-import { readFileSync, writeFileSync, copyFileSync, cpSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync, cpSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -32,9 +32,11 @@ const manifestPath = resolve(here, '../android/app/src/main/AndroidManifest.xml'
 // the app-local plugin (npm plugins auto-register; this one can't).
 const JAVA_SRC = resolve(here, 'android-src')
 const JAVA_DEST = resolve(here, '../android/app/src/main/java/cc/trotters/flock')
-for (const f of ['StayReachableService.java', 'StayReachablePlugin.java', 'FlockNotifyPlugin.java', 'FlockBlePlugin.java', 'FlockOrbotPlugin.java', 'MainActivity.java']) {
+for (const f of ['StayReachableService.java', 'StayReachablePlugin.java', 'FlockNotifyPlugin.java', 'FlockOrbotPlugin.java', 'MainActivity.java']) {
   copyFileSync(resolve(JAVA_SRC, f), resolve(JAVA_DEST, f))
 }
+const retiredBlePlugin = resolve(JAVA_DEST, 'FlockBlePlugin.java')
+if (existsSync(retiredBlePlugin)) unlinkSync(retiredBlePlugin)
 console.error('copied stay-reachable native sources into android/')
 
 // Kotlin sources: the pure publish core (shared with native/crypto-tests) and
@@ -64,12 +66,6 @@ const PERMISSIONS = [
   // the alarm still sounds on the alarm audio stream, through ring-silent.
   'android.permission.USE_FULL_SCREEN_INTENT',
   'android.permission.ACCESS_NOTIFICATION_POLICY',
-  // BLE-nearby transport (FlockBlePlugin): phone-to-phone off-relay delivery when
-  // circle members are co-located. ADVERTISE + CONNECT are bare; SCAN carries
-  // neverForLocation (we never derive location from BLE) and is added separately
-  // below with that flag. flock already declares FINE/COARSE location (geofencing).
-  'android.permission.BLUETOOTH_ADVERTISE',
-  'android.permission.BLUETOOTH_CONNECT',
   // Radar guide haptics (RadarGuideService) — and it lets the WebView's own
   // navigator.vibrate work too. Normal install-time permission, no prompt.
   'android.permission.VIBRATE',
@@ -86,15 +82,6 @@ for (const p of PERMISSIONS) {
     xml = xml.replace('</manifest>', `    <uses-permission android:name="${p}" />\n</manifest>`)
     changed = true
   }
-}
-
-// BLUETOOTH_SCAN needs the neverForLocation flag (a plain name-only <uses-permission>
-// can't express it), and BLE is declared as an optional feature. Idempotent.
-if (!xml.includes('BLUETOOTH_SCAN')) {
-  xml = xml.replace('</manifest>',
-    `    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />\n` +
-    `    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />\n</manifest>`)
-  changed = true
 }
 
 if (xml.includes('android:allowBackup="true"')) {

@@ -52,6 +52,10 @@ files into `native/` before building.
 - **`background.ts`** — permission and plugin watcher bridge. It forwards fixes
   into the WebView while JavaScript is alive, but it is not the authoritative
   locked-phone publisher: Android can suspend that JavaScript path.
+- **`ble.ts` + `capacitor-mesh-ble`** — Flock computes rotating discovery UUIDs,
+  hop policy and opaque NIP-59 frames; the pinned shared package owns the native
+  Android radio, single-link arbitration, chunking, relay and teardown. Capacitor
+  auto-registers the package, so `patch-android.mjs` no longer copies a BLE plugin.
 - **`FlockLocationService` + `FlockPublisher`**
   (`android-src/kotlin-android/` + `android-src/kotlin/`) — the production
   background path. The app mirrors the minimum encrypted configuration through
