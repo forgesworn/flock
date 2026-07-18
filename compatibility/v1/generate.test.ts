@@ -13,7 +13,7 @@ import { fromNsec, derive } from 'nsec-tree'
 import { getPublicKey, finalizeEvent } from 'nostr-tools/pure'
 import { getConversationKey, encrypt as nip44encrypt, decrypt as nip44decrypt } from 'nostr-tools/nip44'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from '@forgesworn/roost-kit'
-import { deriveInbox } from '../../app/src/keys'
+import { deriveInbox } from '@forgesworn/covey-kit'
 import { buildLocationSignal } from '@forgesworn/flock'
 
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), 'vectors.json')

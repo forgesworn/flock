@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { makeLocalSigner } from './signer'
 import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildMeetingExactWrap, readMeetingExactWrap, buildDmWrap, readDmWrap, buildPrivateLocationWrap, readPrivateLocationWrap, type InvitePayload } from './invite'
-import { personalInboxTag } from './keys'
+import { personalInboxTag } from '@forgesworn/covey-kit'
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 const signer = () => makeLocalSigner(hex(generateSecretKey()))

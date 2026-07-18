@@ -14,7 +14,7 @@ separate from the hosting/deploy view in `docs/ARCHITECTURE.md`.
 | Geo primitives | `geohash-kit` | `@forgesworn/flock/geofence`, `app/src/app.ts`, `app/src/meetingPoint.ts` | Haversine distance, point-in-polygon, geohash encoding/decoding, bounds, and privacy precision controls. |
 | Fair meeting points | `rendezvous-kit` | `app/src/meetingPoint.ts`, `app/src/venues.ts` | On-device isochrone/fairness primitives and venue search boundary for meeting-point suggestions. |
 | Sign-in/key custody | `signet-login` | `app/src/app.ts`, `app/src/signer.ts`, `app/src/signin.ts` | Remote signer path for Signet, NIP-07, Amber, `bunker://`, and `nostrconnect://`; raw `nsec` paste is deliberately excluded. |
-| Deterministic personas/epochs | `nsec-tree` | `app/src/keys.ts`, `app/src/wordcode.ts`; also a `canary-kit` dependency | Circle seed derivation, reseed epochs, rotating group inbox keys, and backup word-code derivation. |
+| Deterministic personas/epochs | `@forgesworn/covey-kit` over `nsec-tree` | Canonical provider dependency | Circle seed derivation, reseed epochs, rotating group inbox keys, and word-code derivation. |
 | Local key-at-rest protection | `keystore-kit` | `app/src/lock.ts` | App lock: PIN-wrapped storage secret, grace unlock, burn/reset paths, encrypted persisted state. |
 | Compatible remote signer target | `heartwood` | no package import; reachable through generic NIP-46/bunker support | A self-hosted Heartwood signer can connect through the Signet/NIP-46 path today. Per-circle Heartwood personas are still future work. |
 

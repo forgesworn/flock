@@ -11,7 +11,7 @@ import {
   buildWordInviteDeletion,
   suggestWords,
   type WordInviteRef,
-} from './wordcode'
+} from '@forgesworn/covey-kit'
 
 describe('word-code invite — speakable code, secret never in the code', () => {
   it('turns entropy into N valid, deterministic words (no modulo bias: 65536 % 2048 = 0)', () => {
