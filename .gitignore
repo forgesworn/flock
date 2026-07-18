@@ -30,7 +30,7 @@ native/keystore.properties
 native/release-signing-key
 native/crypto-tests/.gradle/
 native/crypto-tests/build/
-native/vectors/kotlin-wraps.json
+compatibility/v1/kotlin-wraps.json
 
 # Env & secrets
 .env

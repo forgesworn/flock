@@ -187,7 +187,7 @@ copy the new Kotlin sources; apply the Kotlin Gradle plugin + add pinned deps
 
 ## Verification (non-negotiable)
 
-1. **Golden vectors, JS → Kotlin.** A vitest script writes `vectors.json` from
+1. **Golden vectors, JS → Kotlin.** The public `compatibility/v1/` vitest suite writes `vectors.json` from
    the existing JS implementations: byte-compared for everything deterministic
    (nsec-tree `fromNsec`+`derive`, `deriveInbox`, beacon key, group-id hash,
    geohash encode, event-id hashing); decrypt-direction round-trips for the

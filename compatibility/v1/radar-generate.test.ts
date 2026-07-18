@@ -1,4 +1,4 @@
-// Golden vectors for the native (Kotlin) radar guidance core. The radar rules
+// Public compatibility vectors for the native (Kotlin) radar guidance core. The radar rules
 // are pure and deterministic, so every case is directly comparable: the same
 // inputs must produce the same guidance state, cue and numbers on both sides —
 // the locked-phone beeper must never be more confident than the tested JS

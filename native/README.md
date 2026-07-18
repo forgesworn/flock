@@ -132,7 +132,7 @@ kills the process, app-closed alerts are not promised.
 
 `npm run test:native` runs the pure Kotlin policy/crypto JVM suite. That suite
 emits Kotlin-built wraps; CI then runs
-`native/vectors/verify-kotlin.test.ts` in the same job to prove the untouched
+`compatibility/v1/verify-kotlin.test.ts` in the same job to prove the untouched
 JavaScript path can unwrap/decrypt them. This is wire compatibility, not device
 evidence. The real-hardware matrix remains in `../docs/ROADMAP.md`.
 

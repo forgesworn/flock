@@ -78,7 +78,7 @@ device coverage; see `docs/ROADMAP.md`.
 Background publish is native (Kotlin, `native/android-src/kotlin*`): while the
 app is backgrounded the fix→policy→gift-wrap→relay pipeline runs without the
 WebView (which Android suspends — see docs/plans/2026-07-05-native-background-publish-design.md).
-Wire-format parity is enforced by golden vectors (`native/vectors/`,
+Wire-format parity is enforced by public golden vectors (`compatibility/v1/`,
 `npm run gen:vectors`) and JVM tests (`npm run test:native`, JDK 21, no Android
 SDK needed). The pure core under `native/android-src/kotlin/` must never import
 `android.*`.

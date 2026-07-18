@@ -76,7 +76,7 @@ and shipped (release `0294b8c` live on flock.forgesworn.dev).
 - [x] **Native background-publish pipeline** (PR #1, merged) — while the app is
   backgrounded the fix→policy→gift-wrap→relay pipeline runs **natively in Kotlin**
   (`native/android-src/kotlin*`), bypassing the WebView JS that Android suspends.
-  Wire-format parity with the JS path is held by golden vectors (`native/vectors/`)
+  Wire-format parity with the JS path is held by public golden vectors (`compatibility/v1/`)
   + a JVM test suite in CI (JDK 21, no Android SDK). The pure core
   (`native/android-src/kotlin/`) never imports `android.*`. Design:
   `docs/plans/2026-07-05-native-background-publish-design.md`.
@@ -302,7 +302,7 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
     vibration following the SAME pure rules: the guidance core is ported to
     Kotlin (`native/android-src/kotlin/cc/trotters/flock/radar/RadarCore.kt`,
     no `android.*`) and pinned to the JS module by golden vectors
-    (`native/vectors/radar-vectors.json`, `npm run gen:vectors`) + JVM tests
+    (`compatibility/v1/radar-vectors.json`, `npm run gen:vectors`) + JVM tests
     (6, `npm run test:native`). While radar runs on the shell, native owns ALL
     audio/haptics (no double-beep) and JS keeps the visuals; target updates
     are pushed event-driven from the beacon path (`radarBeaconLanded`), so a

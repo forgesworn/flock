@@ -1,4 +1,4 @@
-// Golden vectors for the native (Kotlin) publish pipeline. Deterministic
+// Public compatibility vectors for the native (Kotlin) publish pipeline. Deterministic
 // pieces are byte-compared by the Kotlin tests; randomised pieces (AES-GCM,
 // NIP-44, full wraps) are verified in the decrypt direction. Regenerate with
 // `npm run gen:vectors` ONLY when the wire format deliberately changes.

@@ -7,7 +7,7 @@ import java.io.File
 import java.security.SecureRandom
 
 /** Emits Kotlin-built wraps for the JS reverse-verification stage
- *  (native/vectors/verify-kotlin.test.ts). Gitignored output. */
+ *  (compatibility/v1/verify-kotlin.test.ts). Gitignored output. */
 class EmitWrapsTest {
     @Test
     fun `emit wraps for JS verification`() {
@@ -34,6 +34,6 @@ class EmitWrapsTest {
         out.put(JSONObject()
             .put("wrapJson", JSONObject(coverJson))
             .put("expect", JSONObject().put("geohash", "deadbeef").put("precision", 6).put("t", "cover")))
-        File("../vectors/kotlin-wraps.json").writeText(out.toString(2) + "\n")
+        File("../../compatibility/v1/kotlin-wraps.json").writeText(out.toString(2) + "\n")
     }
 }
