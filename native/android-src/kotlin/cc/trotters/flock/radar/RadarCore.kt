@@ -2,7 +2,7 @@
 // guidance obeys the SAME tested honesty rules as the foreground tracker:
 // a coarse share never yields a precise pointer, a stale target never sounds
 // confident, arrival silences. Parity with the TS module is held by golden
-// vectors (native/vectors/radar-vectors.json, `npm run gen:vectors:radar`)
+// vectors (compatibility/v1/radar-vectors.json, `npm run gen:vectors`)
 // and JVM tests (native/crypto-tests). Never imports android.*.
 package cc.trotters.flock.radar
 

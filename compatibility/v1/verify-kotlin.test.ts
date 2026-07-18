@@ -1,4 +1,4 @@
-// Reverse golden-vector stage: wraps built by the KOTLIN pipeline must decrypt
+// Reverse public-vector stage: wraps built by the KOTLIN pipeline must decrypt
 // through the untouched JS path with zero special-casing (the design doc's
 // criterion). Skips when the Kotlin artefact hasn't been generated
 // (`npm run test:native` produces it).

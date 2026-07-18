@@ -1,7 +1,7 @@
 // Parity for the radar guidance core: the Kotlin port must reproduce the JS
 // module's outputs exactly (states, cues, numbers) so locked-phone guidance is
 // never more confident than the tested foreground tracker. Vectors come from
-// native/vectors/radar-vectors.json (`npm run gen:vectors`).
+// compatibility/v1/radar-vectors.json (`npm run gen:vectors`).
 package cc.trotters.flock.radar
 
 import cc.trotters.flock.publish.LatLng
@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private fun vectors(): JSONObject = JSONObject(File("../vectors/radar-vectors.json").readText())
+private fun vectors(): JSONObject = JSONObject(File("../../compatibility/v1/radar-vectors.json").readText())
 
 private fun JSONObject.latLng(key: String): LatLng? {
     val o = optJSONObject(key) ?: return null

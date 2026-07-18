@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertEquals
 
-fun loadVectors(): JSONObject = JSONObject(File("../vectors/vectors.json").readText())
+fun loadVectors(): JSONObject = JSONObject(File("../../compatibility/v1/vectors.json").readText())
 
 class GeohashTest {
     @Test
