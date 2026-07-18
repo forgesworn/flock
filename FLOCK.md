@@ -192,7 +192,7 @@ The circle **seed** is the shared secret. Two distribution paths:
   can't be scanned, no npub exchanged yet): the inviter parks a fresh, one-time
   **reference** keypair's secret — never the circle seed — encrypted under a
   scrypt-stretched code, as a plain (not gift-wrapped) kind-`8078` event tagged
-  by a hash of the code (`app/src/wordcode.ts`). The real invite still travels
+  by a hash of the code (`@forgesworn/covey-kit`). The real invite still travels
   as an ordinary gift-wrapped `{t:'invite', …}` rumour (above), addressed to
   that reference's pubkey instead of a real npub. A relay that captures the
   low-entropy-protected event learns nothing but a disposable handle; the

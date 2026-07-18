@@ -8,7 +8,7 @@ import { encryptEnvelope, decryptEnvelope } from 'canary-kit/sync'
 import { decode as nip19decode } from 'nostr-tools/nip19'
 import type { Geofence, NoReportZone, MemberBeacon } from '@forgesworn/flock'
 import { resolveRelays } from './relays'
-import { deriveCircleSeed } from './keys'
+import { deriveCircleSeed } from '@forgesworn/covey-kit'
 
 export type Mode = 'family' | 'nightout'
 /** A local identity has `skHex`; a Signet identity is `pk`-only (key in the signer). */

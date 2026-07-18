@@ -6,7 +6,21 @@ import * as svc from './services'
 import { makeLocalSigner, makeSignetSigner, type FlockSigner } from './signer'
 import { buildSignInOptions } from './signin'
 import { PRIVATE_RELAYS, ONION_RELAYS, parseRelayList, unknownRelays, effectiveRelays } from './relays'
-import { deriveCircleSeed, deriveInbox, personalInboxTag } from './keys'
+import {
+  WORD_INVITE,
+  buildWordInviteDeletion,
+  buildWordInviteRef,
+  deriveCircleSeed,
+  deriveInbox,
+  deriveWordCodeSeed,
+  newWordCode,
+  normaliseWordCode,
+  personalInboxTag,
+  readWordInviteRef,
+  suggestWords,
+  wordInviteParkKey,
+  wordInviteTag,
+} from '@forgesworn/covey-kit'
 import { giftWrap, giftUnwrap, rawNip44Decrypt, rotationDue, refreshDue } from '@forgesworn/roost-kit'
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
@@ -17,7 +31,6 @@ import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, meshUuidNow } from './bleId'
 import { createMeshBuffer, remember as rememberMeshWrap, liveEntries as liveMeshEntries, type MeshBufferState } from './meshBuffer'
-import { WORD_INVITE, newWordCode, normaliseWordCode, deriveWordCodeSeed, wordInviteTag, wordInviteParkKey, buildWordInviteRef, readWordInviteRef, buildWordInviteDeletion, suggestWords } from './wordcode'
 import { classifyScan, shouldOfferAppHandoff } from './joinassist'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'

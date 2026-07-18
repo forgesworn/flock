@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deriveCircleSeed, personalInboxTag } from './keys'
+import { deriveCircleSeed, personalInboxTag } from '@forgesworn/covey-kit'
 
 const ROOT = '11'.repeat(32)
 const ROOT2 = '22'.repeat(32)
