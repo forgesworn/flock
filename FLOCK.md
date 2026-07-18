@@ -84,7 +84,7 @@ A circle's safe places are shared as an ordinary encrypted signal — **not** a
 replaceable kind-30078 stored event, whose stable `d`-tag would hand the relay a
 long-lived correlator. Post gift-wrap-everything, the fence set rides the same
 opaque `kind:1059` path as every other signal. `buildFencesSignal`
-(`src/fences.ts`) encrypts the **complete** set with the group envelope key:
+(`@forgesworn/flock/fences`) encrypts the **complete** set with the group envelope key:
 
 ```jsonc
 { "fences": [ /* Geofence[] */ ], "updatedAt": 1781913600, "by": "<editor pubkey hex>" }
@@ -103,7 +103,7 @@ Each device still decrypts and evaluates membership **locally**; raw coordinates
 never leave the device as plaintext. No-report zones are the deliberate opposite:
 **never transmitted** at all (see `docs/PRIVACY.md`).
 
-Fence shapes (`src/geofence.ts`):
+Fence shapes (`@forgesworn/flock/geofence`):
 
 ```jsonc
 // circle
@@ -263,7 +263,7 @@ beacon domain (§6 invariant 3). Rules:
 
 ## 4. Disclosure-on-event policy
 
-The privacy core (`src/policy.ts`, `decideEmission`). Location is plaintext only
+The privacy core (`@forgesworn/flock/policy`, `decideEmission`). Location is plaintext only
 on the holder's own device; it is encrypted-and-published only when an event
 justifies it. Precedence (strongest intent first):
 

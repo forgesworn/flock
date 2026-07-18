@@ -14,7 +14,7 @@ import { getPublicKey, finalizeEvent } from 'nostr-tools/pure'
 import { getConversationKey, encrypt as nip44encrypt, decrypt as nip44decrypt } from 'nostr-tools/nip44'
 import { giftWrap, giftUnwrap, rawNip44Decrypt } from '../../app/src/giftwrap'
 import { deriveInbox } from '../../app/src/keys'
-import { buildLocationSignal } from '../../src/signals'
+import { buildLocationSignal } from '@forgesworn/flock'
 
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), 'vectors.json')
 const toHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')

@@ -7,11 +7,11 @@ separate from the hosting/deploy view in `docs/ARCHITECTURE.md`.
 
 | Layer | Technology | Where it is used | Role in flock |
 |---|---|---|---|
-| Public package | `@forgesworn/flock` | `src/`, `package.json` exports | Private/unpublished pure TypeScript location-safety package: nineteen Flock modules covering geofences, policy, signals, safety state, lost/find, radar, rendezvous, meetings, and spoken verification. |
-| Safety/crypto foundation | `canary-kit` | `src/index.ts`, `src/signals.ts`, `src/*` signal modules | Re-exported by flock; provides groups, beacons, duress, spoken-verification risk estimates, Nostr signal builders, NIP-59/NIP-44 helpers, and sync envelopes. |
+| Shared package | `@forgesworn/flock` | private `forgesworn/flock-kit`, pinned by full commit SHA | Pure TypeScript location-safety package: nineteen Flock modules covering geofences, policy, signals, safety state, lost/find, radar, rendezvous, meetings, and spoken verification. |
+| Safety/crypto foundation | `canary-kit` | re-exported by `@forgesworn/flock` | Provides groups, beacons, duress, spoken-verification risk estimates, Nostr signal builders, NIP-59/NIP-44 helpers, and sync envelopes. |
 | Root word primitive | `spoken-token` | via `canary-kit` | Underlying HMAC-counter-to-words primitive used by canary-style verification and duress words. |
 | Recovery primitive present in graph | `@forgesworn/shamir-words` | transitive dependency of `canary-kit` | Installed as part of the canary stack, but flock has not wired it into a user-facing circle recovery flow yet. |
-| Geo primitives | `geohash-kit` | `src/geofence.ts`, `app/src/app.ts`, `app/src/meetingPoint.ts` | Haversine distance, point-in-polygon, geohash encoding/decoding, bounds, and privacy precision controls. |
+| Geo primitives | `geohash-kit` | `@forgesworn/flock/geofence`, `app/src/app.ts`, `app/src/meetingPoint.ts` | Haversine distance, point-in-polygon, geohash encoding/decoding, bounds, and privacy precision controls. |
 | Fair meeting points | `rendezvous-kit` | `app/src/meetingPoint.ts`, `app/src/venues.ts` | On-device isochrone/fairness primitives and venue search boundary for meeting-point suggestions. |
 | Sign-in/key custody | `signet-login` | `app/src/app.ts`, `app/src/signer.ts`, `app/src/signin.ts` | Remote signer path for Signet, NIP-07, Amber, `bunker://`, and `nostrconnect://`; raw `nsec` paste is deliberately excluded. |
 | Deterministic personas/epochs | `nsec-tree` | `app/src/keys.ts`, `app/src/wordcode.ts`; also a `canary-kit` dependency | Circle seed derivation, reseed epochs, rotating group inbox keys, and backup word-code derivation. |
@@ -26,7 +26,7 @@ flowchart TB
   appEdge["App edge\nstate, signer, transport, storage, map, BLE/native"]
   flockPkg["@forgesworn/flock\nroot import and subpath exports"]
 
-  subgraph modules["Pure flock modules in src/"]
+  subgraph modules["Pure flock modules in forgesworn/flock-kit"]
     geofence["geofence + noreport\ncontainment and privacy zones"]
     policy["policy\ndisclosure decision"]
     signals["signals + buzz + allclear + joined + lost + findping\nbeacons and circle signals"]

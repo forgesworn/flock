@@ -52,7 +52,7 @@ not this list's original `mesh-kit` framing.
    and the still heartbeat); a low-rate cover-traffic publish fills the quiet
    stretch while stationary — wire-identical to a real beacon, carrying only
    random filler, silently discarded by every receiver (`app/src/cadence.ts`,
-   `src/signals.ts`'s `cover` type). Shipped 2026-07-04 for the moving-vs-still
+   `@forgesworn/flock/signals`'s `cover` type). Shipped 2026-07-04 for the moving-vs-still
    swing (audit F1); cover traffic through a fully withheld/off period ("silence
    vs activity") is not yet built.
 

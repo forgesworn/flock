@@ -2,7 +2,7 @@
 // person, one dominant scope, one obvious Stop. The controller owns the DOM
 // overlay, the compass/orientation listener, the Web Audio beeper and the
 // vibration mirror; every DECISION (state, cue, movement, honesty rules) comes
-// from the pure library module (src/radar.ts) so it stays tested.
+// from the pure library module (@forgesworn/flock/radar) so it stays tested.
 //
 // Privacy: this consumes ONLY the already-disclosed beacon the host hands it —
 // it never publishes, never changes anyone's precision or cadence, and a

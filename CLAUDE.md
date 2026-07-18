@@ -26,16 +26,16 @@ Only product requirements and Flock's own threat-model decisions belong here.
 
 ## Commands
 
-- `npm run build` — compile the library (`src/` → `dist/`)
-- `npm test` — run the complete Vitest suite
+- `npm run build` — build the PWA → `dist-app/` and enforce bundle budgets
+- `npm test` — run the app, native bridge, and compatibility Vitest suites
 - `npm run test:e2e` — two-person Playwright e2e over the configured relay. Local
   runs default to the production-shaped relay; CI starts a fresh RAM-only local
   relay. Use `FLOCK_E2E_RELAY=wss://…` for an explicit pre-deploy relay smoke pass;
   target one spec with `-- e2e/<file>.spec.ts` (the full suite is >10 min).
-- `npm run typecheck` — strict library TypeScript project
+- `npm run typecheck` — strict app/native TypeScript project
 - `npm run lint` — all project TypeScript/JavaScript
-- `npm run test:coverage` — complete Vitest suite + enforced 80% coverage gates
-- `npm run smoke` — build + run the Nostr transport round-trip smoke test
+- `npm run test:coverage` — app/native/compatibility Vitest suite with coverage
+- `npm run smoke` — build + exercise the pinned `@forgesworn/flock` package
   (in-process; set `FLOCK_RELAY=wss://…` to also round-trip via a live relay)
 - `npm run dev` — Vite dev server for the PWA (`app/`)
 - `npm run build:app` — build the PWA → `dist-app/`
@@ -45,15 +45,19 @@ Only product requirements and Flock's own threat-model decisions belong here.
 
 ## Structure
 
-### Library (`src/`) — pure, framework-free, tested
+### Shared library (`@forgesworn/flock`) — pure, framework-free, tested
 
-- `geofence.ts` — on-device circle/polygon fence evaluation; `isBreach` (haversine + ray-casting)
-- `policy.ts` — disclosure-on-event decision: `withhold | coarse | full` by mode/trigger/breach
-- `signals.ts` — `beacon`/`breach`/`pickup` beacons + `help` duress alert → kind-20078 events
-- `nightout.ts` — ephemeral groups (NIP-40), presence ("still out / gone home"), separation ("lost")
-- `joined.ts` / `lost.ts` / `findping.ts` / `radar.ts` — current app support
-- `index.ts` — barrel; re-exports the full `canary-kit` + `canary-kit/nostr`
-  surface plus nineteen Flock additions
+Canonical source, tests, package exports, and public compatibility vectors live
+in the private `forgesworn/flock-kit` repository. This app pins that repository
+by full commit SHA in `package.json`; do not restore a local `src/` alias or edit
+installed dependency files here. Protocol changes begin in `flock-kit`, pass its
+package gates, then land here as an explicit SHA update.
+
+- `@forgesworn/flock/geofence` — on-device circle/polygon fence evaluation
+- `@forgesworn/flock/policy` — disclosure-on-event decisions
+- `@forgesworn/flock/signals` — location and duress signal construction
+- `@forgesworn/flock/radar` — distance, bearing, freshness, and cue decisions
+- `@forgesworn/flock` — full public surface, including the nineteen Flock modules
 
 ### PWA (`app/`) — vanilla TS + Vite
 
@@ -78,18 +82,18 @@ device coverage; see `docs/ROADMAP.md`.
 Background publish is native (Kotlin, `native/android-src/kotlin*`): while the
 app is backgrounded the fix→policy→gift-wrap→relay pipeline runs without the
 WebView (which Android suspends — see docs/plans/2026-07-05-native-background-publish-design.md).
-Wire-format parity is enforced by public golden vectors (`compatibility/v1/`,
-`npm run gen:vectors`) and JVM tests (`npm run test:native`, JDK 21, no Android
-SDK needed). The pure core under `native/android-src/kotlin/` must never import
-`android.*`.
+Wire-format parity is enforced against the public golden vectors owned by
+`flock-kit` and exercised by the consumer fixtures in `compatibility/v1/`, plus
+JVM tests (`npm run test:native`, JDK 21, no Android SDK needed). The pure core
+under `native/android-src/kotlin/` must never import `android.*`.
 
 ## Security-critical paths
 
 Be extra careful when modifying:
 
-- `src/policy.ts` — the disclosure-on-event decision; a wrong default leaks or withholds location.
-- `src/signals.ts` — key domain separation (beacon key vs duress key) must hold.
-- `src/geofence.ts` — breach = outside *every* fence; getting this wrong mis-fires or misses alerts.
+- `@forgesworn/flock/policy` — the disclosure-on-event decision; a wrong default leaks or withholds location.
+- `@forgesworn/flock/signals` — key domain separation (beacon key vs duress key) must hold.
+- `@forgesworn/flock/geofence` — breach = outside *every* fence; getting this wrong mis-fires or misses alerts.
 - `app/src/store.ts` — identity + seed handling, and the **at-rest encryption layer** (App lock): a stray save must never clobber the ciphertext; the drain's kill-switch re-checks must stay. Without the lock, localStorage is plaintext (the in-app note says so).
 - `app/src/lock.ts` / `app/src/decoy.ts` — the App lock (keystore-kit PIN wrap, grace window) and decoy sealing. The decoy must stay observationally identical to a fresh install — including **no PIN screen** and constant-work unlock failures.
 
@@ -104,8 +108,8 @@ Be extra careful when modifying:
 
 - **British English** — colour, initialise, behaviour, licence.
 - **ESM-only** — `"type": "module"`, target ES2022.
-- **TDD** — failing test first, then implement. Library modules stay pure (return new state, no mutation).
+- **TDD** — failing test first, then implement. Shared library modules stay pure (return new state, no mutation).
 - **Geohash encoding + encryption stay at the edge** — the library decides policy and builds events; it does not encode geohashes or own transport (mirrors `canary-kit`).
 - **Git:** `type: description` commits. **No `Co-Authored-By` lines.**
-- The strict TypeScript build covers the library; lint and Vitest cover the
-  wider project, and the PWA (`app/`) is built by Vite.
+- Strict TypeScript, lint, Vitest, Vite bundle budgets, and Playwright cover the
+  consumer app. The provider package has its own build, export, and vector gates.

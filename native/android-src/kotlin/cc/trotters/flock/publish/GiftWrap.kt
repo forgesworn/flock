@@ -11,7 +11,7 @@ import rust.nostr.sdk.Timestamp
 import rust.nostr.sdk.nip44Encrypt
 
 // NIP-59 gift wrap of a kind-20078 beacon signal — the Kotlin twin of
-// app/src/giftwrap.ts giftWrap + src/signals.ts buildLocationSignal.
+// app/src/giftwrap.ts giftWrap + @forgesworn/flock/signals buildLocationSignal.
 // Backdating, expiry window and tag order must match the JS byte-for-byte
 // in behaviour (values are randomised; structure is fixed).
 

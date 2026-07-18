@@ -1,5 +1,4 @@
 import { defineConfig } from 'vite'
-import { resolve } from 'node:path'
 import { execSync } from 'node:child_process'
 
 // Build identity: the short git hash, stamped into the bundle (shown in the
@@ -29,8 +28,7 @@ const FLOCK_BUILT_AT = !gitDirty && commitEpoch
   ? new Date(Number(commitEpoch) * 1000).toISOString().slice(0, 10)
   : new Date().toISOString().slice(0, 10)
 
-// The PWA lives in app/ and consumes the flock library straight from src/
-// (aliased), so the app always tracks the latest library code in dev.
+// The PWA lives in app/ and consumes the immutable @forgesworn/flock package.
 export default defineConfig({
   root: 'app',
   base: './',
@@ -46,11 +44,6 @@ export default defineConfig({
       },
     },
   ],
-  resolve: {
-    alias: {
-      '@forgesworn/flock': resolve(__dirname, 'src/index.ts'),
-    },
-  },
   build: {
     outDir: '../dist-app',
     emptyOutDir: true,

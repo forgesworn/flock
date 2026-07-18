@@ -6,7 +6,7 @@
  * is genuinely flagged lost — pre-authorisation is what keeps the disclosure
  * originating from the device's own settings (FLOCK §6.4, and the roadmap's
  * permanent non-goal of remote "start sharing"). This module is the pure gate;
- * the wire signal is `src/findping.ts` in the library, and the app wires the
+ * the wire signal is `@forgesworn/flock/findping`, and the app wires the
  * cancel window + one-shot answer around it.
  *
  * See `docs/plans/2026-07-04-remote-exact-ping.md`.

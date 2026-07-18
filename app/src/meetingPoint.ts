@@ -19,7 +19,7 @@ import {
   type RoutingEngine, type Isochrone, type RouteMatrix, type RendezvousSuggestion, type Venue,
 } from 'rendezvous-kit'
 
-// Straight-line speeds mirror src/rendezvous.ts's SPEED_KMH (flock's 'transit' is
+// Straight-line speeds mirror @forgesworn/flock/rendezvous's SPEED_KMH (flock's 'transit' is
 // the kit's 'public_transit'), so a meeting-point ETA matches the set-rendezvous one.
 const SPEED_KMH: Record<TransportMode, number> = { walk: 5, cycle: 15, drive: 30, public_transit: 20 }
 
