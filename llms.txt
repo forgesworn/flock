@@ -131,7 +131,7 @@ signing is the caller's job (e.g. `nostr-tools` `finalizeEvent`). Group creation
 the root. See `examples/quickstart.ts` for the full pipeline.
 
 **Gift-wrapping is mandatory before publish** (FLOCK.md §3.3): the library has
-no wrap helper — the PWA wraps every signal via `app/src/giftwrap.ts`
+no wrap helper — the PWA wraps every signal via `@forgesworn/roost-kit`
 (`giftWrap(signer, recipientPk, inner, routeTag?)` → signed kind-1059, NIP-40
 expiry baked in); an external consumer can use `nostr-tools`'s `nip59` module.
 Publishing an unwrapped signal violates the privacy model.

@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { giftUnwrap, rawNip44Decrypt } from '../../app/src/giftwrap'
+import { giftUnwrap, rawNip44Decrypt } from '@forgesworn/roost-kit'
 import { deriveBeaconKey, decryptBeacon } from 'canary-kit'
 
 const here = dirname(fileURLToPath(import.meta.url))
