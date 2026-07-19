@@ -1465,9 +1465,10 @@ function lostCard(c: store.Circle): string {
       <button class="btn primary" data-action="found-phone" data-pk="${me}">It's not lost — I've got it</button>
     </div>`
   }
-  const note = rep.message
-    ? `${esc(nameFor(rep.by))}: “${esc(rep.message)}”`
-    : `${esc(nameFor(rep.by))} flagged it in ${esc(c.name)}. Found this phone? Please help it home, its owner's friends can see roughly where it is.`
+  // Lost reports no longer carry a free-text note. Ignore any legacy `message`
+  // an older client may still send, and always show the fixed prompt — the app
+  // neither composes nor displays free-form text.
+  const note = `${esc(nameFor(rep.by))} flagged it in ${esc(c.name)}. Found this phone? Please help it home, its owner's friends can see roughly where it is.`
   return `<div class="card stack geo-issue" style="margin-top:14px" role="alert">
     <strong>This phone was reported lost</strong>
     <div class="note">${note}</div>
@@ -3004,13 +3005,13 @@ function cancelFindPing(): void {
  *  `message` is the reporter's own note ("left in the blue Uber") shown on the
  *  lost phone's own card instead of the generic text — only meaningful when
  *  marking lost, never on a clear. */
-async function sendLostReport(pk: string, lost: boolean, message?: string): Promise<void> {
+async function sendLostReport(pk: string, lost: boolean): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id || !pk) return
   try {
-    const note = lost ? message?.trim().slice(0, 200) : undefined
-    const report: LostReport = { member: pk, by: id.pk, lost, timestamp: nowSec(), ...(note ? { message: note } : {}) }
+    // No free-text note: a lost report carries only the fixed flag, never prose.
+    const report: LostReport = { member: pk, by: id.pk, lost, timestamp: nowSec() }
     await publishSignal(await buildLostSignal({ groupId: c.id, seedHex: c.seedHex, ...report }), c)
     cstate(c.id).lost.set(pk, report)
     if (!lost && pk === id.pk && beingRung?.circleId === c.id) beingRung = null // "I've got it" stops the ring card
