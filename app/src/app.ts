@@ -1422,13 +1422,14 @@ function fmtChatTime(at: number): string {
   return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
 }
 
-/** Sharing is on but flock isn't battery-exempt: the one setting that makes
- *  locked-screen sharing actually hold. Actionable card, not a silent gap. */
+/** Sharing or stay-reachable is on but flock isn't battery-exempt: the one
+ *  setting that makes locked-screen sharing AND message delivery actually hold.
+ *  Actionable card, not a silent gap. */
 function batteryCard(): string {
-  if (!isNativeShell() || !sharing || batteryExempt !== false) return ''
+  if (!isNativeShell() || (!sharing && !stayReachableOn()) || batteryExempt !== false) return ''
   return `<div class="card stack geo-issue" style="margin-top:14px">
-    <strong>Keep sharing with the screen off</strong>
-    <div class="note">Android pauses flock's connection a few minutes after the phone locks, so your circle would stop seeing you mid-walk. Allow flock to ignore battery optimisation: it's the same setting Signal asks for, and the location toggle still rules what's shared.</div>
+    <strong>Keep flock reachable with the screen off</strong>
+    <div class="note">Android pauses flock's connection a few minutes after the phone locks — your circle would stop seeing you mid-walk, and buzzes and messages would stop arriving (and sending) until you reopen flock. Allow flock to ignore battery optimisation: it's the same setting Signal asks for, and the location toggle still rules what's shared.</div>
     <button class="btn small primary" data-action="battery-allow">Allow</button>
   </div>`
 }
@@ -1753,7 +1754,7 @@ function settingsSections(me: store.Identity, c: store.Circle): string {
     <div class="card stack">
       <div class="row" style="justify-content:space-between">
         <span>Stay reachable when closed</span>
-        <button class="switch${persisted.stayReachable ? ' on' : ''}" data-action="toggle-stay-reachable" role="switch" aria-checked="${!!persisted.stayReachable}"><span class="knob"></span></button>
+        <button class="switch${stayReachableOn() ? ' on' : ''}" data-action="toggle-stay-reachable" role="switch" aria-checked="${stayReachableOn()}"><span class="knob"></span></button>
       </div>
       <div class="note">Keeps flock listening even when it's shut, so a message, buzz or safety alert reaches you on the lock screen — like Signal. It shows a quiet "staying reachable" notification while on and uses a little battery, and it's off whenever flock is hidden. If alerts stop arriving overnight, allow flock to ignore battery optimisation when asked.</div>
       <div class="row" style="justify-content:space-between;margin-top:6px">
@@ -3855,12 +3856,21 @@ async function stopBgWatch(): Promise<void> {
 // A location-free foreground service that keeps flock's process — and thus its
 // already-always-on relay subscription — alive while the app is closed, so an
 // incoming DM/buzz/alert lands as a notification on a locked screen (Signal
-// parity). Opt-in (`persisted.stayReachable`); NEVER runs without a real
-// identity (a decoy/hidden or reset install has none), so its ongoing
-// notification can't become a "fresh install" tell.
+// parity). ON BY DEFAULT once a real identity exists — locked-screen messages
+// are the whole point of a safety app, and without the service Android pauses
+// the connection when the phone locks (missed signals; sends fail until a
+// reload). A user can still turn it off. NEVER runs without a real identity (a
+// decoy/hidden or reset install has none), so its ongoing notification can't
+// become a "fresh install" tell.
+/** Whether the stay-reachable service should run: on by default once there's a
+ *  real identity, unless the user has explicitly turned it off. Unset (a new
+ *  install) counts as on; a decoy / no-identity install is always off. */
+function stayReachableOn(): boolean {
+  return (persisted.stayReachable ?? true) && !!persisted.identity
+}
 async function syncStayReachable(): Promise<void> {
   if (!isNativeShell()) return
-  const want = !!persisted.stayReachable && !!persisted.identity
+  const want = stayReachableOn()
   try {
     const m = await import('../../native/stayReachable')
     if (want) await m.startStayReachable()
@@ -3943,7 +3953,7 @@ function onForeground(): void {
  *  service, and — on enable — ask for the Doze battery exemption without which
  *  an aggressive OEM freezes the service overnight (parity would silently lapse). */
 async function toggleStayReachable(): Promise<void> {
-  persisted.stayReachable = !persisted.stayReachable
+  persisted.stayReachable = !stayReachableOn()
   store.save(persisted)
   render()
   await syncStayReachable()
