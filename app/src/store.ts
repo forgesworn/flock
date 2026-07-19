@@ -55,6 +55,13 @@ export interface Circle {
   /** Geohash precision (4–9) my own beacons are shared at in this circle —
    *  the "location detail" slider. Undefined = 6 (~neighbourhood). */
   sharePrecision?: number
+  /** Device-local default location posture, chosen at create/join:
+   *  `'always'` = share continuously while sharing is on (live tracking);
+   *  `'private'` = disclosure-on-event only — never a continuous beacon; my
+   *  location goes out only when I check in, answer a roll-call, or send an
+   *  explicit share. Undefined = `'always'` (preserves pre-feature behaviour).
+   *  Never synced — each member picks their own posture for this circle. */
+  trackingDefault?: 'always' | 'private'
   /** "Find each other" (festival mode): while set and in the future, MY own beacons
    *  step up to building-level detail so the circle can walk to me in a crowd. A
    *  deliberate, temporary, device-local choice — auto-reverts to the slider at this
@@ -489,7 +496,14 @@ export function createIdentity(): Identity {
   return { skHex: toHex(sk), pk: getPublicKey(sk) }
 }
 
-export function createCircle(name: string, mode: Mode, ownerPk: string, circleRootHex: string, expiresAt?: number): Circle {
+export function createCircle(
+  name: string,
+  mode: Mode,
+  ownerPk: string,
+  circleRootHex: string,
+  expiresAt?: number,
+  prefs?: { trackingDefault?: 'always' | 'private'; sharePrecision?: number },
+): Circle {
   const id = randHex(8)
   return {
     id,
@@ -502,6 +516,8 @@ export function createCircle(name: string, mode: Mode, ownerPk: string, circleRo
     reseededAt: Math.floor(Date.now() / 1000),
     pingConsent: false,
     ...(expiresAt ? { expiresAt } : {}),
+    ...(prefs?.trackingDefault ? { trackingDefault: prefs.trackingDefault } : {}),
+    ...(prefs?.sharePrecision ? { sharePrecision: prefs.sharePrecision } : {}),
   }
 }
 
