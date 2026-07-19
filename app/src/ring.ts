@@ -19,6 +19,8 @@
  * flagged lost.
  */
 
+import { RING_LOST_PHONE_LABEL } from '@forgesworn/flock'
+
 /** Should an incoming buzz be escalated to a loud "ring" on THIS device? */
 export function shouldRing(params: { targetedAtMe: boolean; iAmFlaggedLost: boolean }): boolean {
   return params.targetedAtMe && params.iAmFlaggedLost
@@ -32,4 +34,4 @@ export function shouldRing(params: { targetedAtMe: boolean; iAmFlaggedLost: bool
 export const RING_VIBRATION: number[] = [600, 200, 600, 200, 600, 200, 600]
 
 /** The buzz reason a "Make it ring" tap sends — recognisable on every screen. */
-export const RING_REASON = '🔔 Ringing to find this phone'
+export const RING_REASON = RING_LOST_PHONE_LABEL
