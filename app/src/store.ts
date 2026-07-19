@@ -6,7 +6,15 @@
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { encryptEnvelope, decryptEnvelope } from 'canary-kit/sync'
 import { decode as nip19decode } from 'nostr-tools/nip19'
-import type { Geofence, NoReportZone, MemberBeacon } from '@forgesworn/flock'
+import {
+  coordinationActionFromLabel,
+  isDirectCoordinationAction,
+  isGroupCoordinationAction,
+  type CoordinationAction,
+  type Geofence,
+  type NoReportZone,
+  type MemberBeacon,
+} from '@forgesworn/flock'
 import { resolveRelays } from './relays'
 import { deriveCircleSeed } from '@forgesworn/covey-kit'
 
@@ -159,9 +167,9 @@ export interface Persisted {
    *  can't read it without having decrypted) so a decoy unhide can re-lock.
    *  Device-specific: excluded from backups, like the relay list. */
   lock?: { secret: string }
-  /** Circle chat history (circle id → messages, oldest first). On-device only —
-   *  the wire carries each message once, encrypted; this is the local copy that
-   *  makes the thread readable. Pruned with its circle; capped per thread.
+  /** Circle signal history (circle id → actions, oldest first). On-device only —
+   *  the wire carries each action once, encrypted; this is the local activity log.
+   *  Pruned with its circle; capped per thread.
    *  Plaintext at rest unless the App lock is on (same story as everything here). */
   chats?: Record<string, ChatMessage[]>
   /** Private 1:1 threads (peer pubkey → messages, oldest first). Same rules. */
@@ -174,38 +182,80 @@ export interface Persisted {
  *  app, each dismissible, all silencable from settings once comfortable. */
 export interface Hints { on: boolean; dismissed: string[] }
 
-// ── Chat history (circle chat + private 1:1 threads) ─────────────────────────
-/** One message in a thread. `from` is the sender's pubkey; `at` unix seconds
+// ── Signal history (circle + private 1:1 actions) ────────────────────────────
+export type ChatAction = CoordinationAction | 'shared_exact_location'
+
+/** One action in a thread. `from` is the sender's pubkey; `at` unix seconds
  *  (the rumor's own timestamp, so a relay replay carries the identical triple).
  *  `geohash`/`precision` are present only for a private "Come to me" location
- *  share (PM-only — see FLOCK §6: this rides the SAME dedupe-by-triple as any
- *  other message, `text` staying a fixed human-readable marker). */
-export interface ChatMessage { from: string; text: string; at: number; geohash?: string; precision?: number }
+ *  share. Labels are rendered locally; persisted history cannot hold prose. */
+export interface ChatMessage { from: string; action: ChatAction; at: number; geohash?: string; precision?: number }
 
 /** Cap per thread — a safety app's chat is a running conversation, not an archive. */
 export const CHAT_MAX_PER_THREAD = 200
 
 /**
- * Append a message to a thread, deduplicating relay replays: gift wraps are
+ * Append an action to a thread, deduplicating relay replays: gift wraps are
  * replayed on every fresh subscribe, and the SAME rumor decrypts to the same
- * (from, at, text) triple — an exact match is an echo, not a new message.
+ * (from, at, action) triple — an exact match is an echo, not a new action.
  * Returns null when nothing changed (echo), else a fresh capped list kept in
  * `at` order so a delayed relay delivery still lands where it belongs.
  */
 export function withChatMessage(list: ChatMessage[] | undefined, msg: ChatMessage, max = CHAT_MAX_PER_THREAD): ChatMessage[] | null {
   const cur = list ?? []
-  if (cur.some((m) => m.at === msg.at && m.from === msg.from && m.text === msg.text)) return null
+  if (cur.some((m) => m.at === msg.at && m.from === msg.from && m.action === msg.action)) return null
   const next = [...cur, msg].sort((a, b) => a.at - b.at)
   return next.length > max ? next.slice(next.length - max) : next
 }
 
+const HEX_64_RE = /^[0-9a-f]{64}$/
+const LEGACY_LOCATION_MARKERS = new Set(['📍 Shared their exact location', '📍 Shared your exact location'])
+
+function storedAction(value: Record<string, unknown>): ChatAction | null {
+  if (typeof value.action === 'string') {
+    if (value.action === 'shared_exact_location') return value.action
+    const action = value.action as CoordinationAction
+    if (isGroupCoordinationAction(action) || isDirectCoordinationAction(action)) return action
+    return null
+  }
+  if (LEGACY_LOCATION_MARKERS.has(value.text as string)) return 'shared_exact_location'
+  return coordinationActionFromLabel(value.text)
+}
+
+function migrateStoredMessage(value: unknown, scope: 'group' | 'direct'): ChatMessage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const o = value as Record<string, unknown>
+  if (typeof o.from !== 'string' || !HEX_64_RE.test(o.from)) return null
+  if (typeof o.at !== 'number' || !Number.isFinite(o.at)) return null
+  const action = storedAction(o)
+  if (action === null) return null
+  if (scope === 'group' && !isGroupCoordinationAction(action)) return null
+  if (scope === 'direct' && action !== 'shared_exact_location' && !isDirectCoordinationAction(action)) return null
+
+  if (action === 'shared_exact_location') {
+    if (typeof o.geohash !== 'string' || !o.geohash || typeof o.precision !== 'number' || !Number.isInteger(o.precision)) return null
+    return { from: o.from, action, at: o.at, geohash: o.geohash, precision: o.precision }
+  }
+  return { from: o.from, action, at: o.at }
+}
+
+function migrateStoredThread(list: readonly unknown[], scope: 'group' | 'direct'): ChatMessage[] {
+  const migrated = list.flatMap((item) => {
+    const message = migrateStoredMessage(item, scope)
+    return message ? [message] : []
+  }).sort((a, b) => a.at - b.at)
+  return migrated.length > CHAT_MAX_PER_THREAD ? migrated.slice(-CHAT_MAX_PER_THREAD) : migrated
+}
+
 /** Keep only group threads whose circle still exists — leaving/disbanding a
  *  circle must take its conversation with it. Pure; returns a fresh object. */
-export function pruneChats(chats: Record<string, ChatMessage[]> | undefined, circleIds: string[]): Record<string, ChatMessage[]> {
+export function pruneChats(chats: Record<string, readonly unknown[]> | undefined, circleIds: string[]): Record<string, ChatMessage[]> {
   const live = new Set(circleIds)
   const out: Record<string, ChatMessage[]> = {}
   for (const [cid, list] of Object.entries(chats ?? {})) {
-    if (live.has(cid) && list.length) out[cid] = list
+    if (!live.has(cid)) continue
+    const migrated = migrateStoredThread(list, 'group')
+    if (migrated.length) out[cid] = migrated
   }
   return out
 }
@@ -213,11 +263,13 @@ export function pruneChats(chats: Record<string, ChatMessage[]> | undefined, cir
 /** Keep only 1:1 threads with people still in at least one of my circles —
  *  when the last shared circle goes, so does the thread (ephemerality is the
  *  point; nothing here should outlive the relationship that produced it). */
-export function pruneDms(dms: Record<string, ChatMessage[]> | undefined, knownPks: Iterable<string>): Record<string, ChatMessage[]> {
+export function pruneDms(dms: Record<string, readonly unknown[]> | undefined, knownPks: Iterable<string>): Record<string, ChatMessage[]> {
   const known = new Set(knownPks)
   const out: Record<string, ChatMessage[]> = {}
   for (const [pk, list] of Object.entries(dms ?? {})) {
-    if (known.has(pk) && list.length) out[pk] = list
+    if (!known.has(pk)) continue
+    const migrated = migrateStoredThread(list, 'direct')
+    if (migrated.length) out[pk] = migrated
   }
   return out
 }

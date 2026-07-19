@@ -39,7 +39,7 @@ test.describe('decoy view — hide flock under a compelled unlock (FLOCK §6)', 
     await expect(A.getByRole('button', { name: 'Create a circle' })).toBeVisible()
 
     // While hidden there are no subscriptions: B's signal must render NOTHING on A.
-    await sendBuzz(B, 'you out tonight?')
+    await sendBuzz(B)
     await A.waitForTimeout(3000)
     await expect(A.locator('.buzz-banner')).toHaveCount(0)
     await expect(A.getByRole('button', { name: 'Create a circle' })).toBeVisible()

@@ -60,6 +60,6 @@ test.describe('onboarding & circle setup', () => {
     await expect(A.locator('#share-precision')).toHaveValue('6')
     await gotoTab(A, 'chat')
     await expect(A.locator('[data-action="check-in"]')).toBeVisible()
-    await expect(A.locator('[data-action="chat-preset"][data-reason="On my way"]')).toBeVisible()
+    await expect(A.locator('[data-action="group-signal"][data-signal="on_my_way"]')).toBeVisible()
   })
 })

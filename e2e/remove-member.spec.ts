@@ -14,8 +14,8 @@ test.describe('remove member — cut someone off (3 people)', () => {
     await joinByCode(C, code)
 
     // B and C each signal once on the SHARED key, so A's roster holds them both…
-    await sendBuzz(B, 'B here')
-    await sendBuzz(C, 'C here')
+    await sendBuzz(B)
+    await sendBuzz(C)
 
     // …and C's receive path is demonstrably live (it gets a buzz on the shared key).
     await gotoTab(C, 'circle')
@@ -41,10 +41,10 @@ test.describe('remove member — cut someone off (3 people)', () => {
     await settle(B, 3000) // B receives the reseed and resubscribes to the new inbox
 
     // A buzzes on the NEW key.
-    await sendBuzz(A, 'new key check')
+    await sendBuzz(A)
 
     // B (kept in) gets it…
-    await expect(B.locator('.buzz-banner')).toContainText('new key check')
+    await expect(B.locator('.buzz-banner')).toContainText('On my way')
 
     // …C (removed, stranded on the old key) never does — even though its receive
     // path was live moments ago. That's the cut-off, proven over the relay.
@@ -62,7 +62,7 @@ test.describe('remove member — cut someone off (3 people)', () => {
     await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
-    await sendBuzz(B, 'B here') // seed A's roster with B
+    await sendBuzz(B) // seed A's roster with B
 
     await gotoTab(A, 'circle')
     const bPk = await myPubkey(B)
