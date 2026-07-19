@@ -128,6 +128,10 @@ let toastTimer = 0
 
 let mapView: MapView | null = null
 let mapInitToken = 0
+// Where the map last sat, kept across a tab switch so returning to Home reopens
+// that view instead of re-painting the London default and animating back (the
+// map is destroyed off Home and rebuilt on return — see render/initMap).
+let lastCamera: { lng: number; lat: number; zoom: number } | null = null
 let offlineBBox: BBox | null = null // bounds of the active circle's saved map (null = not offline)
 let focusMemberPk: string | null = null // "see on map" target — frame their cell once the map mounts
 let focusGeohash: string | null = null // a one-off PM location share's cell — not a live circle beacon, framed once then forgotten
@@ -1090,6 +1094,7 @@ function render(opts?: { animate?: boolean }): void {
     mapInitToken++ // invalidate a lazy map mount that has not finished yet
     const mounted = mapView
     mapView = null
+    rememberCamera(mounted) // reopen this view when we land back on Home
     mounted?.destroy()
   }
   const keep = captureFocusedInput()
@@ -2337,16 +2342,30 @@ function openRadarFor(pk: string): void {
   })
 }
 
+/** Snapshot the live map's camera before we tear it down, so a return to Home
+ *  reopens the same view (see `lastCamera`). No-op if the map isn't mounted. */
+function rememberCamera(view: MapView | null): void {
+  if (!view) return
+  const c = view.map.getCenter()
+  lastCamera = { lng: c.lng, lat: c.lat, zoom: view.map.getZoom() }
+}
+
 async function initMap(camera?: { lng: number; lat: number; zoom: number }): Promise<void> {
   const token = ++mapInitToken
   const mounted = mapView
   mapView = null
+  rememberCamera(mounted) // preserve the view across a same-tab re-init too
   mounted?.destroy()
   const container = document.getElementById('map')
   if (!container) return
   const { MapView } = await import('./map') // lazy — keeps maplibre out of the main bundle
   if (token !== mapInitToken || !container.isConnected || document.getElementById('map') !== container) return
-  const next = await MapView.create(container, fix ?? undefined, { circleId: activeCircle()?.id })
+  // Open where we last were: a live fix wins; otherwise reopen the restored
+  // camera / last view so we never fall back to the London default and animate
+  // away from it (the reported "starts in London, zooms to me" on a tab-return).
+  const reopen = camera ?? lastCamera
+  const seedCentre = fix ?? (reopen ? { lat: reopen.lat, lon: reopen.lng } : undefined)
+  const next = await MapView.create(container, seedCentre, { circleId: activeCircle()?.id })
   if (token !== mapInitToken || !container.isConnected || document.getElementById('map') !== container) {
     next.destroy()
     return
@@ -2355,6 +2374,10 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   // Tap a member's pin → their private thread (skip my own pin — that's just me).
   mapView.onMemberClick((pk) => { if (pk && pk !== persisted.identity?.pk) openDmThread(pk) })
   if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
+  // Restore the prior zoom before data draws (create only takes a centre), so a
+  // soft reopen returns at the same scale. A hard `camera` restore (below) also
+  // pins the centre and stops auto-framing; a soft reopen leaves member auto-fit free.
+  if (!camera && lastCamera) mapView.map.jumpTo({ center: [lastCamera.lng, lastCamera.lat], zoom: lastCamera.zoom })
   updateMapData()
   requestAnimationFrame(() => mapView?.map.resize())
   if (camera) { mapView.map.jumpTo({ center: [camera.lng, camera.lat], zoom: camera.zoom }); mapView.suppressAutoFit() } // a re-init keeps the person's view
@@ -2366,7 +2389,7 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   // there's nothing to look up beyond the geohash itself.
   if (focusGeohash) { frameCell(focusGeohash); focusGeohash = null }
   if (offlineMapEnabled()) void refreshOfflineState()
-  if (!fix && !camera) void centreOnCurrentPosition() // no live share yet → actively locate for the map
+  if (!fix && !camera && !lastCamera) void centreOnCurrentPosition() // first mount, no view to restore → actively locate for the map
 }
 
 // Centre the map on the user's current position without starting a share. Purely
@@ -4526,6 +4549,7 @@ function resetDevice(): void {
   mapView = null
   mounted?.destroy()
   fix = null
+  lastCamera = null // a wipe forgets the last location too
   circleStates.clear()
   beaconCadence.clear()
   coverCadence.clear()
