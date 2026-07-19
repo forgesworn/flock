@@ -67,7 +67,7 @@ flock.forgesworn.dev {
 	# where the circle is). The user talks only to flock.forgesworn.dev, which they
 	# already trust to serve the app — no new third party. Client-identifying
 	# headers are stripped; a proper User-Agent is set for OSM's tile-usage policy;
-	# a long max-age lets Cloudflare/browser cache so few requests reach OSM.
+	# a long max-age lets the browser cache so few requests reach OSM.
 	handle_path /tiles/* {
 		reverse_proxy https://tile.openstreetmap.org {
 			header_up Host tile.openstreetmap.org
@@ -83,7 +83,7 @@ flock.forgesworn.dev {
 
 	# Nominatim geocoding — same treatment. The literal place-name query reaches
 	# Nominatim from this server, not the user's IP. `no-store` keeps the query out
-	# of any shared (Cloudflare) cache — geocoding is occasional and user-specific.
+	# of any shared cache — geocoding is occasional and user-specific.
 	handle_path /nominatim/* {
 		reverse_proxy https://nominatim.openstreetmap.org {
 			header_up Host nominatim.openstreetmap.org
