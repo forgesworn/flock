@@ -961,8 +961,12 @@ function joinFromLink(code: string): void {
   try {
     const circle = store.decodeInvite(store.inviteCodeFrom(code))
     if (persisted.circles.some((c) => c.id === circle.id)) { switchCircle(circle.id); return }
-    if (!persisted.myHandle) { pendingJoin = circle; render(); return }
-    completeJoin(circle)
+    // ALWAYS confirm before joining — even for an already-onboarded user. A
+    // tapped/scanned `#join=` link or QR must never silently enrol someone (and
+    // publish their real pubkey) into a circle an attacker distributed; the
+    // join-name screen is that explicit confirmation. (Previously returning users
+    // — anyone with a handle — joined with no prompt at all.)
+    pendingJoin = circle; render()
   } catch { toast('That join link is not valid — ask for a fresh one.') }
 }
 
@@ -996,7 +1000,7 @@ function joinNameView(c: store.Circle): string {
     <div class="actions" style="margin-bottom:14px"><button class="btn" data-action="copy-join-invite">Copy the invite</button></div>` : ''}
     <p class="tagline">What should this circle call you? A first name or nickname is perfect.</p>
     <div class="actions">
-      <div class="field"><label for="join-handle">Your name</label><input class="input" id="join-handle" maxlength="40" placeholder="Dave · Mum · a nickname" /></div>
+      <div class="field"><label for="join-handle">Your name</label><input class="input" id="join-handle" maxlength="40" placeholder="Dave · Mum · a nickname" value="${esc(persisted.myHandle ?? '')}" /></div>
       <button class="btn primary" data-action="join-named">Join ${esc(c.name)}</button>
       <button class="btn ghost" data-action="join-skip">Join without a name</button>
     </div>
@@ -4618,6 +4622,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       saveBeacon(c.id, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
     } else if (t === 'buzz') {
       const bz = await decryptBuzz(c.seedHex, e.content)
+      if (bz.from !== e.pubkey) return // the actor is bound to the authenticated seal signer — no impersonating another member (mirrors 'joined')
       if (!me || bz.from !== me.pk) {
         const mine = !!me && bz.target === me.pk
         // An untargeted buzz IS a circle-chat message — thread it. False = a
@@ -4657,6 +4662,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       }
     } else if (t === LOST_SIGNAL_TYPE) {
       const rep = await decryptLost(c.seedHex, e.content)
+      if (rep.by !== e.pubkey) return // only report AS yourself (rep.member may be someone else's phone, but the reporter is the authenticated sender)
       const st = cstate(c.id)
       const prev = st.lost.get(rep.member)
       // Latest wins, and a tie goes to the arrival — one-second timestamps make
@@ -4688,6 +4694,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       // flagged lost AND the ask is aimed at us — then a cancel window before it
       // discloses. Any failing gate is silent (no tell). See app/src/findping.ts.
       const req = await decryptFindPing(c.seedHex, e.content)
+      if (req.from !== e.pubkey) return // the asker is bound to the authenticated seal signer
       if (!me) return
       const gate = shouldAnswerFindPing({
         preAuthorised: !!c.pingConsent,
@@ -4700,6 +4707,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       return
     } else if (t === DISBAND_SIGNAL_TYPE) {
       const d = await decryptDisband(c.seedHex, e.content)
+      if (d.by !== e.pubkey) return // bind to the authenticated seal signer — a forged disband must not wipe everyone's circle
       const name = c.name
       removeCircle(c.id) // the owner ended it for everyone — drop it and wipe its seed
       if (!activeCircle()) tab = 'home'
