@@ -1,7 +1,7 @@
 # Data protection impact assessment
 
 Service: hosted Flock preview  
-Assessment date: 2026-07-10  
+Assessment date: 2026-07-11
 Status: **working one-person POC record - not approved for broader use**  
 Owner: **individual maintainer - legal identity to be completed**
 
@@ -43,8 +43,8 @@ or processor for particular encrypted relay events depends on the real purposes,
 means, contracts, and ability to influence processing; encryption alone does not
 decide the role.
 
-Circle members decide why and with whom they share readable location and
-messages and may be separate controllers or household users. Hosts, relay
+Circle members decide why and with whom they share readable location and fixed
+coordination signals and may be separate controllers or household users. Hosts, relay
 operators, email providers, and upstream map services require a documented role
 and contract analysis.
 
@@ -57,19 +57,19 @@ address, providers, and contracts are recorded.
 | --- | --- | --- | --- |
 | Deliver website, APK, proxy responses, and encrypted relay traffic | IP, request/connection metadata, requested resource, ciphertext | Legitimate interests in providing the requested service | Complete LIA and provider role/contract review |
 | Protect shared infrastructure | Short-lived salted IP hash, timestamps, security events | Legitimate interests in abuse prevention and security | Confirm minimisation, retention, and access |
-| Deliver a user's selected location/message to intended recipients | Device location or message encrypted for recipients; delivery metadata | Role-dependent; user-requested service and legitimate interests are provisional | Counsel must map operator and participant roles; do not describe Terms acceptance as GDPR consent |
+| Deliver a user's selected location/fixed action to intended recipients | Device location or provider-defined action encrypted for recipients; delivery metadata | Role-dependent; user-requested service and legitimate interests are provisional | Counsel must map operator and participant roles; do not describe Terms acceptance as GDPR consent |
 | Handle rights, abuse, safety, and legal requests | Reporter/contact details, allegations, evidence | Legitimate interests, legal obligation, and legal claims as applicable | Operational retention schedule and restricted case log |
 | Record adult-use acknowledgement | Policy version, two confirmations, timestamp on device only | Necessary local product control; no operator receipt | Confirm ePrivacy/PECR strictly-necessary position by target country |
 
 Special-category data is not intentionally requested. Location is not
-automatically special-category data, but content and movement may reveal health,
+automatically special-category data, but movement and use context may reveal health,
 religion, politics, sex life, or other sensitive facts. Treat the system as able
 to carry sensitive data and do not infer or profile it.
 
 ## 5. Data flow and lifecycle
 
 1. The app creates or references a pseudonymous key on the device.
-2. Circle secrets, readable messages, location, and local history remain on the
+2. Circle secrets, readable fixed signals, location, and local history remain on the
    device except when a user deliberately sends encrypted data.
 3. Location sharing starts off on each launch. A user turns it on and selects a
    detail level; neighbourhood is the initial default.
@@ -79,8 +79,8 @@ to carry sensitive data and do not infer or profile it.
    redistribute it.
 6. Map/geocoding requests use same-origin proxies; proxy-visible requests may
    themselves reveal an area or search interest.
-7. Local recent presence is pruned after six hours on load; chats are capped at
-   200 per thread. Encrypted relay events request expiry after about 16 days, but
+7. Local recent presence is pruned after six hours on load; signal logs are capped
+   at 200 actions per thread. Encrypted relay events request expiry after about 16 days, but
    an independent or hostile relay may ignore expiry.
 8. Reports and rights requests enter operator email and case handling rather
    than the encrypted app channel.
@@ -94,6 +94,8 @@ The detailed inventory is in `ROPA.md` and the public description is in
 
 - No Flock account, required phone number, or required email
 - End-to-end encrypted application payloads
+- No free-form chat, URLs, media, attachments, forwarding, or custom lost-phone
+  notes; current clients accept only fixed action codes and exact compatibility labels
 - Pseudonymous keys and rotating identifiers
 - Location sharing off every launch
 - Neighbourhood rather than exact location as the initial detail

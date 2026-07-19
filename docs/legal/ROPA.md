@@ -1,6 +1,6 @@
 # Record of processing activities
 
-Last reviewed: 2026-07-10  
+Last reviewed: 2026-07-11
 Status: **working one-person POC record - identity and provider details incomplete**
 
 This working record covers the personal, free, non-commercial hosted preview.
@@ -13,7 +13,7 @@ and, as applicable, EU GDPR Article 30.
 | Website and APK delivery | Visitors/downloaders | IP, timestamp, resource, user agent, TLS/network metadata | Deliver and secure service | Legitimate interests | Host/CDN/network provider | Host currently Germany; provider path to verify | App access log off; provider retention unknown | TLS, security headers, no analytics |
 | Legal acknowledgement | App user | Policy version, adult flag, consenting-adults-only flag, timestamp | Enforce current entry boundary | Strictly necessary local control; confirm national ePrivacy rule | Device only | Device location | Until app/site storage cleared or uninstall | Not sent to operator; fail closed |
 | Local identity and circles | App user/circle members | Keys, circle secret, member keys, names, settings | Provide encrypted circle functions | Role-dependent; device-side user request | Device, chosen signer | Device/signer location | Until circle/device reset, clear, or uninstall | Optional App lock, encrypted backup |
-| Live location and messages | Users/circle members | Location, time, status, message, recipient/member identifiers | Deliver user-selected communication | Role-dependent; legitimate interests hypothesis | Intended recipients; selected relay | Recipients/relays anywhere | Device presence six hours on load; chat max 200/thread; relay expiry requested ~16 days | E2EE, off-by-default sharing, coarse default, pseudonymous keys |
+| Live location and fixed coordination signals | Users/circle members | Location, time, provider-defined action/status, recipient/member identifiers | Deliver user-selected coordination | Role-dependent; legitimate interests hypothesis | Intended recipients; selected relay | Recipients/relays anywhere | Device presence six hours on load; signal log max 200 actions/thread; relay expiry requested ~16 days | E2EE, off-by-default sharing, coarse default, pseudonymous keys, no free-form chat/links/media/attachments/forwarding |
 | Relay routing | Connecting users | IP, timing, subscriptions, encrypted event envelope | Route encrypted communications | Legitimate interests | Relay host/network provider | Verify each operator | Event expiry requested ~16 days; connection logging must be verified | Payload encryption, relay choice, Tor/VPN option |
 | Map tile proxy | Map users | IP at proxy, tile coordinates, request metadata | Deliver maps without direct upstream IP disclosure | Legitimate interests | Host/network; upstream OpenStreetMap service | Germany/upstream location to verify | No app access log; tile cache up to seven days | Header stripping, same-origin proxy |
 | Geocoding/venue proxy | Search users | IP at proxy, search text/area, request metadata | Return user-requested place results | Legitimate interests | Host/network; upstream search service | Germany/upstream location to verify | No app access log; shared caching disabled | Header stripping, same-origin proxy |

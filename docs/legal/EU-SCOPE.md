@@ -1,6 +1,6 @@
 # EU and EEA legal scope record
 
-Last reviewed: 2026-07-10  
+Last reviewed: 2026-07-11
 Status: **open - operator establishment and target markets unknown**
 
 This record identifies decisions required before claiming EU compliance. It is
@@ -69,12 +69,16 @@ development, or organisational involvement could change the answer. Record the
 facts and obtain advice rather than treating either "free" or "POC" as a
 standalone exemption.
 
-Flock transmits and may store user-provided encrypted communications. The final
+Flock transmits and may store encrypted location and a small provider-defined
+action vocabulary. It has no free-form chat, URLs, media, attachments,
+forwarding, or custom lost notes. That materially narrows user-content risk but
+does not determine whether a relay/host is an intermediary service. The final
 operator must obtain a written classification of each hosted component under
 the Digital Services Act: mere conduit, caching, hosting, online platform, or
 outside a category. Private or invitation-only communication and the definition
 of dissemination to the public can affect whether a component is an "online
-platform"; do not assume the answer from the presence of messaging alone.
+platform". Private circle communication points away from dissemination to the
+public, while a relay may still require separate mere-conduit/hosting analysis.
 
 If any intermediary-service duties apply, map at least:
 
@@ -94,7 +98,7 @@ formal DSA notice-and-action requirement.
 ## 5. Electronic communications and device storage
 
 Assess the European Electronic Communications Code classification of hosted
-real-time/group messaging, including whether it is a number-independent
+real-time/group fixed signalling and location delivery, including whether it is a number-independent
 interpersonal communications service and whether the service is "normally
 provided for remuneration" directly or through another economic model. The
 present personal, non-commercial facts point away from the economic-service

@@ -21,8 +21,8 @@
   </nav>
 
   <h1>Privacy policy</h1>
-  <p class="lede">flock is a personal, free, non-commercial proof of concept designed to keep location and message content on your device and inside your chosen circles. This policy explains what the individual operator still processes, what other participants and infrastructure can see, and what choices you have.</p>
-  <p class="meta">Effective 10 July 2026 · Last updated 10 July 2026</p>
+  <p class="lede">flock is a personal, free, non-commercial proof of concept designed to keep location and fixed coordination signals on your device and inside your chosen circles. This policy explains what the individual operator still processes, what other participants and infrastructure can see, and what choices you have.</p>
+  <p class="meta">Effective 10 July 2026 · Last updated 11 July 2026</p>
 
   <div class="notice critical">
     <p><strong>flock is currently for adults aged 18 and over.</strong> It must not be used to collect, share, or monitor a child's location or other personal information.</p>
@@ -36,20 +36,21 @@
   <h2>2. The short version</h2>
   <ul>
     <li>No flock account, phone number, or email address is required.</li>
-    <li>Location, messages, circle membership, and chosen names are end-to-end encrypted for the intended recipients.</li>
-    <li>Keys, readable chats, saved places, and recent map presence live on devices, not in a flock account database.</li>
+    <li>Location, fixed coordination signals, circle membership, and chosen names are end-to-end encrypted for the intended recipients.</li>
+    <li>flock has no free-form chat, URL sharing, media, attachments, or forwarding. Group and private actions come from a small built-in list.</li>
+    <li>Keys, readable signal history, saved places, and recent map presence live on devices, not in a flock account database.</li>
     <li>The canonical website has no advertising, analytics pixels, behavioural profiling, or non-essential cookies.</li>
     <li>Relays and infrastructure providers can still observe connection metadata. Circle members can see and retain content sent to them.</li>
   </ul>
 
   <h2>3. Information on your device</h2>
-  <p>Depending on the features you use, flock stores an identity key or public signer reference, circle secrets and member keys, chosen names and nicknames, relay settings, location-sharing preferences, private-place settings, recent presence, chat and direct-message history, app-lock material, and optional public profile cache in browser or app storage. Offline maps are stored in device file storage.</p>
+  <p>Depending on the features you use, flock stores an identity key or public signer reference, circle secrets and member keys, chosen names and nicknames, relay settings, location-sharing preferences, private-place settings, recent presence, fixed circle/private signal history, app-lock material, and optional public profile cache in browser or app storage. Offline maps are stored in device file storage.</p>
   <p>A separate local record stores the legal-notice version, the two adult-use confirmations, and the time they were accepted. It is used only to enforce the entry gate on that browser or app installation. It is not sent to the operator and remains until site or app storage is cleared or the app is uninstalled.</p>
   <p>App lock encrypts the main local state at rest. Without App lock, the main state is readable local storage on that device. Device backups are encrypted with the passphrase you choose. We do not receive the backup or passphrase.</p>
-  <p>Recent presence is pruned after six hours when state loads. Chat is capped at 200 messages per thread and is removed when its last associated circle relationship is removed. Other device data remains until you remove a circle, reset flock, clear the app or browser storage, or uninstall it. Browser caches and offline maps may need to be cleared separately through browser or device controls.</p>
+  <p>Recent presence is pruned after six hours when state loads. Signal history is capped at 200 actions per thread and is removed when its last associated circle relationship is removed. Other device data remains until you remove a circle, reset flock, clear the app or browser storage, or uninstall it. Browser caches and offline maps may need to be cleared separately through browser or device controls.</p>
 
   <h2>4. Information sent to circle members</h2>
-  <p>When you share, flock sends the location detail, message, status, or request you select to the intended circle or person. It is encrypted in transit, but the recipients can read it. They may copy, screenshot, export, infer, or retain it. You should only join circles whose members you trust.</p>
+  <p>When you share, flock sends the location detail or built-in action you select to the intended circle or person. Available actions are fixed by flock rather than typed by a user. They are encrypted in transit, but recipients can read them and may screenshot, infer from, or retain them. You should only join circles whose members you trust.</p>
   <p>Location sharing begins only after you deliberately turn it on and returns to private when a new app session starts. New circles start at neighbourhood-level detail; you can choose a rougher or more precise level. The separate permission that lets a lost phone answer a circle's one-shot exact-location request is also off by default. The app shows when sharing is active and provides controls for stopping it and changing detail. Operating-system location permission is separate from the in-app sharing control.</p>
   <p>In the Android app, a sharing session you deliberately start can continue through screen lock, background use, and Doze using a location foreground service and a persistent Android notification. It continues until you tap <strong>Go private</strong>, hide or reset flock, revoke the required permission, or the operating system stops it. Android may ask you to allow background location and exempt flock from battery optimisation. The website cannot reliably share while it is hidden.</p>
 
@@ -62,7 +63,7 @@
         <tr><td>Map tiles</td><td>The proxy receives tile coordinates. It requests the tile upstream without forwarding your IP or referring page.</td><td>No application access log. Tiles may be cached for up to seven days.</td><td>Legitimate interests in privately providing the map you request.</td></tr>
         <tr><td>Place and venue search</td><td>The proxy handles the search text or area you submit and forwards it from the server to the relevant OpenStreetMap service without forwarding your IP.</td><td>No application access log; responses are marked not to be stored in shared caches.</td><td>Legitimate interests in providing the search you request.</td></tr>
         <tr><td>Offline map extract</td><td>The service handles the area boundary you choose. A per-process salted hash of your IP and request times rate-limits abuse.</td><td>The IP hash and times are held in memory for about ten minutes. The temporary map extract is deleted when the request ends. The boundary is not logged.</td><td>Legitimate interests in providing the download and protecting shared infrastructure.</td></tr>
-        <tr><td>Operator-provided relay</td><td>The relay handles your IP, connection timing, subscriptions, and encrypted Nostr envelopes so it can route them. Message type, readable content, real sender identity, and location are inside the encryption.</td><td>Encrypted events request expiry after about 16 days. A relay may fail to honour expiry. Connection metadata is not intentionally logged by the application; infrastructure providers may still observe it.</td><td>Legitimate interests in delivering encrypted traffic requested by users.</td></tr>
+        <tr><td>Operator-provided relay</td><td>The relay handles your IP, connection timing, subscriptions, and encrypted Nostr envelopes so it can route them. Signal type, readable content, real sender identity, and location are inside the encryption.</td><td>Encrypted events request expiry after about 16 days. A relay may fail to honour expiry. Connection metadata is not intentionally logged by the application; infrastructure providers may still observe it.</td><td>Legitimate interests in delivering encrypted traffic requested by users.</td></tr>
         <tr><td>Legal, privacy, security, or abuse contact</td><td>Your email address and anything you choose to send are used to respond, investigate, protect people and the Services, and meet legal duties.</td><td>Kept only as long as reasonably needed for the request, security record, dispute, or legal obligation.</td><td>Legitimate interests, legal obligation, or establishing and defending legal claims.</td></tr>
       </tbody>
     </table>

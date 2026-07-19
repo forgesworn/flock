@@ -1,6 +1,6 @@
 # One-person POC legal posture
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-07-11
 
 ## Confirmed facts
 
@@ -11,7 +11,9 @@ Last reviewed: 2026-07-10
 - The website and APK are nevertheless technically reachable without a private
   access code.
 - Flock has no user account database and the operator does not receive readable
-  message or location content in the ordinary design.
+  fixed-signal or location content in the ordinary design.
+- Flock has no free-form chat, link/media attachment, forwarding, or custom
+  lost-note surface; communication is limited to provider-defined actions.
 
 If funding, advertising, paid work, customer use, public promotion, or another
 organisation becomes involved, this record must be reassessed.

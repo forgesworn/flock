@@ -1,6 +1,6 @@
 # UK legal readiness: operator checklist
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 This is an engineering and operations checklist, not legal advice. The public
 Terms and Privacy Policy accurately describe the checked-in product as of this
@@ -174,14 +174,17 @@ Do not market to parents or permit child use until all items are complete:
 ## Facts the policies rely on
 
 - No flock account, required phone number, or required email.
-- End-to-end encrypted Nostr gift wraps for messages and location payloads.
+- End-to-end encrypted Nostr gift wraps for fixed coordination actions and
+  location payloads; there is no free-form chat, URL/media attachment, forwarding,
+  or custom lost-note surface.
 - Location sharing starts off each launch; a new circle starts at neighbourhood
   detail and remote exact lost-phone response starts off.
 - Once deliberately started in the Android app, sharing is designed to continue
   while locked/in Doze through a visible foreground service and native publisher.
-- Readable state and chat history held on devices; main state is plaintext at
+- Readable state and fixed signal history held on devices; main state is plaintext at
   rest unless App lock is enabled.
-- Presence cache pruned after six hours on load; chat capped at 200 per thread.
+- Presence cache pruned after six hours on load; signal history capped at 200
+  actions per thread.
 - Canonical Caddy access logs disabled.
 - Map/geocoding proxies strip client-identifying upstream headers.
 - Offline extract IP rate-limit key is a per-process salted hash held about ten
