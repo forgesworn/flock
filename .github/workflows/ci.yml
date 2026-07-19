@@ -91,6 +91,12 @@ jobs:
       - run: npx vitest run compatibility/v1/verify-kotlin.test.ts
 
   e2e:
+    # On-demand only. The two-person Playwright suite (many specs, software-WebGL
+    # rendering, serial workers + 2 retries) exceeds the 45-min job budget on
+    # every push and it belongs on the developer's machine (docs/DEPLOY.md) — so
+    # run it via a manual `workflow_dispatch` (a fresh RAM-only relay is started
+    # for it, see playwright.config.ts) rather than blocking every push/PR.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
