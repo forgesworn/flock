@@ -1,13 +1,17 @@
 # UK illegal-content risk assessment
 
-Assessment date: 2026-07-10  
+Assessment date: 2026-07-11
 Status: **provisional - not an approved Ofcom assessment**  
 Accountable person: **individual maintainer - legal identity to be completed**
 
-This record assumes the hosted group/direct messaging service is an in-scope
-user-to-user service under the Online Safety Act until UK counsel records a
-supported scope decision. If the service is already in scope and operating,
-obtain immediate advice on deadlines; this draft does not cure a missed duty.
+This record assumes the hosted user-to-user location and fixed-signal service is
+in scope under the Online Safety Act until UK counsel records a supported scope
+decision. Removing free-form chat materially reduces the service's capacity to
+create or transmit illegal content, but it does not by itself establish a scope
+exit: users still share location, fixed requests/status actions, chosen names,
+and invitations with other users. If the service is already in scope and
+operating, obtain immediate advice on deadlines; this draft does not cure a
+missed duty.
 
 Flock is a one-person, free, non-commercial POC intended for a very small set of
 invited adult testers. There is no corporate moderation team. Reach and
@@ -17,8 +21,11 @@ child-location incident can nevertheless have severe impact.
 
 ## Service and evidence considered
 
-- Encrypted group messages, direct messages, location beacons, alerts, invites,
-  lost-phone reports, and remote find requests
+- Encrypted fixed group actions (`Check in`, `On my way`) and fixed private
+  actions (`Come to me`, `Where are you?`, `Call me`, `On my way`)
+- Location beacons, alerts, invites, lost-phone reports with fixed context, and
+  remote find requests
+- No free-form chat, URLs, media, attachments, forwarding, or custom lost notes
 - Open website and directly distributed Android app
 - Invitation-secret circles with no central account directory
 - Operator-controlled proxies and any operator-provided relay
@@ -30,19 +37,21 @@ child-location incident can nevertheless have severe impact.
 
 | Risk | How Flock could be used | Likelihood / impact | Existing controls | Remaining work |
 | --- | --- | --- | --- | --- |
-| Stalking and harassment | Coerced installation, repeated location demands, unwanted messages, leaked invite | Medium / High | Adult/consent terms, sharing off, visible state, block by leaving/removing, report route | Coercion UX test, operational report handling, safer rapid-exit review |
+| Stalking and harassment | Coerced installation, repeated fixed location demands, unwanted signals, leaked invite | Medium / High | Adult/consent terms, sharing off, visible state, bounded action set, block by leaving/removing, report route | Coercion UX test, action-rate limits, operational report handling, safer rapid-exit review |
 | Controlling or coercive behaviour and domestic abuse | Partner controls device/circle, monitors movement, punishes privacy choice | Medium / High | Own-device expectation, session-private default, app lock/decoy options, remote find off | Specialist review; test compromised PIN/device and separated-partner scenarios |
-| Threats, violence, abduction, or trafficking | Location used to find a target; messages coordinate harm | Low-Medium / High | E2EE recipient limits, coarse default, no-report zones, explicit ban, report/escalation route | Authority escalation criteria and operator restriction capability |
-| Child sexual exploitation or abuse | Adult creates a circle with a child, requests location/messages, sends illegal content | Low-Medium / Severe | 18+ gate, explicit child ban, private defaults, report route | Treat children as likely to access; complete children's risk assessment/duties |
+| Threats, violence, abduction, or trafficking | Location or a small fixed action set is used to find or coordinate around a target | Low-Medium / High | No user-authored content, E2EE recipient limits, coarse default, no-report zones, explicit ban, report/escalation route | Authority escalation criteria and operator restriction capability |
+| Child sexual exploitation or abuse | Adult creates a circle with a child and requests or observes location; no user-authored sexual content can be sent through Flock | Low / Severe | 18+ gate, explicit child ban, private defaults, fixed actions, report route | Treat children as likely to access; complete children's risk assessment/duties |
 | Fraud and impersonation | Malicious invite, false identity/name, deceptive safety request | Medium / Medium-High | Pseudonymous keys, invite secrets, roster notices, spoken verification tools | Clearer verification prompts and compromised-invite response |
-| Terrorism or other priority illegal content | Encrypted group/direct communications coordinate an offence | Low / Severe | Small invitation groups, report route, lawful-request process | Formal threat escalation, competent-authority process, current Ofcom code mapping |
-| Malicious code or service attacks | Messages/invites exploit parsing; relay/proxy abuse | Medium / High | Input validation, cryptographic verification, rate limiting, security contact | Periodic security review, vulnerability intake/SLA, abuse telemetry decision |
+| Terrorism or other priority illegal content | Location and a small fixed action set assist coordination; Flock cannot carry substantive user-authored propaganda or instructions | Low / Severe | Bounded vocabulary, small invitation groups, report route, lawful-request process | Formal threat escalation, competent-authority process, current Ofcom code mapping |
+| Malicious code or service attacks | Invites, bounded names, or protocol payloads exploit parsing; relay/proxy abuse | Low-Medium / High | Strict action validation, arbitrary-text rejection, cryptographic verification, rate limiting, security contact | Periodic security review, vulnerability intake/SLA, abuse telemetry decision |
 
 ## Design and operation factors
 
 ### Risk-reducing
 
 - No public content feed, discovery, virality, or recommendation algorithm
+- No user-authored chat, URL sharing, media, attachments, forwarding, or custom
+  lost-phone notes; unknown action codes and arbitrary legacy strings are rejected
 - No monetisation based on attention or growth
 - Invitation-secret groups and pseudonymous keys
 - Payloads encrypted to intended recipients
@@ -57,7 +66,8 @@ child-location incident can nevertheless have severe impact.
 - An unsafe adult with device control can defeat in-app autonomy controls
 - Invitation secrets can be forwarded or exposed
 - Pseudonymity and no accounts reduce operator-level enforcement options
-- Encryption prevents proactive content inspection and can limit report evidence
+- Encryption prevents routine inspection of location and signal traffic and can
+  limit report evidence, although the human-readable action vocabulary is fixed
 - Direct APK/web distribution makes contractual age restriction easy to bypass
 - Operator currently lacks assigned people, tested inboxes, case operations, and
   a supported legal scope decision
@@ -71,8 +81,10 @@ reporting, victim support, infrastructure restrictions, security fixes, and
 lawful response using data the operator actually holds.
 
 The operator must be honest that it normally cannot read or search encrypted
-content. A reporter may provide material voluntarily, but the reporting process
-must not request secrets or unnecessary exact location.
+location or signal traffic. Flock has no general user-content moderation surface:
+current clients accept only provider-defined actions and discard arbitrary legacy
+text. A reporter may provide material voluntarily, but the reporting process must
+not request secrets or unnecessary exact location.
 
 ## Reporting, complaints, and enforcement
 
@@ -93,10 +105,12 @@ Terms. Operational prerequisites remain:
 
 ## Provisional residual risk and decision
 
-Residual illegal-content risk is **medium overall and high for the smaller set
-of location-enabled stalking, coercive-control, and child-safety incidents**.
-Small encrypted groups reduce prevalence and reach but not the severity of a
-single physical-location disclosure.
+Residual risk is **low for illegal-content publication/transmission through the
+fixed action surface, medium overall, and high for the smaller set of
+location-enabled stalking, coercive-control, and child-safety incidents**.
+Removing free-form content reduces prevalence and attack surface; small encrypted
+groups and bounded actions do not reduce the severity of one physical-location
+disclosure.
 
 **Not approved for a claim of Online Safety Act compliance.** Before broader
 operation, counsel must confirm scope and the accountable operator must complete

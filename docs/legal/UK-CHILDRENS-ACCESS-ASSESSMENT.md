@@ -1,6 +1,6 @@
 # UK children's access assessment
 
-Assessment date: 2026-07-10  
+Assessment date: 2026-07-11
 Owner: **unassigned - launch blocker**  
 Review due: before public deployment, then at least annually and after any
 material product, audience, evidence, or access-control change
@@ -20,7 +20,8 @@ remove the impact of one child-location disclosure.
 - Hosted PWA at `flock.forgesworn.dev`
 - Downloadable Android shell for the same hosted service
 - Operator-controlled web proxies and any operator-provided relay
-- User-to-user group and direct messaging plus encrypted location sharing
+- User-to-user fixed group/private coordination actions plus encrypted location
+  sharing; no free-form chat, links, media, attachments, or forwarding
 
 Independent self-hosted deployments are separate services operated by their
 deployers. The source-code repository by itself is not treated as the hosted
@@ -28,7 +29,7 @@ service.
 
 ## Scope assumption
 
-For safety, this record assumes the hosted messaging service is an in-scope
+For safety, this record assumes the hosted location and fixed-signal service is an in-scope
 user-to-user service under Part 3 of the Online Safety Act until counsel records
 a supported contrary conclusion. Invitation-only circles, end-to-end encryption,
 no accounts, and a free preview do not by themselves resolve scope.
@@ -52,7 +53,7 @@ and access controls, the assessment must proceed to stage 2.
 
 | Factor | Evidence | Direction |
 | --- | --- | --- |
-| Core functionality | Live and background location sharing, private/group messages, lost-phone finding, and safety-oriented alerts can appeal to families and teenagers. | Towards likely access |
+| Core functionality | Live and background location sharing, fixed private/group actions, lost-phone finding, and safety-oriented alerts can appeal to families and teenagers. Removing free-form chat reduces content risk, not likely access. | Towards likely access |
 | Operator knowledge | The product discussion expressly anticipates parents installing the app and giving it to children. | Strongly towards likely access |
 | Access friction | No account, payment, identity check, or high-assurance age check is required. | Towards likely access |
 | Marketing boundary | Current public copy says adults 18+ and prohibits child tracking; package and download copy are adult-only. | Away from likely access, but not conclusive |

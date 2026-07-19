@@ -1,6 +1,6 @@
 # flock legal and safety notices
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 This is a practical legal-risk checklist for flock, not legal advice. Before a
 public launch, paid offering, app-store submission, or high-risk deployment, have
@@ -30,6 +30,14 @@ detail, and remote exact lost-phone permission starts off per circle. Once an
 adult deliberately starts Android sharing, the foreground service/native
 publisher remains a hard requirement so it continues while locked and in Doze.
 These are privacy defaults, not a claim of highly effective age assurance.
+
+The coordination surface is now deliberately bounded: circle actions are
+`Check in` and `On my way`; private actions are `Come to me`, `Where are you?`,
+`Call me`, and `On my way`. There is no free-form chat, URL or media attachment,
+forwarding, or custom lost-phone note. This materially reduces illegal-content
+and parsing pathways. It does not eliminate location-enabled stalking/coercion
+risk or, without a supported scope decision, establish an Online Safety Act or
+Digital Services Act exemption.
 
 The one-person POC facts and reassessment triggers are in
 `docs/legal/POC-POSTURE.md`. Remaining work that policy text cannot solve is
