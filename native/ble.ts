@@ -54,3 +54,28 @@ export async function broadcastBle(data: string): Promise<void> {
 export function bleRunning(): boolean {
   return running
 }
+
+// ── Observability seam (diagnostics) ─────────────────────────────────────────
+// The shared plugin already tracks advertise/scan/GATT state, peer links and
+// per-frame TX/RX counts; the product path never needed to read them, but the
+// BLE diagnostics screen (app/src/ble-diagnostics.ts) does. These are thin,
+// additive reads over the same MeshBle instance — no product behaviour changes.
+
+/** Snapshot the live transport status (fields per capacitor-mesh-ble's getStatus). */
+export async function getBleStatus(): Promise<Record<string, unknown>> {
+  return (await MeshBle.getStatus()) as unknown as Record<string, unknown>
+}
+
+/** Subscribe to plugin status pushes. Returns a handle; call `.remove()` to stop. */
+export async function addBleStatusListener(
+  onStatus: (status: Record<string, unknown>) => void,
+): Promise<PluginListenerHandle> {
+  return MeshBle.addListener('status', (e) => onStatus(e as unknown as Record<string, unknown>))
+}
+
+/** Directed send to a single peer id. Diagnostics only — the product path floods
+ *  via broadcastBle; this exercises the plugin's point-to-point write. Never throws. */
+export async function sendBle(peer: string, data: string): Promise<void> {
+  if (!running) return
+  try { await MeshBle.send({ peer, data }) } catch { /* no such peer / adapter off */ }
+}
