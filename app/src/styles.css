@@ -571,6 +571,23 @@ a.btn { text-decoration: none; }
 }
 .rzv-pin .flag { font-size: 20px; line-height: 1; color: var(--warn); text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
 
+/* Dropped pins (Feature: droppable pins) — a distinct violet marker, tappable to navigate. */
+.drop-pin { display: flex; flex-direction: column; align-items: center; }
+.drop-pin .tag {
+  font-size: 11px; font-weight: 700;
+  background: rgba(124,156,255,0.16); border: 1px solid #7c9cff; color: #b9c8ff;
+  padding: 2px 7px; border-radius: 999px; white-space: nowrap; margin-bottom: 2px; box-shadow: var(--shadow);
+}
+.drop-pin .flag { font-size: 18px; line-height: 1; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+.drop-pin.mine .tag { background: rgba(95,208,168,0.16); border-color: var(--safe); color: #a9e9d2; }
+
+/* Drop-a-pin panel over the map. */
+.pins-bar { display: flex; justify-content: flex-end; margin-top: 8px; }
+.pins-panel { margin-top: 8px; }
+.pins-panel .chip-row { flex-wrap: wrap; gap: 6px; }
+.pin-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; margin-top: 4px; }
+.pin-row .pin-nav { flex: 1; text-align: left; }
+
 /* Meeting-point contributor pin — soft violet, distinct from live presence (blue). */
 .map-pin.contrib .dot { background: #a78bfa; box-shadow: 0 0 0 1px rgba(255,255,255,0.25); }
 .map-pin.contrib .tag { color: #cbb7fb; border-color: #6d5bbf; }

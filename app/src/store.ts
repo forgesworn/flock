@@ -17,6 +17,7 @@ import {
 } from '@forgesworn/flock'
 import { resolveRelays } from './relays'
 import { deriveCircleSeed } from '@forgesworn/covey-kit'
+import type { Pin } from './pin'
 
 export type Mode = 'family' | 'nightout'
 /** A local identity has `skHex`; a Signet identity is `pk`-only (key in the signer). */
@@ -131,6 +132,10 @@ export interface Persisted {
    *  or a PWA relaunch. A convenience cache only — pruned by age + circle existence
    *  on load; live beacons always overwrite. On-device only, like everything here. */
   presence: Record<string, MemberBeacon[]>
+  /** Dropped pins per circle (id → pins) — a member's car, a picnic spot… A
+   *  local cache of the ephemeral pin signals so they survive a refresh; pruned
+   *  by circle existence on load. On-device only, like presence. */
+  pins?: Record<string, Pin[]>
   /** Opt-in: fetch public kind:0 profiles (names/avatars) from public relays. Default off. */
   showProfiles?: boolean
   /** How distances read across the app (location-detail sizes etc.). Undefined = metric.

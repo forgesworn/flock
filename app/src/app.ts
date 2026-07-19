@@ -26,6 +26,7 @@ import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION } from './ring'
+import { PIN_KIND_LIST, pinLabel as pinKindLabel, isPinKind, buildPinSignal, decryptPin, withPin, type Pin, type PinKind } from './pin'
 import { openRadar, closeRadar, radarBeaconLanded } from './radarMode'
 import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
@@ -42,7 +43,7 @@ import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure'
 import { bytesToHex } from '@noble/hashes/utils.js'
-import type { MapView, MapPoint } from './map'
+import type { MapView, MapPoint, DroppedPinPoint } from './map'
 import { bboxContains, type BBox } from './area'
 import { isNativeShell, shareOrigin, isApkUpdateAvailable } from './native'
 import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildDmWrap, readDmWrap, buildPrivateLocationWrap, readPrivateLocationWrap, type DirectMessage, type PrivateLocationShare } from './invite'
@@ -283,6 +284,8 @@ let chipHeldGuard = false
 let onboardStep: 'intro' | 'create' | 'join' | 'await' | 'restore' = 'intro'
 let adding = false // adding another circle from within the app (not first-run onboarding)
 let ttlMode: 'ongoing' | 'today' | 'custom' = 'ongoing' // chosen lifetime for a new circle
+let pinsOpen = false // the drop-a-pin panel is expanded
+let placingPinKind: PinKind | null = null // armed to drop this kind at the next map tap
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
 let resetConfirm = false // inline confirm for the destructive "sign out & reset this device"
 let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
@@ -308,11 +311,14 @@ interface CircleState {
    *  only the presence pill, so someone active-but-not-sharing doesn't read
    *  as "no activity". */
   lastActivity: Map<string, number>
+  /** Dropped pins in this circle (a member's car, a picnic spot). Latest-wins
+   *  per id; a tombstone removes one. See app/src/pin.ts. */
+  pins: Pin[]
 }
 const circleStates = new Map<string, CircleState>()
 function cstate(id: string): CircleState {
   let s = circleStates.get(id)
-  if (!s) { s = { beacons: new Map(), lost: new Map(), lastActivity: new Map() }; circleStates.set(id, s) }
+  if (!s) { s = { beacons: new Map(), lost: new Map(), lastActivity: new Map(), pins: [] }; circleStates.set(id, s) }
   return s
 }
 
@@ -364,6 +370,88 @@ function rehydratePresence(): void {
     const st = cstate(cid)
     for (const b of list) st.beacons.set(b.member, b)
   }
+  for (const [cid, list] of Object.entries(persisted.pins ?? {})) cstate(cid).pins = [...list]
+}
+
+/** Persist a circle's dropped pins (they're ephemeral on the wire — the local
+ *  cache is what survives a refresh). */
+function savePins(circleId: string): void {
+  persisted.pins ??= {}
+  persisted.pins[circleId] = cstate(circleId).pins
+  store.save(persisted)
+}
+
+/** Merge a received (or self-dropped) pin into a circle and re-render the map. */
+function landPin(circleId: string, pin: Pin): void {
+  const st = cstate(circleId)
+  const next = withPin(st.pins, pin)
+  if (next === st.pins) return // an echo / older than what we hold
+  st.pins = next
+  savePins(circleId)
+  if (tab === 'home' && circleId === activeCircle()?.id) updateMapData()
+  refresh()
+}
+
+/** Drop a pin of `kind` at a spot for the active circle — the caller's current
+ *  fix, or a point they placed on the map. Exact by construction (precision 9).
+ *  Optimistic: it lands locally first, then publishes. */
+async function dropPin(kind: PinKind, lat: number, lon: number): Promise<void> {
+  const c = activeCircle()
+  const id = persisted.identity
+  if (!c || !id) return
+  const precision = 9
+  const pin: Pin = {
+    id: Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join(''),
+    from: id.pk,
+    kind,
+    geohash: encode(lat, lon, precision),
+    precision,
+    timestamp: nowSec(),
+  }
+  landPin(c.id, pin) // optimistic — see sendGroupSignal
+  toast(`Dropped ${pinKindLabel(kind)}`)
+  try {
+    await publishSignal(await buildPinSignal({ groupId: c.id, seedHex: c.seedHex, ...pin }), c)
+  } catch { toast("Pin saved — but couldn't reach the network.") }
+}
+
+/** Retract one of MY own pins (a tombstone the circle applies latest-wins). */
+async function removePin(circleId: string, pin: Pin): Promise<void> {
+  const c = persisted.circles.find((x) => x.id === circleId)
+  const id = persisted.identity
+  if (!c || !id || pin.from !== id.pk) return // only the dropper removes their own
+  const tomb: Pin = { ...pin, timestamp: nowSec(), removed: true }
+  landPin(circleId, tomb)
+  try {
+    await publishSignal(await buildPinSignal({ groupId: c.id, seedHex: c.seedHex, ...tomb }), c)
+  } catch { /* the local tombstone stands; a re-broadcast can retry */ }
+}
+
+/** Drop a pin at my CURRENT location — fetch a fresh fix if I haven't got one. */
+async function dropPinHere(kind: PinKind): Promise<void> {
+  if (!fix) {
+    const f = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 15_000, timeoutMs: 8000 }).catch(() => null)
+    if (f) fix = f
+  }
+  if (!fix) { toast("Couldn't get your location — try again by a window."); return }
+  await dropPin(kind, fix.lat, fix.lon)
+  pinsOpen = false
+  armPinPlacement(null)
+  refresh()
+}
+
+/** Arm (or disarm, with null) placing a pin by tapping the map — a one-shot: the
+ *  next tap on bare map drops `kind` there and disarms. */
+function armPinPlacement(kind: PinKind | null): void {
+  placingPinKind = kind
+  if (!kind) { mapView?.onMapClick(null); return }
+  mapView?.onMapClick((lat, lon) => {
+    void dropPin(kind, lat, lon)
+    armPinPlacement(null)
+    pinsOpen = false
+    refresh()
+  })
+  toast(`Tap the map to place your ${pinKindLabel(kind)}`)
 }
 
 // ── Active circle + writers ──────────────────────────────────────────────────
@@ -1339,6 +1427,35 @@ function dmUnreadTotal(): number {
  *  settings (precision, find-each-other, invite) live on the Circle tab; the
  *  conversation lives on the Chat tab. Tap anyone below to zoom to them; tap
  *  their PIN on the map itself to message them privately. */
+/** Drop-a-pin panel over the map: pick a fixed kind to drop where you are, place
+ *  one by tapping the map, or navigate to / remove existing pins. Fixed
+ *  vocabulary only — the label is a glyph + provider name, never free text. */
+function pinsCard(): string {
+  const c = activeCircle()
+  if (!c) return ''
+  const me = persisted.identity?.pk
+  const pins = cstate(c.id).pins
+  const toggle = `<button class="btn small pins-toggle${pinsOpen ? ' primary' : ''}" data-action="toggle-pins">📌 Pins${pins.length ? ` · ${pins.length}` : ''}</button>`
+  if (!pinsOpen) return `<div class="pins-bar">${toggle}</div>`
+  const dropChip = (k: PinKind): string => `<button class="btn small" data-action="drop-pin" data-kind="${k}">${esc(pinKindLabel(k))}</button>`
+  const placeChip = (k: PinKind): string => `<button class="btn small${placingPinKind === k ? ' primary' : ''}" data-action="place-pin" data-kind="${k}">${esc(pinKindLabel(k))}</button>`
+  const list = pins.length
+    ? pins.map((p) => `<div class="pin-row">
+        <button class="btn small ghost pin-nav" data-action="nav-pin" data-id="${p.id}">🧭 ${esc(pinKindLabel(p.kind))}${p.from === me ? '' : ` · ${esc(nameFor(p.from))}`}</button>
+        ${p.from === me ? `<button class="btn small ghost" data-action="remove-pin" data-id="${p.id}" aria-label="Remove this pin">🗑</button>` : ''}
+      </div>`).join('')
+    : '<div class="note">No pins yet.</div>'
+  return `<div class="pins-bar">${toggle}</div>
+    <div class="card stack pins-panel">
+      <div class="field" style="margin-bottom:4px"><label>Drop where you are</label></div>
+      <div class="chip-row">${PIN_KIND_LIST.map(dropChip).join('')}</div>
+      <div class="field" style="margin:8px 0 4px"><label>${placingPinKind ? `Tap the map to place ${esc(pinKindLabel(placingPinKind))}` : 'Or place on the map'}</label></div>
+      <div class="chip-row">${PIN_KIND_LIST.map(placeChip).join('')}</div>
+      <div class="section-title" style="margin-top:10px">Pins in ${esc(c.name)}</div>
+      ${list}
+    </div>`
+}
+
 function homeView(): string {
   const c = activeCircle() as store.Circle
   return `
@@ -1349,6 +1466,7 @@ function homeView(): string {
         ${topbar()}
         <div class="home-share-bar" id="home-share-bar">${homeShareBarInner()}</div>
         <div id="home-alerts">${geoIssueCard()}${batteryCard()}${rollCallCard()}${lostCard(c)}</div>
+        <div id="home-pins">${pinsCard()}</div>
       </div>
       <div class="home-overlay home-overlay-bottom">
         <div id="home-strip">${memberStrip()}</div>
@@ -2355,6 +2473,35 @@ function openRadarFor(pk: string): void {
   })
 }
 
+/** Open radar navigation to a dropped PIN — a fixed lat/lon target instead of a
+ *  member's beacon. Reuses the whole radar: on-screen scope AND, on Android, the
+ *  locked-screen haptic/sound guide (walk to your car with the phone in your
+ *  pocket). getTarget returns an ever-advancing timestamp so the JS scope never
+ *  ages a stationary pin to "stale"; the native guide gets the same via its
+ *  evergreen-waypoint flag (see startRadarGuide / RadarGuideService). */
+function openRadarForPin(pin: Pin): void {
+  const d = decode(pin.geohash)
+  openRadar({
+    layer: overlayLayer,
+    // Sentinel key: a pin never receives beacon interrupts (it doesn't move).
+    targetKey: { circleId: activeCircle()?.id ?? '', pk: `pin:${pin.id}` },
+    targetName: () => pinKindLabel(pin.kind),
+    getTarget: () => ({ lat: d.lat, lon: d.lon, uncertaintyMetres: 0, timestamp: nowSec() }),
+    getMyFix: () => (fix ? { lat: fix.lat, lon: fix.lon, at: fix.at } : null),
+    startLocalFix: () => svc.watchLocation((f) => { fix = f }, () => { /* radar shows no-fix */ }, { highAccuracy: true }),
+    fmtDistance,
+    onClosed: () => { /* overlay self-removes */ },
+  }, { evergreen: true })
+}
+
+/** A tapped pin: navigate to it (radar). */
+function navigateToPin(pinId: string): void {
+  const c = activeCircle()
+  if (!c) return
+  const pin = cstate(c.id).pins.find((p) => p.id === pinId)
+  if (pin) openRadarForPin(pin)
+}
+
 /** Snapshot the live map's camera before we tear it down, so a return to Home
  *  reopens the same view (see `lastCamera`). No-op if the map isn't mounted. */
 function rememberCamera(view: MapView | null): void {
@@ -2386,6 +2533,7 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   mapView = next
   // Tap a member's pin → their private thread (skip my own pin — that's just me).
   mapView.onMemberClick((pk) => { if (pk && pk !== persisted.identity?.pk) openDmThread(pk) })
+  mapView.onPinClick((pinId) => navigateToPin(pinId))
   if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
   // Restore the prior zoom before data draws (create only takes a centre), so a
   // soft reopen returns at the same scale. A hard `camera` restore (below) also
@@ -2457,9 +2605,21 @@ function memberPoints(): MapPoint[] {
     }
   })
 }
+/** The active circle's dropped pins as map markers (glyph+name labels). */
+function pinPoints(): DroppedPinPoint[] {
+  const c = activeCircle()
+  if (!c) return []
+  const me = persisted.identity?.pk
+  return cstate(c.id).pins.map((p) => {
+    const d = decode(p.geohash)
+    return { id: p.id, lat: d.lat, lon: d.lon, label: pinKindLabel(p.kind), mine: p.from === me }
+  })
+}
+
 function updateMapData(): void {
   const pts = memberPoints()
   mapView?.setMembers(pts)
+  mapView?.setPins(pinPoints())
   // "See what they see" preview: while NOT sharing, ghost the cell the circle
   // WOULD get at the current slider setting (dashed — clearly not a live pin).
   // While sharing, my real pin/square is already exactly what everyone else sees.
@@ -3423,6 +3583,16 @@ function handleAction(action: string, node: HTMLElement): void {
       break
     }
     case 'check-in': void doCheckIn(); break
+    case 'toggle-pins': pinsOpen = !pinsOpen; if (!pinsOpen) armPinPlacement(null); render(); break
+    case 'drop-pin': { const k = node.dataset.kind; if (isPinKind(k)) void dropPinHere(k); break }
+    case 'place-pin': { const k = node.dataset.kind; if (isPinKind(k)) { armPinPlacement(k); render() } break }
+    case 'nav-pin': navigateToPin(node.dataset.id ?? ''); break
+    case 'remove-pin': {
+      const rc = activeCircle()
+      const rp = rc && cstate(rc.id).pins.find((x) => x.id === node.dataset.id)
+      if (rc && rp) void removePin(rc.id, rp)
+      break
+    }
     case 'open-dm': openDmThread(node.dataset.pk ?? ''); break
     case 'dm-close': closeDmThread(); break
     case 'battery-allow': batteryAsked = true; void import('../../native/stayReachable').then((m) => m.requestBatteryExemption()).catch(() => { /* older shell */ }); break
@@ -4689,6 +4859,10 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
           try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
         }
       }
+    } else if (t === 'pin') {
+      const pin = await decryptPin(c.seedHex, e.content)
+      if (pin.from !== e.pubkey) return // bind the dropper to the authenticated seal signer — no dropping pins as another member
+      landPin(c.id, pin)
     } else if (t === LOST_SIGNAL_TYPE) {
       const rep = await decryptLost(c.seedHex, e.content)
       if (rep.by !== e.pubkey) return // only report AS yourself (rep.member may be someone else's phone, but the reporter is the authenticated sender)

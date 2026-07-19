@@ -64,6 +64,9 @@ interface RadarSession {
   removeOrientation: () => void
   audio: AudioContext | null
   muted: boolean
+  /** A stationary waypoint (a dropped pin) — the native guide must not age it to
+   *  "stale" while the screen is locked. */
+  evergreen: boolean
   cue: RadarCue
   compassHeading: number | null
   lastFixes: TimedPosition[]
@@ -120,7 +123,7 @@ export function radarBeaconLanded(circleId: string, member: string): void {
   syncTarget(s)
 }
 
-export function openRadar(host: RadarHost): void {
+export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): void {
   closeRadar()
   const el = mountRadar(host)
   session = {
@@ -132,6 +135,7 @@ export function openRadar(host: RadarHost): void {
     removeOrientation: () => { /* replaced below */ },
     audio: null,
     muted: false,
+    evergreen: !!opts.evergreen,
     cue: { pattern: 'silent', periodMs: 0, toneHz: 0, vibrateMs: [] },
     compassHeading: null,
     lastFixes: [],
@@ -155,7 +159,7 @@ export function openRadar(host: RadarHost): void {
   void nativeGuideApi().then((m) => {
     if (!m || s.closed) return
     const t = host.getTarget()
-    void m.startRadarGuide(t ? { lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000 } : null, s.muted)
+    void m.startRadarGuide(t ? { lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, evergreen: s.evergreen } : null, s.muted)
       .then(() => { if (s.closed) void m.stopRadarGuide(); else s.nativeGuide = true })
   })
   void startOrientation(s)
