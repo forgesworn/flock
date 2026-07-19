@@ -9,7 +9,7 @@ test.describe('join notice — a new phone on the roster is never silent (audit 
     const B = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     // A's buzz becomes stored relay history — the roster B will replay on joining.
-    await sendBuzz(A, 'setup done')
+    await sendBuzz(A)
 
     const code = await inviteCode(A)
     await joinByCode(B, code)
@@ -19,7 +19,7 @@ test.describe('join notice — a new phone on the roster is never silent (audit 
     await expect(B.locator('.new-member-notice')).toHaveCount(0)
 
     // B's first signal reaches A: THAT is news — banner + a "new" badge on the row.
-    await sendBuzz(B, 'hello')
+    await sendBuzz(B)
     await gotoTab(A, 'circle')
     await expect(A.locator('.new-member-notice')).toBeVisible()
     await expect(A.locator('.member.unseen .pill.new')).toBeVisible()
@@ -27,7 +27,7 @@ test.describe('join notice — a new phone on the roster is never silent (audit 
     // Acknowledge → cleared, and it STAYS cleared on B's next signal.
     await A.click('[data-action="ack-new-members"]')
     await expect(A.locator('.new-member-notice')).toHaveCount(0)
-    await sendBuzz(B, 'again')
+    await sendBuzz(B)
     await expect(A.locator('.buzz-banner')).toBeVisible()
     await expect(A.locator('.new-member-notice')).toHaveCount(0)
   })

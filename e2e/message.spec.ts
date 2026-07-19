@@ -1,133 +1,113 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, goPrivate, gotoTab, settle, joinRemoteAwait, sendRemoteInvite } from './fixtures'
+import {
+  test,
+  expect,
+  newPerson,
+  createCircle,
+  inviteCode,
+  joinByCode,
+  startSharing,
+  goPrivate,
+  gotoTab,
+  settle,
+  joinRemoteAwait,
+  sendRemoteInvite,
+  quickAction,
+  openDmWith,
+  myPubkey,
+} from './fixtures'
 
-// Messaging: the circle chat (one Signal-style thread, its own Chat tab, shared
-// inbox like a buzz) and private 1:1 threads (gift-wrapped to one member's
-// personal inbox — only they can read it; the thread sheet lives behind people,
-// PMs under You). Everything goes over the selected relay, so the OTHER person's
-// screen proves the transport.
-test.describe('messaging — circle chat & private 1:1 threads', () => {
-  test('Home is the full-screen map; Chat is its own tab with the composer', async ({ browser }) => {
+// Flock coordinates with a deliberately bounded vocabulary. These scenarios
+// prove both delivery paths and the absence of a general-purpose composer.
+test.describe('structured circle and private signals', () => {
+  test('Home is the full-screen map; Signals has fixed actions and no composer', async ({ browser }) => {
     const A = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     await gotoTab(A, 'home')
-    // The map fills Home; the people and share bar float over the bottom of it.
     await expect(A.locator('.home-shell')).toBeVisible()
     await expect(A.locator('.map-status')).toBeVisible()
     await expect(A.locator('.member-strip')).toBeVisible()
-    await expect(A.locator('#chat-input')).toHaveCount(0)
-    // The composer lives on its own tab now.
+    // The coordination surface is its own tab — no signals card floats over Home.
+    await expect(A.locator('.chat-card')).toHaveCount(0)
+
     await gotoTab(A, 'chat')
-    await expect(A.locator('#chat-input')).toBeVisible()
+    await expect(A.locator('[data-action="check-in"]')).toHaveText('Check in')
+    await expect(A.locator('[data-action="group-signal"][data-signal="on_my_way"]')).toHaveText('On my way')
+    // Fixed actions only — there is no free-text field to type into.
+    await expect(A.locator('.chat-card textarea, .chat-card input')).toHaveCount(0)
   })
 
-  test('circle chat A→everyone — B gets a banner AND the message lands in B\'s thread', async ({ browser }) => {
+  test('circle action A→everyone — B gets a banner and both activity logs update', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // Type into the Chat tab composer and send to everyone.
-    await gotoTab(A, 'chat')
-    await A.fill('#chat-input', 'dinner at eight?')
-    await A.click('[data-action="chat-send"]')
-    // A's own message threads immediately (my side of the conversation).
-    await expect(A.locator('#chat-thread .msg.mine')).toContainText('dinner at eight?')
-
-    const banner = B.locator('.buzz-banner')
-    await expect(banner).toBeVisible()
-    await expect(banner).toContainText('dinner at eight?')
-    // …and it's in B's thread too — a conversation, not a fleeting banner.
+    await quickAction(A, 'On my way')
+    await expect(A.locator('#chat-thread .msg.mine')).toContainText('On my way')
+    await expect(B.locator('.buzz-banner')).toContainText('On my way')
     await gotoTab(B, 'chat')
-    await expect(B.locator('#chat-thread .msg')).toContainText('dinner at eight?')
+    await expect(B.locator('#chat-thread .msg')).toContainText('On my way')
   })
 
-  test('private 1:1 A→B — B gets a locked, private banner nobody else would', async ({ browser }) => {
+  test('private action A→B — fixed, encrypted to B, and recorded without a composer', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
-
-    // Populate both rosters over the relay, exactly as two phones on the map would:
-    // A sharing teaches B who A is (so B will ACCEPT A's DM — a stranger's is
-    // dropped); B sharing teaches A who B is (so B has a row/pin to message).
     await startSharing(A)
     await startSharing(B)
     await settle(A)
 
-    // A messages B privately from B's row on the Circle tab (the ✉️ button,
-    // behind the row's chevron) — it opens the whole 1:1 thread, not a one-shot box.
-    // Scoped to B's row specifically: A's own row now also gets a chevron once A
-    // has a beacon (for "see on map"), so a bare .first() would be a coin flip.
-    await gotoTab(A, 'circle')
-    await expect(A.locator('.member')).toHaveCount(2)
-    const bRow = A.locator('.member').filter({ hasNotText: 'You' })
-    await bRow.locator('[data-action="toggle-member-actions"]').click()
-    await bRow.locator('[data-action="msg-member"]').click()
+    const bPk = await myPubkey(B)
+    await openDmWith(A, bPk)
     await expect(A.locator('#dm-sheet')).toBeVisible()
-    await A.fill('#dm-input', 'meet you round the back')
-    await A.click('[data-action="dm-send"]')
-    // My message appears in the open thread.
-    await expect(A.locator('#dm-thread .msg.mine')).toContainText('meet you round the back')
+    await expect(A.locator('#dm-sheet textarea, #dm-sheet input')).toHaveCount(0)
+    await A.click('[data-action="dm-signal"][data-signal="where_are_you"]')
+    await expect(A.locator('#dm-thread .msg.mine')).toContainText('Where are you?')
 
     const banner = B.locator('.buzz-banner.private')
-    await expect(banner).toBeVisible()
-    await expect(banner).toContainText('meet you round the back')
+    await expect(banner).toContainText('Where are you?')
     await expect(banner).toContainText('just you')
-
-    // And B's copy lives under You → Private chats.
     await gotoTab(B, 'you')
-    await expect(B.locator('.dm-row')).toContainText('meet you round the back')
+    await expect(B.locator('.dm-row')).toContainText('Where are you?')
     await B.locator('.dm-row').first().click()
-    await expect(B.locator('#dm-thread .msg')).toContainText('meet you round the back')
+    await expect(B.locator('#dm-thread .msg')).toContainText('Where are you?')
+    await expect(B.locator('#dm-sheet textarea, #dm-sheet input')).toHaveCount(0)
   })
 
-  test('tapping a member pin on the map opens their private thread', async ({ browser }) => {
+  test('tapping a member pin on the map opens their private signals', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
-
-    // Keep A private so the only pin is B's, proving that tapping a member's pin
-    // opens their thread (tapping your own opens nothing).
     await startSharing(B)
     await settle(A)
     await goPrivate(A)
     await gotoTab(A, 'home')
 
-    const pin = A.locator('.map-pin')
-    await expect(pin.first()).toBeVisible()
-    await pin.first().click()
-
-    // The tap opens B's private thread, marked private (the lock title).
-    await expect(A.locator('#dm-sheet')).toBeVisible()
+    const pin = A.locator('.map-pin').first()
+    await expect(pin).toBeVisible()
+    await pin.click()
     await expect(A.locator('#dm-sheet')).toContainText('private')
+    await expect(A.locator('#dm-sheet textarea, #dm-sheet input')).toHaveCount(0)
   })
 
-  test('cold start — a freshly-invited member accepts the inviter\'s first DM', async ({ browser }) => {
-    // The members-gate drops DMs from unknown senders. A remote invite carries the
-    // inviter's key in its seal, so the joiner seeds their roster with the inviter
-    // on receipt — and A's very first message (before B has shared anything) lands.
+  test('cold start — a freshly invited member accepts the inviter\'s first fixed action', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     const npub = await joinRemoteAwait(B)
-    await sendRemoteInvite(A, npub) // A now has B; B, on receipt, seeds A into its roster
+    await sendRemoteInvite(A, npub)
     await settle(B)
 
-    // A messages B immediately — B has never emitted a beacon/buzz/join signal.
-    // Scope to B's row so a bare selector never depends on self-row controls.
-    await gotoTab(A, 'circle')
-    const bRow = A.locator('.member').filter({ hasNotText: 'You' })
-    await bRow.locator('[data-action="toggle-member-actions"]').click()
-    await bRow.locator('[data-action="msg-member"]').click()
-    await A.fill('#dm-input', 'welcome aboard')
-    await A.click('[data-action="dm-send"]')
+    const bPk = await myPubkey(B)
+    await openDmWith(A, bPk)
+    await A.click('[data-action="dm-signal"][data-signal="call_me"]')
 
     const banner = B.locator('.buzz-banner.private')
-    await expect(banner).toBeVisible()
-    await expect(banner).toContainText('welcome aboard')
+    await expect(banner).toContainText('Call me')
   })
 })

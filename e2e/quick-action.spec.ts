@@ -1,7 +1,7 @@
 import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, goPrivate, setSharePrecision, quickAction, dmComeToMe, openDmWith, myPubkey, settle, gotoTab, joinRemoteAwait, sendRemoteInvite } from './fixtures'
 
-// Quick actions are split: group-appropriate ones (Check in, On my way) live as
-// preset chips in the circle chat; person-to-person asks (Come to me, Where are
+// Fixed actions are split: group-appropriate ones (Check in, On my way) live in
+// the circle signal log; person-to-person asks (Come to me, Where are
 // you?, Call me) live in the PM sheet instead. See app/src/app.ts's
 // GROUP_QUICK_ACTIONS / DM_QUICK_ACTIONS split.
 test.describe('quick actions', () => {
@@ -36,7 +36,7 @@ test.describe('quick actions', () => {
     const bPk = await myPubkey(B)
     await openDmWith(A, bPk)
     await expect(A.locator('#dm-sheet')).toBeVisible()
-    await A.click('[data-action="dm-preset"][data-reason="Where are you?"]')
+    await A.click('[data-action="dm-signal"][data-signal="where_are_you"]')
 
     const banner = B.locator('.buzz-banner.private')
     await expect(banner).toBeVisible()

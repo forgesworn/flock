@@ -16,7 +16,7 @@ test.describe('make it ring — a lost phone sounds when a member rings it', () 
     await joinByCode(B, code)
 
     // B discovers A on A's first signal (the roster travels by signals).
-    await sendBuzz(A, 'hello')
+    await sendBuzz(A)
     await gotoTab(B, 'circle')
     await expect(B.locator('.member')).toHaveCount(2)
 

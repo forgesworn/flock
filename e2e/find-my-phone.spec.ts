@@ -24,7 +24,7 @@ test.describe('find my phone — a pre-authorised lost phone answers with an exa
     await expect(consent).toHaveAttribute('aria-checked', 'true')
 
     // B discovers A on A's first signal.
-    await sendBuzz(A, 'hello')
+    await sendBuzz(A)
     await gotoTab(B, 'circle')
     await expect(B.locator('.member')).toHaveCount(2)
 

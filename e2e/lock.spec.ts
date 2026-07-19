@@ -52,7 +52,7 @@ test.describe('app lock — key-at-rest (Phase E)', () => {
     await A.fill('#lock-pin-entry', PIN)
     await A.click('[data-action="lock-unlock"]')
     await expect(A.locator('button', { hasText: 'The Smiths' })).toBeVisible({ timeout: 15_000 })
-    await sendBuzz(B, 'still here?')
+    await sendBuzz(B)
     await gotoTab(A, 'circle')
     await expect(A.locator('.buzz-banner')).toBeVisible()
 
