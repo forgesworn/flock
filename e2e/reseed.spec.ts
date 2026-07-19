@@ -11,14 +11,14 @@ test.describe('reseed — rotate the circle key', () => {
     await joinByCode(B, code)
 
     // B buzzes A so A learns B's key — reseed is gift-wrapped to known members.
-    await sendBuzz(B, 'hi')
+    await sendBuzz(B)
     await gotoTab(A, 'circle')
     await expect(A.locator('.member')).toHaveCount(2)
 
     await reseed(A) // new seed → gift-wrapped to B → B re-subscribes to the new inbox
     await settle(B, 3000) // let B receive the reseed and resubscribe
 
-    await sendBuzz(A, 'still with you?') // sent on the NEW inbox
-    await expect(B.locator('.buzz-banner')).toContainText('still with you?') // only decryptable on the new seed
+    await sendBuzz(A) // sent on the NEW inbox
+    await expect(B.locator('.buzz-banner')).toContainText('On my way') // only decryptable on the new seed
   })
 })

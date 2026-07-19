@@ -1,29 +1,21 @@
 import { test, expect, newPerson, createCircle, inviteCode, joinByCode, sendBuzz, gotoTab } from './fixtures'
 
-test.describe('typing survives inbound re-renders (audit follow-up)', () => {
-  // The input-wipe bug: render-on-state rebuilds the DOM whenever a signal
-  // arrives, and whatever you were mid-typing vanished — then the next tap acted
-  // on the emptied field. Reproduce the original failure exactly: B is mid-typing
-  // a buzz reason when A's buzz lands and re-renders B's screen.
-  test("B's half-typed buzz reason survives A's incoming buzz", async ({ browser }) => {
+test.describe('fixed signal boundary', () => {
+  test('group coordination has only fixed actions before and after inbound traffic', async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
     await createCircle(A, { name: 'The Smiths' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // B starts typing a chat message — with real keystrokes, focus in the field.
     await gotoTab(B, 'chat')
-    await B.locator('#chat-input').pressSequentially('meet at the corner', { delay: 20 })
+    await expect(B.locator('.chat-card textarea, .chat-card input')).toHaveCount(0)
+    await expect(B.locator('[data-action="check-in"]')).toHaveText('Check in')
+    await expect(B.locator('[data-action="group-signal"][data-signal="on_my_way"]')).toHaveText('On my way')
 
-    // A's buzz lands on B mid-thought and re-renders B's whole screen.
-    await sendBuzz(A, 'where are you?')
-    await expect(B.locator('.buzz-banner')).toBeVisible()
-
-    // B's typing is still there — value AND focus — and sending it works.
-    await expect(B.locator('#chat-input')).toHaveValue('meet at the corner')
-    await B.locator('#chat-input').press('End')
-    await B.click('[data-action="chat-send"]')
-    await expect(A.locator('.buzz-banner')).toContainText('meet at the corner')
+    await sendBuzz(A)
+    await expect(B.locator('.buzz-banner')).toContainText('On my way')
+    await expect(B.locator('#chat-thread')).toContainText('On my way')
+    await expect(B.locator('.chat-card textarea, .chat-card input')).toHaveCount(0)
   })
 })

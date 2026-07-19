@@ -42,9 +42,9 @@ test.describe('backup & restore — survive losing the device', () => {
     await expect(A.locator('button', { hasText: 'The Smiths' })).toBeVisible({ timeout: 15_000 })
 
     // The proof it really works: B's next signal decrypts on the restored device.
-    await sendBuzz(B, 'still here?')
+    await sendBuzz(B)
     await gotoTab(A, 'circle')
     await expect(A.locator('.buzz-banner')).toBeVisible()
-    await expect(A.locator('.buzz-banner')).toContainText('still here?')
+    await expect(A.locator('.buzz-banner')).toContainText('On my way')
   })
 })

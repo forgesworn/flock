@@ -181,12 +181,12 @@ export async function setSharePrecision(page: Page, precision: number): Promise<
   await settle(page) // let the forced re-emit reach the relay
 }
 
-/** Tap a quick-action chip in the circle chat (Check in / Where are you? / Call me / On my way).
- *  "Check in" is its own action — it fans out to every circle as a roll-call. */
-export async function quickAction(page: Page, reason: string): Promise<void> {
+/** Tap one of the two fixed circle actions. "Check in" is its own handler
+ *  because it fans out to every circle as a roll-call. */
+export async function quickAction(page: Page, label: 'Check in' | 'On my way'): Promise<void> {
   await gotoTab(page, 'chat')
-  if (reason === 'Check in') await page.click('[data-action="check-in"]')
-  else await page.click(`[data-action="chat-preset"][data-reason="${reason}"]`)
+  if (label === 'Check in') await page.click('[data-action="check-in"]')
+  else await page.click('[data-action="group-signal"][data-signal="on_my_way"]')
 }
 
 /** PM "Come to me" — the confirmed quick action, private to one person, that
@@ -211,15 +211,10 @@ export function memberPill(page: Page, text: string | RegExp) {
   return page.locator('.member').filter({ hasNotText: 'You' }).locator('.pill', { hasText: text })
 }
 
-/** Send a message to the whole circle from the Chat tab's composer. A plain
- *  fill + click, deliberately: renders preserve the focused input (value +
- *  caret) across inbound re-renders, so every call is a live regression test
- *  of that fix. (Before it, an inbound signal between fill and click wiped
- *  the field and the send silently no-opped — the audit's input-wipe bug.) */
-export async function sendBuzz(page: Page, reason: string): Promise<void> {
-  await gotoTab(page, 'chat')
-  await page.fill('#chat-input', reason)
-  await page.click('[data-action="chat-send"]')
+/** Send a fixed group signal. Kept as `sendBuzz` for the transport/security
+ *  scenarios whose concern is relay delivery rather than the UI label. */
+export async function sendBuzz(page: Page, label: 'Check in' | 'On my way' = 'On my way'): Promise<void> {
+  await quickAction(page, label)
 }
 
 /** Expand a member's row on the Circle tab to reveal its routine actions

@@ -13,7 +13,7 @@ test.describe('lost phone — a peer flags it, anyone clears it', () => {
     await joinByCode(B, code)
 
     // B discovers A on A's first signal (the roster travels by signals, not the invite).
-    await sendBuzz(A, 'hello')
+    await sendBuzz(A)
     await gotoTab(B, 'circle')
     await expect(B.locator('.member')).toHaveCount(2)
 
@@ -34,24 +34,28 @@ test.describe('lost phone — a peer flags it, anyone clears it', () => {
     await expect(memberPill(B, 'phone lost')).toHaveCount(0)
   })
 
-  test("B's custom note shows on A's finder card instead of the generic text", async ({ browser }) => {
+  test("reporting lost has no free-text note — the finder card shows the fixed prompt", async ({ browser }) => {
     const A = await newPerson(browser)
     const B = await newPerson(browser)
     await createCircle(A, { name: 'Mallorca trip' })
     const code = await inviteCode(A)
     await joinByCode(B, code)
-    await sendBuzz(A, 'hello')
+    await sendBuzz(A)
     await gotoTab(B, 'circle')
     await expect(B.locator('.member')).toHaveCount(2)
 
     const aPk = await myPubkey(A)
     await B.click(`[data-action="toggle-member-actions"][data-pk="${aPk}"]`)
     await B.click(`[data-action="ask-lost"][data-pk="${aPk}"]`)
-    await B.fill(`#lost-note-${aPk}`, 'left in the blue Uber')
+    // The report is a bare flag now — the composer is gone, so the confirm has no
+    // free-text note field to fill; it offers only Report lost / Cancel.
+    await expect(B.locator('.member.editing input')).toHaveCount(0)
     await B.click(`[data-action="report-lost"][data-pk="${aPk}"]`)
 
+    // A's finder card carries the fixed prompt, not any composed message.
     await gotoTab(A, 'home')
     const card = A.locator('.card', { hasText: 'reported lost' })
-    await expect(card).toContainText('left in the blue Uber')
+    await expect(card).toBeVisible()
+    await expect(card).toContainText('Please help it home')
   })
 })

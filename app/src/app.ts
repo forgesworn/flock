@@ -25,7 +25,7 @@ import { giftWrap, giftUnwrap, rawNip44Decrypt, rotationDue, refreshDue } from '
 import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
-import { shouldRing, RING_VIBRATION, RING_REASON } from './ring'
+import { shouldRing, RING_VIBRATION } from './ring'
 import { openRadar, closeRadar, radarBeaconLanded } from './radarMode'
 import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
@@ -58,6 +58,13 @@ import {
   classifyPresence,
   buildBuzzSignal,
   decryptBuzz,
+  RING_LOST_PHONE_LABEL,
+  GROUP_COORDINATION_ACTIONS,
+  DIRECT_COORDINATION_ACTIONS,
+  coordinationLabel,
+  coordinationActionFromLabel,
+  isGroupCoordinationAction,
+  isDirectCoordinationAction,
   buildDisbandSignal,
   decryptDisband,
   DISBAND_SIGNAL_TYPE,
@@ -74,6 +81,8 @@ import {
   decryptBeacon,
   type MemberBeacon,
   type LostReport,
+  type GroupCoordinationAction,
+  type DirectCoordinationAction,
 } from '@forgesworn/flock'
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -1261,8 +1270,9 @@ function festivalCard(c: store.Circle): string {
 // is special in both: it also shares a one-shot exact spot, so it asks first
 // (see doComeToMe / doDmComeToMe). "Check in" fans out to EVERY circle asking
 // them all to show where they are (see doCheckIn) — group-only, deliberately.
-const GROUP_QUICK_ACTIONS = ['Check in', 'On my way'] as const
-const DM_QUICK_ACTIONS = ['Come to me', 'Where are you?', 'Call me', 'On my way'] as const
+// Flock carries this fixed provider-defined vocabulary, not user-authored chat.
+const GROUP_QUICK_ACTIONS = GROUP_COORDINATION_ACTIONS
+const DM_QUICK_ACTIONS = DIRECT_COORDINATION_ACTIONS
 
 /** How much of a thread the UI renders (the store keeps CHAT_MAX_PER_THREAD). */
 const CHAT_SHOWN = 50
@@ -1287,6 +1297,14 @@ function appendDm(peer: string, m: store.ChatMessage): boolean {
   persisted.dms = { ...(persisted.dms ?? {}), [peer]: next }
   store.save(persisted)
   return true
+}
+
+/** Render a provider-defined label locally; persisted history contains no prose. */
+function chatMessageLabel(m: store.ChatMessage): string {
+  if (m.action === 'shared_exact_location') {
+    return m.from === persisted.identity?.pk ? '📍 Shared your exact location' : '📍 Shared their exact location'
+  }
+  return coordinationLabel(m.action)
 }
 
 function threadReadAt(key: string): number { return persisted.chatReadAt?.[key] ?? 0 }
@@ -1366,31 +1384,25 @@ function memberStrip(): string {
   </button></div></div>`
 }
 
-/** The circle chat — one running, Signal-style thread for everyone in the
- *  circle. Quick actions live here as presets (they ARE messages) — just the
- *  ones that make sense said to a whole group; person-to-person asks ("Come to
- *  me", "Where are you?", "Call me") live in the PM sheet instead. */
+/** The circle's running coordination log. Only provider-defined group actions
+ *  can enter it; person-to-person actions live in the private sheet. */
 function chatSection(c: store.Circle): string {
   const list = persisted.chats?.[c.id] ?? []
   const thread = list.slice(-CHAT_SHOWN).map((m, i, arr) => chatBubble(m, arr[i - 1])).join('')
-    || `<div class="note chat-empty">No messages yet. Say something: everyone in ${esc(c.name)} sees it, it's encrypted end-to-end and lives only on your phones.</div>`
-  const chip = (r: string): string => r === 'Check in'
-    ? `<button class="btn small" data-action="check-in">${esc(r)}</button>`
-    : `<button class="btn small" data-action="chat-preset" data-reason="${esc(r)}">${esc(r)}</button>`
-  return `<div class="section-title" style="margin-top:22px">Chat · ${esc(c.name)}</div>
+    || `<div class="note chat-empty">No signals yet. Use one of the fixed actions below to coordinate with everyone in ${esc(c.name)}.</div>`
+  const chip = (action: GroupCoordinationAction): string => action === 'check_in'
+    ? `<button class="btn small" data-action="check-in">${esc(coordinationLabel(action))}</button>`
+    : `<button class="btn small" data-action="group-signal" data-signal="${action}">${esc(coordinationLabel(action))}</button>`
+  return `<div class="section-title" style="margin-top:22px">Signals · ${esc(c.name)}</div>
   <div class="card chat-card">
     <div class="chat-thread" id="chat-thread">${thread}</div>
     <div class="chip-row chat-presets">${GROUP_QUICK_ACTIONS.map(chip).join('')}</div>
-    <div class="chat-composer">
-      <textarea class="input" id="chat-input" rows="1" maxlength="500" placeholder="Message ${esc(c.name)}…" autocapitalize="sentences"></textarea>
-      <button class="btn small primary" data-action="chat-send">Send</button>
-    </div>
-    ${hint('chat', 'Messages go to everyone in this circle, encrypted end-to-end: the servers never see them. “Check in” also asks all your circles to show where they are. To message one person privately, and ask them to come to you with your exact spot, tap them above or on the map.')}
+    ${hint('chat', 'Signals go to everyone in this circle, encrypted end-to-end: the servers never see them. “Check in” also asks all your circles to show where they are. For a private action — including “Come to me” with a separately confirmed exact spot — tap one person above or on the map.')}
   </div>`
 }
 
-/** One chat bubble. The sender's name heads a run of their messages (Signal
- *  style) — never on my own (right-aligned) bubbles. */
+/** One fixed-action bubble. The sender's name heads a run of their messages
+ *  (Signal style) — never on my own (right-aligned) bubbles. */
 function chatBubble(m: store.ChatMessage, prev?: store.ChatMessage): string {
   const mine = m.from === persisted.identity?.pk
   const who = !mine && (!prev || prev.from !== m.from) ? `<span class="msg-who">${esc(nameFor(m.from))}</span>` : ''
@@ -1400,7 +1412,7 @@ function chatBubble(m: store.ChatMessage, prev?: store.ChatMessage): string {
     ? `<button class="btn small ghost" data-action="see-shared-location" data-geohash="${esc(m.geohash)}" data-pk="${esc(m.from)}">See on map</button>`
     : ''
   const size = m.precision !== undefined ? ` · ${esc(precisionSize(m.precision))}` : ''
-  return `<div class="msg${mine ? ' mine' : ''}">${who}<span class="msg-text">${esc(m.text)}${size}</span>${view}<span class="msg-when">${esc(fmtChatTime(m.at))}</span></div>`
+  return `<div class="msg${mine ? ' mine' : ''}">${who}<span class="msg-text">${esc(chatMessageLabel(m))}${size}</span>${view}<span class="msg-when">${esc(fmtChatTime(m.at))}</span></div>`
 }
 
 /** "14:02" today, "Wed 14:02" earlier — a running conversation's clock. */
@@ -1453,9 +1465,10 @@ function lostCard(c: store.Circle): string {
       <button class="btn primary" data-action="found-phone" data-pk="${me}">It's not lost — I've got it</button>
     </div>`
   }
-  const note = rep.message
-    ? `${esc(nameFor(rep.by))}: “${esc(rep.message)}”`
-    : `${esc(nameFor(rep.by))} flagged it in ${esc(c.name)}. Found this phone? Please help it home, its owner's friends can see roughly where it is.`
+  // Lost reports no longer carry a free-text note. Ignore any legacy `message`
+  // an older client may still send, and always show the fixed prompt — the app
+  // neither composes nor displays free-form text.
+  const note = `${esc(nameFor(rep.by))} flagged it in ${esc(c.name)}. Found this phone? Please help it home, its owner's friends can see roughly where it is.`
   return `<div class="card stack geo-issue" style="margin-top:14px" role="alert">
     <strong>This phone was reported lost</strong>
     <div class="note">${note}</div>
@@ -1500,7 +1513,6 @@ function circleMemberRow(pk: string, mePk: string): string {
     return `<div class="member editing">
       ${avatarHtml(pk, isMe)}
       <div class="meta"><div class="who">${esc(nameFor(pk))}</div><div class="when">Report their phone lost? Everyone sees it flagged, and the phone shows a message for whoever finds it. Nothing about their sharing changes.</div></div>
-      <input class="input" id="lost-note-${pk}" placeholder="Left in the blue Uber… (optional)" maxlength="200" style="flex-basis:100%" />
       <button class="btn small ghost" style="color:var(--alert);border-color:var(--alert-dim)" data-action="report-lost" data-pk="${pk}">Report lost</button>
       <button class="btn small ghost" data-action="cancel-lost" aria-label="Cancel">✕</button>
     </div>`
@@ -1722,7 +1734,7 @@ function privateChatsSection(): string {
     return '<div class="card muted">No private chats yet. Tap someone on the map or on Home to message them; only the two of you can read it.</div>'
   }
   const rows = entries.map(({ pk, last, unread }) => {
-    const preview = (last?.from === me ? 'You: ' : '') + (last?.text ?? '')
+    const preview = (last?.from === me ? 'You: ' : '') + (last ? chatMessageLabel(last) : '')
     return `<div class="member dm-row" data-action="open-dm" data-pk="${pk}" role="button" tabindex="0">
       ${avatarHtml(pk, false)}
       <div class="meta"><div class="who">${esc(nameFor(pk))}</div><div class="when">${esc(preview.length > 44 ? `${preview.slice(0, 43)}…` : preview)}</div></div>
@@ -2844,32 +2856,21 @@ function startMonitor(): void {
   }, 30_000)
 }
 
-// ── Buzz ─────────────────────────────────────────────────────────────────────
-async function sendBuzz(reason: string, target?: string, opts?: { quiet?: boolean }): Promise<void> {
+// ── Fixed group signals ──────────────────────────────────────────────────────
+/** Send a provider-defined group action to everyone in the active circle, and
+ *  record my own side of the thread (recipients append on decrypt; my echo is
+ *  skipped there). The action label appearing in the thread IS the feedback. */
+async function sendGroupSignal(action: GroupCoordinationAction): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
-  const r = reason.trim()
-  if (!r) { toast('Pick or type a reason'); return }
   try {
     const at = nowSec()
-    const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: r, timestamp: at, ...(target ? { target } : {}) })
+    const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, action, timestamp: at })
     await publishSignal(tmpl, c)
-    // An untargeted buzz IS a circle-chat message — record my own side of the
-    // thread (recipients append on decrypt; my echo is skipped there).
-    if (!target) appendChat(c.id, { from: id.pk, text: r, at })
-    if (!opts?.quiet) toast(target ? 'Buzzed' : 'Buzzed everyone')
-  } catch { toast('Message failed. Check your connection.') }
+    appendChat(c.id, { from: id.pk, action, at })
+  } catch { toast('Signal failed. Check your connection.') }
   refresh()
-}
-
-/** Send the circle-chat composer's text (or a preset chip) to everyone. */
-function chatSend(text: string): void {
-  const t = text.trim()
-  if (!t) { toast('Type a message first'); return }
-  const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
-  if (input) input.value = ''
-  void sendBuzz(t, undefined, { quiet: true }) // the message appearing in the thread IS the feedback
 }
 
 /** "Check in" — tell EVERY circle I'm OK, and ask them all to show where they
@@ -2882,9 +2883,9 @@ async function doCheckIn(): Promise<void> {
   for (const c of persisted.circles) {
     try {
       const at = nowSec()
-      const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: 'Check in', ask: 'location', timestamp: at })
+      const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, action: 'check_in', timestamp: at })
       await publishSignal(tmpl, c)
-      appendChat(c.id, { from: id.pk, text: 'Check in', at })
+      appendChat(c.id, { from: id.pk, action: 'check_in', at })
       sent++
     } catch { /* keep going — other circles may still be reachable */ }
   }
@@ -2942,7 +2943,7 @@ async function ringPhone(pk: string): Promise<void> {
   const id = persisted.identity
   if (!c || !id || !pk) return
   try {
-    await publishSignal(await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, reason: RING_REASON, target: pk }), c)
+    await publishSignal(await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, action: 'ring_lost_phone', target: pk }), c)
     toast(`Ringing ${nameFor(pk)}'s phone — it'll sound even on silent`)
   } catch { toast("Couldn't ring it — check your connection") }
 }
@@ -3004,13 +3005,13 @@ function cancelFindPing(): void {
  *  `message` is the reporter's own note ("left in the blue Uber") shown on the
  *  lost phone's own card instead of the generic text — only meaningful when
  *  marking lost, never on a clear. */
-async function sendLostReport(pk: string, lost: boolean, message?: string): Promise<void> {
+async function sendLostReport(pk: string, lost: boolean): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id || !pk) return
   try {
-    const note = lost ? message?.trim().slice(0, 200) : undefined
-    const report: LostReport = { member: pk, by: id.pk, lost, timestamp: nowSec(), ...(note ? { message: note } : {}) }
+    // No free-text note: a lost report carries only the fixed flag, never prose.
+    const report: LostReport = { member: pk, by: id.pk, lost, timestamp: nowSec() }
     await publishSignal(await buildLostSignal({ groupId: c.id, seedHex: c.seedHex, ...report }), c)
     cstate(c.id).lost.set(pk, report)
     if (!lost && pk === id.pk && beingRung?.circleId === c.id) beingRung = null // "I've got it" stops the ring card
@@ -3093,22 +3094,22 @@ function togglePingConsent(): void {
   render()
 }
 
-// ── Messaging (free text: group buzz, or private 1:1 DM) ─────────────────────
-/** Send a private direct message to ONE member — gift-wrapped to their personal
- *  inbox, never the shared circle inbox, so only they can read it. */
-async function sendDm(pk: string, text: string): Promise<void> {
+// ── Private coordination actions ─────────────────────────────────────────────
+/** Send one provider-defined private action to ONE member — gift-wrapped to
+ *  their personal inbox, never the shared circle inbox, so only they can read
+ *  it. The fixed action label rides as the wrap's `text` (covey-kit's DM API);
+ *  current clients validate and re-derive the action on receipt. */
+async function sendDm(pk: string, action: DirectCoordinationAction): Promise<void> {
   const c = activeCircle()
   const signer = getSigner()
   const id = persisted.identity
   if (!c || !signer || !id) return
-  const t = text.trim()
-  if (!t) { toast('Type a message first'); return }
   if (pk === id.pk) { toast("That's you"); return }
   try {
-    const wrap = await buildDmWrap(signer, pk, { circleId: c.id, text: t })
+    const wrap = await buildDmWrap(signer, pk, { circleId: c.id, text: coordinationLabel(action) })
     await svc.publishSigned(activeRelays(), wrap as never)
-    appendDm(pk, { from: id.pk, text: t, at: nowSec() }) // my side of the thread
-  } catch { toast('Message failed — check your connection') }
+    appendDm(pk, { from: id.pk, action, at: nowSec() }) // my side of the thread
+  } catch { toast('Signal failed — check your connection') }
 }
 
 /** Open a private 1:1 thread with one member. Mounted as an overlay so it never
@@ -3176,19 +3177,17 @@ function mountCircleMenu(): void {
   })
   el.addEventListener('click', (e) => { if (e.target === el) closeCircleMenu() }) // tap the dim backdrop to dismiss
 }
-/** The private-chat sheet: the whole 1:1 thread plus a composer — Signal's chat
- *  screen in miniature. The old one-shot compose sheet grew a memory. Presets
- *  here are the person-to-person asks — "Come to me" also shares your exact
- *  spot with just this person, so it asks first. */
+/** The private 1:1 signal sheet. "Come to me" also shares an exact spot with
+ *  this person, so it keeps a separate explicit confirmation. */
 function dmSheet(): string {
   if (!dmPeer) return ''
   const list = persisted.dms?.[dmPeer] ?? []
   const thread = list.slice(-CHAT_SHOWN).map((m, i, arr) => chatBubble(m, arr[i - 1])).join('')
-    || `<div class="note chat-empty">No messages yet, it's just the two of you. Encrypted so only ${esc(nameFor(dmPeer))} can read it.</div>`
-  const chip = (r: string): string => r === 'Come to me'
-    ? `<button class="btn small${dmComeToMeArmed ? ' primary' : ''}" data-action="dm-come-to-me">${esc(r)}</button>`
-    : `<button class="btn small" data-action="dm-preset" data-reason="${esc(r)}">${esc(r)}</button>`
-  // "Find them": radar straight from the person's chat (which is also what a
+    || `<div class="note chat-empty">No private signals yet. Choose a fixed action below; only ${esc(nameFor(dmPeer))} can read it.</div>`
+  const chip = (action: DirectCoordinationAction): string => action === 'come_to_me'
+    ? `<button class="btn small${dmComeToMeArmed ? ' primary' : ''}" data-action="dm-come-to-me">${esc(coordinationLabel(action))}</button>`
+    : `<button class="btn small" data-action="dm-signal" data-signal="${action}">${esc(coordinationLabel(action))}</button>`
+  // "Find them": radar straight from the person's signals (which is also what a
   // map-pin tap opens) — shown whenever they have a disclosed location in any
   // shared circle. Same consumer-only rules as everywhere else.
   const findCircle = persisted.circles.find((x) => (x.members ?? []).includes(dmPeer as string) && cstate(x.id).beacons.get(dmPeer as string))
@@ -3211,17 +3210,11 @@ function dmSheet(): string {
       <div class="chat-thread dm-thread" id="dm-thread">${thread}</div>
       <div class="chip-row chat-presets">${findBtn}${DM_QUICK_ACTIONS.map(chip).join('')}</div>
       ${confirm}
-      <div class="chat-composer">
-        <textarea class="input" id="dm-input" rows="1" maxlength="500" placeholder="Message ${esc(nameFor(dmPeer))}…" autocapitalize="sentences"></textarea>
-        <button class="btn small primary" data-action="dm-send">Send</button>
-      </div>
-      <div class="note">Private: encrypted so only they can read it. It stays out of the circle chat.</div>
+      <div class="note">Private: encrypted so only they can read it. It stays out of the circle signal log.</div>
     </div>
   </div>`
 }
-function mountDmSheet(opts?: { keepFocus?: boolean }): void {
-  const prior = document.getElementById('dm-input') as HTMLTextAreaElement | null
-  const keep = opts?.keepFocus ? prior?.value ?? '' : ''
+function mountDmSheet(): void {
   document.getElementById('dm-sheet')?.remove()
   if (!dmPeer) return
   const tmp = document.createElement('div')
@@ -3233,68 +3226,56 @@ function mountDmSheet(opts?: { keepFocus?: boolean }): void {
     const action = node.getAttribute('data-action') as string
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   })
-  const input = el.querySelector('#dm-input') as HTMLTextAreaElement | null
-  if (input) { input.value = keep; input.focus() }
   scrollChatToEnd()
 }
-/** Refresh ONLY the open thread's messages in place — no teardown, so the sheet
- *  never replays its entrance animation and the composer (value, caret, focus)
- *  is left exactly as the user had it. This is the hot path: a message sent or
- *  received re-renders the bubbles and re-scrolls, nothing else. Falls back to a
- *  full mount if the sheet isn't up yet (e.g. it was closed). */
+/** Refresh ONLY the open thread's signals in place — no teardown, so the sheet
+ *  never replays its entrance animation. Falls back to a full mount if the sheet
+ *  isn't up yet (e.g. it was closed). */
 function updateDmThread(): void {
   if (!dmPeer) return
   const threadEl = document.getElementById('dm-thread')
   if (!threadEl) { mountDmSheet(); return }
   const list = persisted.dms?.[dmPeer] ?? []
   threadEl.innerHTML = list.slice(-CHAT_SHOWN).map((m, i, arr) => chatBubble(m, arr[i - 1])).join('')
-    || `<div class="note chat-empty">No messages yet, it's just the two of you. Encrypted so only ${esc(nameFor(dmPeer))} can read it.</div>`
+    || `<div class="note chat-empty">No private signals yet. Choose a fixed action below; only ${esc(nameFor(dmPeer))} can read it.</div>`
   scrollChatToEnd()
 }
-/** Send text to the open DM thread, then refresh it in place. Shared by the
- *  composer's Send button and the preset chips (Where are you? / Call me / On
- *  my way) — "Come to me" is the one exception, since it also shares location
- *  and asks first (see doDmComeToMe). */
-function dmSendText(text: string): void {
+/** Send a fixed private action and refresh its log in place. */
+function dmSendAction(action: DirectCoordinationAction): void {
   const pk = dmPeer
-  const t = text.trim()
   if (!pk) return
-  if (!t) { toast('Type a message first'); return }
-  void sendDm(pk, t).then(() => { if (dmPeer === pk) updateDmThread() })
-}
-/** Send whatever's in the DM composer. */
-function dmSend(): void {
-  const input = document.getElementById('dm-input') as HTMLTextAreaElement | null
-  const t = input?.value ?? ''
-  if (input) input.value = ''
-  dmSendText(t)
+  void sendDm(pk, action).then(() => { if (dmPeer === pk) updateDmThread() })
 }
 
-/** A private direct message just arrived on my personal inbox. Surface it as the
- *  top banner (locked, "just you"), notify and buzz — but only from a member of a
- *  circle I'm actually in, so a stranger who scraped my npub can't spam or spoof a
- *  circle name at me. */
+/** A private coordination action just arrived on my personal inbox. Surface it as
+ *  the top banner (locked, "just you"), notify and buzz — but only from a member of
+ *  a circle I'm actually in, so a stranger who scraped my npub can't spam or spoof a
+ *  circle name at me. The wire carries only a fixed label (covey-kit's DM `text`);
+ *  translate it back to a provider action and DROP anything that isn't one, so a
+ *  free-text message from an old or modified client never renders. */
 function onIncomingDm(dm: DirectMessage): void {
   const me = persisted.identity
-  if (me && dm.from === me.pk) return // my own message echoed back — never notify myself
+  if (me && dm.from === me.pk) return // my own action echoed back — never notify myself
   const c = persisted.circles.find((x) => x.id === dm.circleId)
   if (!c || !(c.members ?? []).includes(dm.from)) return // not a fellow circle member — drop
-  const isNew = appendDm(dm.from, { from: dm.from, text: dm.text, at: dm.at })
+  const action = coordinationActionFromLabel(dm.text)
+  if (!isDirectCoordinationAction(action)) return // not a provider-defined private action — drop
+  const label = coordinationLabel(action)
+  const isNew = appendDm(dm.from, { from: dm.from, action, at: dm.at })
   // A relay replaying history (re-subscribe after a reconnect) repopulates the
-  // thread silently — only a genuinely new, recent message rings.
+  // thread silently — only a genuinely new, recent signal rings.
   if (!isNew || nowSec() - dm.at > MSG_FRESH_SEC) { refresh(); return }
   if (dmPeer === dm.from && !document.hidden) {
-    // Their thread is open in front of me — the message lands IN the sheet,
-    // refreshed in place (no teardown, no flicker, composer untouched).
+    // Their thread is open in front of me — refresh in place without flicker.
     markThreadRead(dmKeyOf(dm.from))
     updateDmThread()
     refresh()
     return
   }
-  raiseBuzz({ from: dm.from, reason: dm.text, mine: true, circle: c.name, private: true })
+  raiseBuzz({ from: dm.from, reason: label, mine: true, circle: c.name, private: true })
   // Private 1:1 → its own conversation notification, headed by the sender and
   // updated in place per person (Signal-style), distinct from a circle thread.
-  notifyIfHidden(dm.text, { kind: 'dm', title: nameFor(dm.from), group: `dm:${dm.from}`, sender: nameFor(dm.from) })
+  notifyIfHidden(label, { kind: 'dm', title: nameFor(dm.from), group: `dm:${dm.from}`, sender: nameFor(dm.from) })
   try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ }
   refresh()
 }
@@ -3315,8 +3296,8 @@ function onIncomingLocationShare(loc: PrivateLocationShare): void {
   // On-device only (the wrap was addressed to me alone); their own next ambient
   // beacon supersedes it by recency, so it can't outlive their real position.
   saveBeacon(c.id, { member: loc.from, geohash: loc.geohash, precision: loc.precision, timestamp: loc.at })
-  const text = '📍 Shared their exact location'
-  const isNew = appendDm(loc.from, { from: loc.from, text, at: loc.at, geohash: loc.geohash, precision: loc.precision })
+  const label = '📍 Shared their exact location'
+  const isNew = appendDm(loc.from, { from: loc.from, action: 'shared_exact_location', at: loc.at, geohash: loc.geohash, precision: loc.precision })
   if (!isNew || nowSec() - loc.at > MSG_FRESH_SEC) { refresh(); return }
   if (dmPeer === loc.from && !document.hidden) {
     markThreadRead(dmKeyOf(loc.from))
@@ -3324,8 +3305,8 @@ function onIncomingLocationShare(loc: PrivateLocationShare): void {
     refresh()
     return
   }
-  raiseBuzz({ from: loc.from, reason: text, mine: true, circle: c.name, private: true })
-  notifyIfHidden(text, { kind: 'dm', title: nameFor(loc.from), group: `dm:${loc.from}`, sender: nameFor(loc.from) })
+  raiseBuzz({ from: loc.from, reason: label, mine: true, circle: c.name, private: true })
+  notifyIfHidden(label, { kind: 'dm', title: nameFor(loc.from), group: `dm:${loc.from}`, sender: nameFor(loc.from) })
   try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ }
   refresh()
 }
@@ -3380,11 +3361,11 @@ async function doDmComeToMe(pk: string): Promise<void> {
   const id = persisted.identity
   const c = activeCircle()
   if (!signer || !id || !pk || !c) return
-  await sendDm(pk, 'Come to me')
+  await sendDm(pk, 'come_to_me')
   const fresh = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 5000, timeoutMs: 2500 })
   if (fresh) fix = fresh
   const use = fresh ?? fix
-  const done = (msg: string): void => { toast(msg); mountDmSheet({ keepFocus: true }) }
+  const done = (msg: string): void => { toast(msg); mountDmSheet() }
   if (!use) { done("Sent. Couldn't attach your spot."); return }
   const plan = decideEmission({
     mode: 'nightout',
@@ -3399,7 +3380,7 @@ async function doDmComeToMe(pk: string): Promise<void> {
     const geohash = encode(use.lat, use.lon, plan.precision)
     const wrap = await buildPrivateLocationWrap(signer, pk, { geohash, precision: plan.precision })
     await svc.publishSigned(activeRelays(), wrap as never)
-    appendDm(pk, { from: id.pk, text: '📍 Shared your exact location', at: nowSec(), geohash, precision: plan.precision })
+    appendDm(pk, { from: id.pk, action: 'shared_exact_location', at: nowSec(), geohash, precision: plan.precision })
     done('Sent, your exact spot is on its way')
   } catch { done("Sent. Couldn't attach your spot.") }
 }
@@ -3424,11 +3405,13 @@ function handleAction(action: string, node: HTMLElement): void {
       if (pk === persisted.identity?.pk) { tab = 'circle'; render() } else focusOnMember(pk)
       break
     }
-    case 'chat-send': chatSend((document.getElementById('chat-input') as HTMLTextAreaElement | null)?.value ?? ''); break
-    case 'chat-preset': chatSend(node.dataset.reason ?? ''); break
+    case 'group-signal': {
+      const signal = node.dataset.signal
+      if (isGroupCoordinationAction(signal)) void sendGroupSignal(signal)
+      break
+    }
     case 'check-in': void doCheckIn(); break
     case 'open-dm': openDmThread(node.dataset.pk ?? ''); break
-    case 'dm-send': dmSend(); break
     case 'dm-close': closeDmThread(); break
     case 'battery-allow': batteryAsked = true; void import('../../native/stayReachable').then((m) => m.requestBatteryExemption()).catch(() => { /* older shell */ }); break
     case 'rollcall-share': void doRollCallShare(); break
@@ -3451,20 +3434,19 @@ function handleAction(action: string, node: HTMLElement): void {
     }
     case 'ask-lost': lostConfirmPk = node.dataset.pk ?? null; render(); break
     case 'cancel-lost': lostConfirmPk = null; render(); break
-    case 'report-lost': {
-      const pk = node.dataset.pk ?? ''
-      const note = (document.getElementById(`lost-note-${pk}`) as HTMLInputElement | null)?.value ?? ''
-      void sendLostReport(pk, true, note)
-      break
-    }
+    case 'report-lost': void sendLostReport(node.dataset.pk ?? '', true); break
     case 'found-phone': void sendLostReport(node.dataset.pk ?? '', false); break
     case 'make-it-ring': void ringPhone(node.dataset.pk ?? ''); break
     case 'find-exact': void askFindPing(node.dataset.pk ?? ''); break
     case 'cancel-findping': cancelFindPing(); break
     case 'toggle-ping-consent': togglePingConsent(); break
-    case 'dm-preset': dmSendText(node.dataset.reason ?? ''); break
-    case 'dm-come-to-me': dmComeToMeArmed = !dmComeToMeArmed; mountDmSheet({ keepFocus: true }); break
-    case 'dm-come-to-me-cancel': dmComeToMeArmed = false; mountDmSheet({ keepFocus: true }); break
+    case 'dm-signal': {
+      const signal = node.dataset.signal
+      if (isDirectCoordinationAction(signal)) dmSendAction(signal)
+      break
+    }
+    case 'dm-come-to-me': dmComeToMeArmed = !dmComeToMeArmed; mountDmSheet(); break
+    case 'dm-come-to-me-cancel': dmComeToMeArmed = false; mountDmSheet(); break
     case 'dm-come-to-me-confirm': dmComeToMeArmed = false; void doDmComeToMe(dmPeer ?? ''); break
     case 'copy-invite': void copyInvite(); break
     case 'share-word-code': case 'new-word-code': void shareWordCode(); break
@@ -4649,9 +4631,12 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       if (bz.from !== e.pubkey) return // the actor is bound to the authenticated seal signer — no impersonating another member (mirrors 'joined')
       if (!me || bz.from !== me.pk) {
         const mine = !!me && bz.target === me.pk
-        // An untargeted buzz IS a circle-chat message — thread it. False = a
+        const label = bz.action === 'ring_lost_phone' ? RING_LOST_PHONE_LABEL : coordinationLabel(bz.action)
+        // A group action enters the circle log. False = a
         // relay replay repopulating history; those must stay silent.
-        const isNew = !bz.target ? appendChat(c.id, { from: bz.from, text: bz.reason, at: bz.timestamp }) : true
+        const isNew = isGroupCoordinationAction(bz.action)
+          ? appendChat(c.id, { from: bz.from, action: bz.action, at: bz.timestamp })
+          : true
         const isFresh = nowSec() - bz.timestamp <= MSG_FRESH_SEC
         // "Make it ring": if THIS phone is flagged lost and a member buzzed it,
         // escalate to the alarm channel — loud even on silent/DND — so whoever
@@ -4674,13 +4659,12 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
               locAsk = { circleId: c.id, from: bz.from, at: nowSec() }
             }
           }
-          raiseBuzz({ from: bz.from, reason: bz.reason, mine, circle: c.name })
+          raiseBuzz({ from: bz.from, reason: label, mine, circle: c.name })
           // The buzz banner is in-app only — with the screen off it must still
           // land as a system notification. With a sender attached this renders
           // as a Signal-style conversation per circle: title "Night out", lines
           // "Alex: Come to me", one notification updated in place.
-          const buzzBody = bz.reason || `Buzzed${mine ? ' you' : ' the circle'}`
-          notifyIfHidden(buzzBody, { kind: 'group', title: c.name, group: `group:${c.id}`, sender: nameFor(bz.from), conversation: c.name })
+          notifyIfHidden(label, { kind: 'group', title: c.name, group: `group:${c.id}`, sender: nameFor(bz.from), conversation: c.name })
           try { navigator.vibrate?.(mine ? [300, 120, 300, 120, 300] : [200, 100, 200]) } catch { /* no haptics */ }
         }
       }
