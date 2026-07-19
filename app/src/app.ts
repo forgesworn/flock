@@ -2865,13 +2865,17 @@ async function sendGroupSignal(action: GroupCoordinationAction): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
+  const at = nowSec()
+  // Optimistic echo: my own action lands in the thread IMMEDIATELY, decoupled
+  // from the network. A slow/stale relay or a stalled BLE hop must never make my
+  // tap look like it did nothing (the whole reported bug). The send follows; a
+  // genuine failure only toasts — the receiver skips my own echo on replay.
+  appendChat(c.id, { from: id.pk, action, at })
+  refresh()
   try {
-    const at = nowSec()
     const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, action, timestamp: at })
     await publishSignal(tmpl, c)
-    appendChat(c.id, { from: id.pk, action, at })
   } catch { toast('Signal failed. Check your connection.') }
-  refresh()
 }
 
 /** "Check in" — tell EVERY circle I'm OK, and ask them all to show where they
@@ -2880,13 +2884,17 @@ async function sendGroupSignal(action: GroupCoordinationAction): Promise<void> {
 async function doCheckIn(): Promise<void> {
   const id = persisted.identity
   if (!id) return
+  const at = nowSec()
+  // Optimistic echo first (see sendGroupSignal): record the check-in in every
+  // circle's thread and paint it before the network fan-out, so the tap always
+  // registers even on a slow or offline connection.
+  for (const c of persisted.circles) appendChat(c.id, { from: id.pk, action: 'check_in', at })
+  refresh()
   let sent = 0
   for (const c of persisted.circles) {
     try {
-      const at = nowSec()
       const tmpl = await buildBuzzSignal({ groupId: c.id, seedHex: c.seedHex, from: id.pk, action: 'check_in', timestamp: at })
       await publishSignal(tmpl, c)
-      appendChat(c.id, { from: id.pk, action: 'check_in', at })
       sent++
     } catch { /* keep going — other circles may still be reachable */ }
   }
@@ -2894,7 +2902,7 @@ async function doCheckIn(): Promise<void> {
   const ac = activeCircle()
   if (sharing && ac) { beaconCadence.delete(ac.id); void autoEmit() }
   toast(sent === 0
-    ? "Couldn't check in. Check your connection."
+    ? "Checked in locally — but couldn't reach the network. Check your connection."
     : sent === 1 ? 'Checked in. Asked everyone to show where they are.'
     : `Checked in with ${sent} circles. Asked everyone to show where they are.`)
   refresh()
@@ -3106,10 +3114,13 @@ async function sendDm(pk: string, action: DirectCoordinationAction): Promise<voi
   const id = persisted.identity
   if (!c || !signer || !id) return
   if (pk === id.pk) { toast("That's you"); return }
+  // Optimistic echo (see sendGroupSignal): my side of the thread updates now,
+  // not after the network round-trip.
+  appendDm(pk, { from: id.pk, action, at: nowSec() })
+  if (dmPeer === pk) updateDmThread()
   try {
     const wrap = await buildDmWrap(signer, pk, { circleId: c.id, text: coordinationLabel(action) })
     await svc.publishSigned(activeRelays(), wrap as never)
-    appendDm(pk, { from: id.pk, action, at: nowSec() }) // my side of the thread
   } catch { toast('Signal failed — check your connection') }
 }
 
