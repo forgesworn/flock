@@ -643,6 +643,10 @@ a.btn { text-decoration: none; }
   0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(0.85); }
   50% { opacity: 0.9; transform: translateX(-50%) scale(1.15); }
 }
+/* Our own full-screen drag surface over the map: it catches the touch (so maplibre
+   never sees it) and touch-action:none stops the browser treating it as a scroll. */
+.pin-catch { position: absolute; inset: 0; pointer-events: auto; touch-action: none; }
+.place-dbg { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .pin-place-bar {
   position: absolute; left: 12px; right: 12px;
   bottom: calc(var(--nav-h) + 12px + env(safe-area-inset-bottom));

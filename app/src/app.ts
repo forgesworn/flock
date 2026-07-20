@@ -451,7 +451,8 @@ async function enterPlacement(kind?: PinKind): Promise<void> {
   pinsOpen = false
   mountPinsSheet() // tear down the list sheet
   placing = true
-  mountPlacement() // the aim bar
+  dragDbg = { down: 0, move: 0, cancel: 0, up: 0 }
+  mountPlacement() // the aim bar + drag surface
   if (!fix) {
     const f = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 15_000, timeoutMs: 8000 }).catch(() => null)
     if (f) fix = f
@@ -462,11 +463,39 @@ async function enterPlacement(kind?: PinKind): Promise<void> {
   if (start) raiseDraftPin(start.lat, start.lon) // pin sits dead-centre → always visible
 }
 
-/** Show the pin and keep placingPos tracking it — showDraftPin wires the finger-
- *  follow (press+drag the map moves the pin), so onMove fires as the user moves it. */
+/** Show the pin at (lat,lon); the drag-catcher overlay (mountPlacement) then drives
+ *  its position as the user presses/drags anywhere over the map. */
 function raiseDraftPin(lat: number, lon: number): void {
   placingPos = { lat, lon }
-  mapView?.showDraftPin(lat, lon, (la, lo) => { placingPos = { lat: la, lon: lo } })
+  mapView?.showDraftPin(lat, lon)
+}
+
+// Live diagnostic counters for the placement drag — surfaced in the aim bar so a
+// failing device can report exactly what fired. TEMPORARY.
+let dragDbg = { down: 0, move: 0, cancel: 0, up: 0 }
+
+/** Wire the full-screen touch surface (over the map) that drives the draft pin.
+ *  It's OUR element, so maplibre's touch handling is entirely out of the loop —
+ *  pointer events on it are the whole story. A press snaps the pin to the finger,
+ *  a drag slides it (pointer-capture keeps move events flowing), a tap places it. */
+function wireDraftDrag(catcher: HTMLElement): void {
+  let pid: number | null = null
+  const dbg = (): void => { const el = document.getElementById('place-dbg'); if (el) el.textContent = `▾${dragDbg.down} ↔${dragDbg.move} ▴${dragDbg.up} ✕${dragDbg.cancel}` }
+  const put = (e: PointerEvent): void => { const p = mapView?.moveDraftPinToClient(e.clientX, e.clientY); if (p) placingPos = p }
+  catcher.addEventListener('pointerdown', (e) => {
+    if (pid !== null) return
+    pid = e.pointerId; dragDbg.down++; dbg()
+    try { catcher.setPointerCapture(e.pointerId) } catch { /* ok */ }
+    put(e)
+  })
+  catcher.addEventListener('pointermove', (e) => { if (e.pointerId === pid) { dragDbg.move++; dbg(); put(e) } })
+  const end = (which: 'up' | 'cancel') => (e: PointerEvent): void => {
+    if (e.pointerId !== pid) return
+    pid = null; dragDbg[which]++; dbg()
+    try { catcher.releasePointerCapture(e.pointerId) } catch { /* ok */ }
+  }
+  catcher.addEventListener('pointerup', end('up'))
+  catcher.addEventListener('pointercancel', end('cancel'))
 }
 
 /** Leave placement mode without dropping. */
@@ -1548,14 +1577,17 @@ function mountPinsSheet(): void {
  *  to sit over the map centre. Lives INSIDE .home-shell so the `.placing` fade can
  *  quiet the other overlays while you position the pin. */
 function placementUi(): string {
+  // A full-screen touch surface OVER the map catches the drag (id=pin-catch); the
+  // aim bar sits above it. Both are inside #pin-place (which is pointer-events:none).
   return `<div id="pin-place">
+    <div class="pin-catch" id="pin-catch" aria-hidden="true"></div>
     <div class="pin-place-bar" id="pin-place-bar">${placementBarInner()}</div>
   </div>`
 }
 
 function placementBarInner(): string {
   const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}">${esc(pinKindLabel(k))}</button>`).join('')
-  return `<div class="place-hint">Drag anywhere to move the 📌 to the exact spot</div>
+  return `<div class="place-hint">Drag anywhere to move the 📌 to the exact spot <span class="place-dbg" id="place-dbg"></span></div>
     <div class="pin-kind-row">${chips}</div>
     <div class="place-actions">
       <button class="btn ghost" data-action="pin-cancel">Cancel</button>
@@ -1576,6 +1608,8 @@ function mountPlacement(): void {
   if (!el) return
   shell.appendChild(el)
   wirePinActions(el)
+  const catcher = el.querySelector('#pin-catch') as HTMLElement | null
+  if (catcher) wireDraftDrag(catcher)
 }
 
 /** Wire every [data-action] within a freshly-built pins element (sheet or bar). */
