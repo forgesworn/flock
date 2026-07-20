@@ -571,15 +571,29 @@ a.btn { text-decoration: none; }
 }
 .rzv-pin .flag { font-size: 20px; line-height: 1; color: var(--warn); text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
 
-/* Dropped pins (Feature: droppable pins) — a distinct violet marker, tappable to navigate. */
+/* Dropped pins (Feature: droppable pins) — the KIND's glyph in a big badge with
+   a pointer tail, so what a pin is (and whose) reads at a glance: blue = someone
+   else's (named in the tag), green = mine. Tap to navigate; hold mine to move. */
 .drop-pin { display: flex; flex-direction: column; align-items: center; }
 .drop-pin .tag {
-  font-size: 11px; font-weight: 700;
+  font-size: 12px; font-weight: 700;
   background: rgba(124,156,255,0.16); border: 1px solid #7c9cff; color: #b9c8ff;
-  padding: 2px 7px; border-radius: 999px; white-space: nowrap; margin-bottom: 2px; box-shadow: var(--shadow);
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap; margin-bottom: 3px; box-shadow: var(--shadow);
 }
-.drop-pin .flag { font-size: 18px; line-height: 1; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+.drop-pin .glyph {
+  display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; font-size: 23px; line-height: 1;
+  background: var(--surface); border: 2px solid #7c9cff; border-radius: 50%;
+  box-shadow: 0 3px 9px rgba(0,0,0,0.5);
+}
+.drop-pin .pin-tip { /* not `.tip` — that's the global hint box */
+  width: 0; height: 0; margin-top: -2px;
+  border-left: 7px solid transparent; border-right: 7px solid transparent;
+  border-top: 10px solid #7c9cff;
+}
 .drop-pin.mine .tag { background: rgba(95,208,168,0.16); border-color: var(--safe); color: #a9e9d2; }
+.drop-pin.mine .glyph { border-color: var(--safe); }
+.drop-pin.mine .pin-tip { border-top-color: var(--safe); }
 
 /* ── Pins: a floating button, a list sheet, and a drag-to-aim placer ─────────── */
 /* The floating pins button — bottom-right, above the people strip, off the map's
@@ -684,7 +698,9 @@ a.btn { text-decoration: none; }
 .pin-kind.on { background: var(--safe-dim); border-color: var(--safe); color: var(--safe); }
 .place-actions { display: flex; gap: 10px; }
 .place-actions .btn { flex: 1; }
-.place-actions .pin-edit-del { flex: 0 0 auto; }
+/* .btn sets width:100%, which a flex-basis:auto item would honour — pinning the
+   width keeps the 🗑 square instead of swallowing the whole row. */
+.place-actions .pin-edit-del { flex: 0 0 54px; width: 54px; padding: 16px 0; }
 
 /* Meeting-point contributor pin — soft violet, distinct from live presence (blue). */
 .map-pin.contrib .dot { background: #a78bfa; box-shadow: 0 0 0 1px rgba(255,255,255,0.25); }
