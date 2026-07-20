@@ -976,12 +976,15 @@ function bootUnlocked(): void {
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
     // Belt-and-braces against a relay subscription going quietly dead even in a
     // long CONTINUOUSLY-foregrounded session (onForeground's rebuild only fires
-    // on an actual background→foreground transition, which never happens if
-    // the app was simply left open) — force a full teardown + rebuild every
-    // few minutes regardless. ensureSubscriptions() is idempotent by design, so
-    // this is a no-op the rest of the time; it's just insurance for the case
-    // where a subscription looks fine to us but silently stopped delivering.
-    window.setInterval(() => { stopAllSubs(); ensureSubscriptions() }, 180_000)
+    // on an actual background→foreground transition, which never happens if the
+    // app was simply left open) — force a full teardown + rebuild on a short
+    // cadence regardless. This is the ceiling on how long a message can hide
+    // behind a silently-dead REQ while someone sits watching the screen: it was
+    // 180s (the reported "chat lags by a few minutes"); 60s keeps the passive
+    // wait to a minute at worst while the interactive resubscribes below (opening
+    // Chat, coming forward) make the common case near-instant. resubscribe() is
+    // idempotent-cheap the rest of the time.
+    window.setInterval(() => { resubscribe() }, 60_000)
     // The interval above is unreliable while backgrounded, so also re-check the
     // moment the user brings flock forward — a fresh deploy then shows within
     // seconds of reopening, not up to 6 hours later. Capacitor resume is the
@@ -3593,7 +3596,15 @@ async function doDmComeToMe(pk: string): Promise<void> {
 
 function handleAction(action: string, node: HTMLElement): void {
   switch (action) {
-    case 'tab': tab = (node.dataset.tab as typeof tab); render(); break
+    case 'tab': {
+      const prev = tab
+      tab = node.dataset.tab as typeof tab
+      // Opening Chat is exactly when you're waiting on a reply — force a fresh
+      // REQ so a quietly-dead subscription can't hide it behind the failsafe.
+      if (tab === 'chat' && prev !== 'chat') resubscribe()
+      render()
+      break
+    }
     case 'switch-circle': if (chipHeldGuard) { chipHeldGuard = false; break } switchCircle(node.dataset.id as string); break
     case 'add-circle': adding = true; onboardStep = 'intro'; render(); break
     case 'go-invite': tab = 'circle'; showInvite = true; render(); break
@@ -4146,8 +4157,7 @@ function onForeground(): void {
   // "healthy" — force a full teardown + rebuild the moment the user actually
   // looks at the app again, when staleness would otherwise show up as
   // "messages just don't arrive" until the next full app restart.
-  stopAllSubs()
-  ensureSubscriptions()
+  resubscribe()
   // A WebGL context is a prime target for the OS to reclaim GPU memory from a
   // backgrounded WebView — reported live as "the map is black" after locking
   // the phone for a few minutes then waking it, fixed only by switching tabs
@@ -4796,6 +4806,16 @@ function ensureSubscriptions(): void {
 function stopAllSubs(): void {
   for (const stop of subs.values()) stop()
   subs.clear()
+}
+
+/** Force a fresh subscription: tear every REQ down and rebuild it. Unlike
+ *  ensureSubscriptions() — which is idempotent and so can't tell a silently-dead
+ *  REQ (socket open, EVENTs stopped) from a healthy one — this is the actual cure
+ *  for "messages arrive minutes late". Called on the moments the user is waiting
+ *  on others (opening Chat, coming to the foreground) and on a short failsafe. */
+function resubscribe(): void {
+  stopAllSubs()
+  ensureSubscriptions()
 }
 
 async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: string; id?: string }, inboxSk: Uint8Array): Promise<void> {
