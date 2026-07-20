@@ -339,6 +339,19 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   the map preview swaps 📍→🚗. Version-skew note: an older peer strictly rejects
   an unknown kind (drops that pin) — fine for a single-unit private app that
   updates together.
+- [x] **Edit a pin's icon + bigger icons (2026-07-20).** Every one of your own
+  pins gets a ✏️ **Edit** action in the list — it opens the same aim bar seeded
+  with the pin's current icon selected and on the draggable marker, so you can
+  re-icon and/or move it and **Save pin** in one step (previously only reachable
+  by a long-press framed as "move"). Icons enlarged across the picker (27 px),
+  the map badge (50 px), and the draft pin. **Bug found + fixed on the way:** pin
+  timestamps are whole seconds and `withPin` keeps the incumbent on a tie
+  (replay-proofing), so an edit/move/removal landing in the **same second** as the
+  version it replaced was silently discarded — a real defect in the shipped
+  move/delete too, not just the new edit. Fixed with `nextPinTs` — a re-send of an
+  existing id now carries `max(now, prev+1)`, so a legitimate local change always
+  outranks what it replaces. `e2e/pins.spec.ts` gained an edit-changes-icon test
+  (caught the bug as flakiness; deterministic after the fix).
 
 ## Messaging & map-led Home (2026-07-03)
 

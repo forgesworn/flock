@@ -56,6 +56,38 @@ test('pins: FAB → sheet → draggable-pin placement → listed', async ({ brow
   await expect(page.locator('.pins-fab .fab-count')).toHaveCount(0)
 })
 
+test('pins: edit a pin changes its icon in place', async ({ browser }) => {
+  const page = await newPerson(browser)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await createCircle(page, { name: 'Edit crew' })
+  await gotoTab(page, 'home')
+
+  // Drop a Car pin.
+  await page.locator('.pins-fab').click()
+  await page.click('[data-action="pin-place-start"]')
+  await page.click('[data-action="pin-kind"][data-kind="car"]')
+  await page.click('[data-action="pin-drop"]')
+  await page.locator('.pins-fab').click()
+  await expect(page.locator('.pin-row .pin-nav')).toContainText('Car')
+
+  // Edit it → the same aim bar opens, seeded with the pin's current icon selected
+  // and its glyph on the draggable pin. Switch the icon to Parking and save.
+  await page.click('.pin-row [data-action="edit-pin"]')
+  await expect(page.locator('#pin-place-bar')).toBeVisible()
+  await expect(page.locator('.pin-kind.on')).toHaveText(/Car/i)
+  await expect(page.locator('.draft-pin .flag')).toHaveText('🚗')
+  await page.click('[data-action="pin-kind"][data-kind="parking"]')
+  await expect(page.locator('.draft-pin .flag')).toHaveText('🅿️') // map preview swapped live
+  await page.click('[data-action="pin-drop"]') // "Save pin"
+  await expect(page.locator('.draft-pin')).toHaveCount(0)
+
+  // One pin still (edited in place, not a second drop), now showing the new icon.
+  await page.locator('.pins-fab').click()
+  await expect(page.locator('.pin-row')).toHaveCount(1)
+  await expect(page.locator('.pin-row .pin-nav')).toContainText('Parking')
+  await expect(page.locator('.pins-fab .fab-count')).toHaveText('1')
+})
+
 test('pins: Cancel leaves placement without dropping', async ({ browser }) => {
   const page = await newPerson(browser)
   await page.setViewportSize({ width: 390, height: 844 })

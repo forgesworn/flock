@@ -386,24 +386,36 @@ function landPin(circleId: string, pin: Pin): void {
   refresh()
 }
 
+/** A strictly-monotonic timestamp for RE-SENDING an existing pin id (an edit, a
+ *  move, a removal). Pins carry whole-second timestamps and withPin breaks ties by
+ *  keeping what it already holds (replay-proofing), so a change landing in the SAME
+ *  second as the version it replaces would be discarded as a stale echo — you'd move
+ *  or re-icon a pin and nothing would happen. Bump one past the prior entry so a
+ *  legitimate local change always outranks it. */
+function nextPinTs(prev?: Pin): number {
+  return prev ? Math.max(nowSec(), prev.timestamp + 1) : nowSec()
+}
+
 /** Drop a pin of `kind` at a spot for the active circle. Exact by construction
- *  (precision 9). Pass `reuseId` to MOVE an existing pin (same id, newer timestamp
- *  → latest-wins replaces it everywhere). Optimistic: lands locally then publishes. */
+ *  (precision 9). Pass `reuseId` to EDIT an existing pin — change its icon and/or
+ *  move it (same id, newer timestamp → latest-wins replaces it everywhere).
+ *  Optimistic: lands locally then publishes. */
 async function dropPin(kind: PinKind, lat: number, lon: number, reuseId?: string): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
   const precision = 9
+  const prev = reuseId ? cstate(c.id).pins.find((p) => p.id === reuseId) : undefined
   const pin: Pin = {
     id: reuseId ?? Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join(''),
     from: id.pk,
     kind,
     geohash: encode(lat, lon, precision),
     precision,
-    timestamp: nowSec(),
+    timestamp: nextPinTs(prev),
   }
   landPin(c.id, pin) // optimistic — see sendGroupSignal
-  toast(reuseId ? `Moved ${pinKindLabel(kind)}` : `Dropped ${pinKindLabel(kind)}`)
+  toast(reuseId ? `Updated ${pinKindLabel(kind)}` : `Dropped ${pinKindLabel(kind)}`)
   try {
     await publishSignal(await buildPinSignal({ groupId: c.id, seedHex: c.seedHex, ...pin }), c)
   } catch { toast("Pin saved — but couldn't reach the network.") }
@@ -419,7 +431,7 @@ async function removePin(circleId: string, pin: Pin): Promise<void> {
   const c = persisted.circles.find((x) => x.id === circleId)
   const id = persisted.identity
   if (!c || !id) return
-  const tomb: Pin = { ...pin, from: id.pk, timestamp: nowSec(), removed: true }
+  const tomb: Pin = { ...pin, from: id.pk, timestamp: nextPinTs(pin), removed: true }
   landPin(circleId, tomb)
   try {
     await publishSignal(await buildPinSignal({ groupId: c.id, seedHex: c.seedHex, ...tomb }), c)
@@ -1611,6 +1623,7 @@ function pinsSheet(): string {
   const list = pins.length
     ? pins.map((p) => `<div class="pin-row">
         <button class="btn pin-nav" data-action="nav-pin" data-id="${p.id}">🧭 <span>${esc(pinKindLabel(p.kind))}</span>${p.from === me ? '' : `<span class="pin-who">${esc(nameFor(p.from))}</span>`}</button>
+        ${p.from === me ? `<button class="btn ghost pin-edit" data-action="edit-pin" data-id="${p.id}" aria-label="Change icon or move this pin">✏️</button>` : ''}
         <button class="btn ghost pin-del" data-action="remove-pin" data-id="${p.id}" aria-label="Remove this pin">🗑</button>
       </div>`).join('')
     : '<div class="note pin-empty">No pins here yet. Drop one to mark a spot — your car, a meeting point, somewhere to steer clear of.</div>'
@@ -1677,12 +1690,17 @@ function placementBarInner(): string {
   // picker and the map always agree on what you're about to drop.
   const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}" aria-label="${esc(PIN_KINDS[k].label)}" title="${esc(PIN_KINDS[k].label)}"><span class="pk-glyph">${PIN_KINDS[k].glyph}</span><span class="pk-label">${esc(PIN_KINDS[k].label)}</span></button>`).join('')
   const editing = editingPinId !== null
-  return `<div class="place-hint">Pick an icon · hold the pin to lift it · drag or pinch the map to line up</div>
+  // Editing is the same aim bar seeded with this pin's icon + spot, so the icon
+  // strip doubles as "change the icon" — spell that out and save both in one tap.
+  const hint = editing
+    ? 'Change the icon, or hold the pin to move it · then save'
+    : 'Pick an icon · hold the pin to lift it · drag or pinch the map to line up'
+  return `<div class="place-hint">${hint}</div>
     <div class="pin-kind-row">${chips}</div>
     <div class="place-actions">
       <button class="btn ghost" data-action="pin-cancel">Cancel</button>
       ${editing ? '<button class="btn ghost pin-edit-del" data-action="pin-remove-editing" aria-label="Remove this pin">🗑</button>' : ''}
-      <button class="btn primary" data-action="pin-drop">${editing ? 'Move pin here' : 'Drop pin here'}</button>
+      <button class="btn primary" data-action="pin-drop">${editing ? 'Save pin' : 'Drop pin here'}</button>
     </div>`
 }
 
@@ -3893,6 +3911,7 @@ function handleAction(action: string, node: HTMLElement): void {
       break
     }
     case 'nav-pin': pinsOpen = false; mountPinsSheet(); navigateToPin(node.dataset.id ?? ''); break
+    case 'edit-pin': editPin(node.dataset.id ?? ''); break // opens placement seeded with the pin's icon + spot
     case 'remove-pin': {
       const rc = activeCircle()
       const rp = rc && cstate(rc.id).pins.find((x) => x.id === node.dataset.id)

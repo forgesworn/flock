@@ -582,7 +582,7 @@ a.btn { text-decoration: none; }
 }
 .drop-pin .glyph {
   display: flex; align-items: center; justify-content: center;
-  width: 44px; height: 44px; font-size: 23px; line-height: 1;
+  width: 50px; height: 50px; font-size: 27px; line-height: 1;
   background: var(--surface); border: 2px solid #7c9cff; border-radius: 50%;
   box-shadow: 0 3px 9px rgba(0,0,0,0.5);
 }
@@ -621,7 +621,8 @@ a.btn { text-decoration: none; }
 .pin-row { display: flex; align-items: center; gap: 8px; }
 .pin-row .pin-nav { flex: 1; display: inline-flex; align-items: center; gap: 8px; justify-content: flex-start; text-align: left; }
 .pin-row .pin-nav .pin-who { color: var(--muted); font-weight: 500; }
-.pin-row .pin-del { flex: none; width: auto; padding: 12px 14px; }
+.pin-row .pin-del,
+.pin-row .pin-edit { flex: none; width: auto; padding: 12px 14px; }
 
 /* Placement: a focused "aim, then drop" state laid over the live map. The other
    overlays fade so the map + draggable pin + aim bar are all there is. */
@@ -634,7 +635,7 @@ a.btn { text-decoration: none; }
    NB: maplibre owns .draft-pin's own `transform` (positioning) — never animate it
    here; the bob/pulse animate the inner .flag and the ::before/::after only. */
 .draft-pin {
-  font-size: 40px; line-height: 1; pointer-events: none; /* the MAP handles the
+  font-size: 46px; line-height: 1; pointer-events: none; /* the MAP handles the
   drag and moves this pin, so presses must pass straight through it */
   filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.6));
 }
@@ -695,12 +696,12 @@ a.btn { text-decoration: none; }
 .pin-kind {
   flex: 0 0 auto; scroll-snap-align: center;
   display: flex; flex-direction: column; align-items: center; gap: 3px;
-  width: 60px; border: 1px solid var(--line); background: var(--surface-2);
+  width: 68px; border: 1px solid var(--line); background: var(--surface-2);
   color: var(--muted); font: inherit; font-weight: 600;
-  padding: 8px 4px 6px; border-radius: 14px; cursor: pointer;
+  padding: 9px 4px 6px; border-radius: 14px; cursor: pointer;
   transition: transform 0.08s ease, background 0.12s ease, border-color 0.12s ease;
 }
-.pin-kind .pk-glyph { font-size: 22px; line-height: 1; }
+.pin-kind .pk-glyph { font-size: 27px; line-height: 1; }
 .pin-kind .pk-label { font-size: 11px; line-height: 1.1; white-space: nowrap; }
 .pin-kind:active { transform: scale(0.94); }
 .pin-kind.on { background: var(--safe-dim); border-color: var(--safe); color: var(--safe); }
