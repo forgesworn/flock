@@ -84,6 +84,25 @@ for (const p of PERMISSIONS) {
   }
 }
 
+// capacitor-mesh-ble declares ACCESS_FINE_LOCATION with maxSdkVersion="30"
+// (correct for a BLE library — API 31+ scans use BLUETOOTH_SCAN instead), but
+// the manifest merger grafts that cap onto OUR declaration too, so on Android
+// 12+ the APK stops requesting FINE at all. Coarse-only means every fix is
+// fuzzed ~2 km and throttled to one per 10 minutes — and on GrapheneOS with
+// network location off, no fixes at all (the "Looking for you…" card, measured
+// on-device 2026-07-20). tools:node="replace" makes the app's unrestricted
+// declaration win outright.
+if (!xml.includes('xmlns:tools=')) {
+  xml = xml.replace(/(<manifest\b)/, '$1 xmlns:tools="http://schemas.android.com/tools"')
+  changed = true
+}
+const fineRe = /<uses-permission android:name="android\.permission\.ACCESS_FINE_LOCATION"[^>]*\/>/
+const FINE_DECL = '<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="replace" />'
+if (!xml.includes(FINE_DECL)) {
+  xml = xml.replace(fineRe, FINE_DECL)
+  changed = true
+}
+
 if (xml.includes('android:allowBackup="true"')) {
   xml = xml.replace('android:allowBackup="true"', 'android:allowBackup="false"')
   changed = true
