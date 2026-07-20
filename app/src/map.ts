@@ -401,15 +401,15 @@ export class MapView {
       ;(el.querySelector('.tag') as HTMLElement).textContent = p.who ? `${p.label} · ${p.who}` : p.label
       ;(el.querySelector('.glyph') as HTMLElement).textContent = p.glyph
       const pinId = p.id
-      const canMove = p.mine
       el.style.cursor = 'pointer'
-      // Tap → navigate (radar); press-and-HOLD → move it (my own pins only), the
-      // same gesture as placing. Pointer-based so a hold is told apart from a tap.
+      // Tap → navigate (radar); press-and-HOLD → manage it (the app offers move
+      // for your own pins, remove for anyone's). Pointer-based so a hold is told
+      // apart from a tap.
       el.addEventListener('pointerdown', (ev) => {
         ev.stopPropagation() // touching a pin must not start a map pan
         const sx = ev.clientX, sy = ev.clientY
         let moved = false, longFired = false
-        const timer = canMove ? window.setTimeout(() => { longFired = true; this.pinLongPressCb?.(pinId) }, 450) : 0
+        const timer = window.setTimeout(() => { longFired = true; this.pinLongPressCb?.(pinId) }, 450)
         const mv = (e2: PointerEvent): void => { if (Math.hypot(e2.clientX - sx, e2.clientY - sy) > 10) { moved = true; window.clearTimeout(timer) } }
         const up = (): void => {
           window.clearTimeout(timer)
