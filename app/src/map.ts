@@ -42,8 +42,10 @@ export interface DroppedPinPoint {
   id: string
   lat: number
   lon: number
-  /** Local label (glyph + provider-defined name) — never free text. */
+  /** Provider-defined kind name (no glyph — that renders as the badge) — never free text. */
   label: string
+  /** The kind's fixed glyph, rendered large as the marker badge. */
+  glyph: string
   mine: boolean
   /** Dropper's petname, shown on OTHERS' pins so everyone knows whose pin is
    *  whose (mine read as mine by their green tag). Untrusted — textContent only. */
@@ -393,10 +395,11 @@ export class MapView {
     for (const p of points) {
       const el = document.createElement('div')
       el.className = `drop-pin${p.mine ? ' mine' : ''}`
-      // The label is a fixed glyph+name, but textContent keeps the marker path
-      // uniformly injection-proof like the member/rendezvous pins.
-      el.innerHTML = '<span class="tag"></span><span class="flag">📌</span>'
+      // The label/glyph are fixed vocabulary (and `who` a petname), but textContent
+      // keeps the marker path uniformly injection-proof like the member pins.
+      el.innerHTML = '<span class="tag"></span><span class="glyph"></span><span class="pin-tip"></span>'
       ;(el.querySelector('.tag') as HTMLElement).textContent = p.who ? `${p.label} · ${p.who}` : p.label
+      ;(el.querySelector('.glyph') as HTMLElement).textContent = p.glyph
       const pinId = p.id
       const canMove = p.mine
       el.style.cursor = 'pointer'

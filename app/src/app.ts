@@ -26,7 +26,7 @@ import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION } from './ring'
-import { PIN_KIND_LIST, pinLabel as pinKindLabel, isPinKind, buildPinSignal, decryptPin, withPin, type Pin, type PinKind } from './pin'
+import { PIN_KINDS, PIN_KIND_LIST, pinLabel as pinKindLabel, isPinKind, buildPinSignal, decryptPin, withPin, type Pin, type PinKind } from './pin'
 import { openRadar, closeRadar, radarBeaconLanded } from './radarMode'
 import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
@@ -2858,7 +2858,7 @@ function pinPoints(): DroppedPinPoint[] {
     .map((p) => {
       const d = decode(p.geohash)
       const mine = p.from === me
-      return { id: p.id, lat: d.lat, lon: d.lon, label: pinKindLabel(p.kind), mine, who: mine ? undefined : nameFor(p.from) }
+      return { id: p.id, lat: d.lat, lon: d.lon, label: PIN_KINDS[p.kind].label, glyph: PIN_KINDS[p.kind].glyph, mine, who: mine ? undefined : nameFor(p.from) }
     })
 }
 
