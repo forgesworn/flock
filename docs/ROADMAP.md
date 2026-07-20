@@ -362,6 +362,26 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   path, kept out of the common one. `enterPlacement` now seeds from `mapView.center()`
   only (dropped the `svc.currentPosition` background fetch + `flyTo`); `e2e/pins.spec.ts`
   header updated. Released as `adbd606`.
+- [x] **Bugfix — in-app QR join scanner said "Camera unavailable" on every
+  Android build (2026-07-20).** Reported on a Galaxy A32: tapping "Scan their
+  invite QR" (or "Scan their key QR") always showed the camera-denied fallback,
+  so the in-app join-by-QR path never worked on the APK. Root cause was native,
+  not JS: the scanner (`app/src/qrscan.ts`) calls `getUserMedia` inside the
+  WebView; Capacitor's `BridgeWebChromeClient.onPermissionRequest` maps that to a
+  runtime `android.permission.CAMERA` request — but the manifest never **declared**
+  CAMERA (`patch-android.mjs` listed location/FGS/notify/BLE/vibrate/wakelock but
+  not camera), and Android auto-**denies** a runtime request for an undeclared
+  permission with no dialog, so `getUserMedia` rejected → "Camera unavailable".
+  The scanner had never worked on Android; iPhone uses a different path (the OS
+  camera app opens invite links in Safari), which is why it went unnoticed. Fix:
+  `patch-android.mjs` now declares `android.permission.CAMERA` plus
+  `<uses-feature android:name="android.hardware.camera" android:required="false">`
+  (camera-less devices still install and fall back to the six-word code). Verified
+  in the merged manifest of the signed release APK (`aapt dump permissions`/`badging`
+  both show CAMERA + not-required camera feature). No JS change — the existing
+  "Camera unavailable — ask them to read you the six words instead" fallback still
+  covers a genuine user deny. Needs a reinstall of the rebuilt `flock-release.apk`
+  on the A32 to take effect.
 
 ## Messaging & map-led Home (2026-07-03)
 

@@ -72,6 +72,14 @@ const PERMISSIONS = [
   // RadarGuideService holds a short capped partial wakelock so the beep
   // scheduler + compass stay honest with the screen off.
   'android.permission.WAKE_LOCK',
+  // The in-app QR join scanner (app/src/qrscan.ts) calls getUserMedia inside the
+  // WebView. Capacitor's BridgeWebChromeClient.onPermissionRequest maps a WebView
+  // VIDEO_CAPTURE request to a runtime android.permission.CAMERA request — but
+  // Android auto-DENIES a runtime request for a permission the manifest never
+  // declares (no dialog shown), so getUserMedia rejects and the scanner shows
+  // "Camera unavailable" on every Android build (measured on a Galaxy A32,
+  // 2026-07-20). Declaring CAMERA lets the runtime prompt actually appear.
+  'android.permission.CAMERA',
 ]
 
 let xml = readFileSync(manifestPath, 'utf8')
@@ -82,6 +90,15 @@ for (const p of PERMISSIONS) {
     xml = xml.replace('</manifest>', `    <uses-permission android:name="${p}" />\n</manifest>`)
     changed = true
   }
+}
+
+// Declaring CAMERA implies a hard camera requirement for Play-style filtering;
+// pin it required="false" so a camera-less device can still install (the QR
+// scanner just falls back to the six-word code) — mirrors the bluetooth_le
+// uses-feature the mesh-ble plugin contributes.
+if (!xml.includes('android.hardware.camera"')) {
+  xml = xml.replace('</manifest>', '    <uses-feature android:name="android.hardware.camera" android:required="false" />\n</manifest>')
+  changed = true
 }
 
 // capacitor-mesh-ble declares ACCESS_FINE_LOCATION with maxSdkVersion="30"
