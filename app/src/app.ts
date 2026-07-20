@@ -284,6 +284,10 @@ let chipHeldGuard = false
 let onboardStep: 'intro' | 'create' | 'join' | 'await' | 'restore' = 'intro'
 let adding = false // adding another circle from within the app (not first-run onboarding)
 let ttlMode: 'ongoing' | 'today' | 'custom' = 'ongoing' // chosen lifetime for a new circle
+// The location posture + detail chosen for the circle being created/joined. Private
+// (disclosure-on-event) is the safety-first default; the user picks explicitly.
+let onboardTracking: 'always' | 'private' = 'private'
+let onboardPrecision = 6 // geohash precision my shares default to (= PRECISION_DEFAULT, inlined — declared later)
 let pinsOpen = false // the drop-a-pin panel is expanded
 let placingPinKind: PinKind | null = null // armed to drop this kind at the next map tap
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
@@ -1071,11 +1075,19 @@ function joinFromLink(code: string): void {
   } catch { toast('That join link is not valid — ask for a fresh one.') }
 }
 
+/** Stamp the joiner's own posture choices (device-local, never from the invite)
+ *  onto a circle they're joining — see postureFields / onboardTracking. */
+function applyJoinPosture(circle: store.Circle): void {
+  circle.trackingDefault = onboardTracking
+  circle.sharePrecision = onboardPrecision
+}
+
 function completeJoin(circle: store.Circle): void {
   persisted.identity ??= store.createIdentity()
   circle.members = [persisted.identity.pk]
   circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
   circle.pingConsent = false // remote exact location is a deliberate device-local opt-in
+  applyJoinPosture(circle)
   upsertCircle(circle, true)
   announceJoin(circle)
   pendingJoin = null
@@ -2041,6 +2053,23 @@ function chatView(): string {
 }
 
 // ── Views: onboarding ────────────────────────────────────────────────────────
+/** The location-posture + detail pickers shown when creating OR joining a circle
+ *  — a per-circle, device-local default each member picks for themselves. */
+function postureFields(): string {
+  const track = (v: 'always' | 'private', label: string): string =>
+    `<button class="btn small${onboardTracking === v ? ' primary' : ''}" data-action="ob-track" data-track="${v}">${esc(label)}</button>`
+  const prec = (v: number, label: string): string =>
+    `<button class="btn small${onboardPrecision === v ? ' primary' : ''}" data-action="ob-prec" data-prec="${v}">${esc(label)}</button>`
+  return `
+      <div class="field" style="text-align:left;margin-bottom:6px"><label>Location sharing</label></div>
+      <div class="chip-row" role="group" aria-label="Location sharing" style="margin-bottom:6px;justify-content:center">${track('private', 'Private')}${track('always', 'Always share')}</div>
+      <div class="note" style="margin-bottom:14px">${onboardTracking === 'private'
+        ? 'Hidden by default — your location goes out only when you check in or answer a request.'
+        : 'Shared continuously with this circle whenever sharing is on.'}</div>
+      <div class="field" style="text-align:left;margin-bottom:6px"><label>Detail when you share</label></div>
+      <div class="chip-row" role="group" aria-label="Detail" style="margin-bottom:18px;justify-content:center">${prec(6, 'Area')}${prec(7, 'Street')}${prec(9, 'Exact')}</div>`
+}
+
 function onboardingView(): string {
   let inner: string
   if (onboardStep === 'create') {
@@ -2054,10 +2083,11 @@ function onboardingView(): string {
       <div class="chip-row" role="group" aria-label="Lifetime" style="margin-bottom:10px;justify-content:center">
         ${ttlChip('ongoing', 'Ongoing')}${ttlChip('today', 'Today')}${ttlChip('custom', 'Custom')}
       </div>
-      <div id="ob-ttl-custom" class="row" style="gap:8px;justify-content:center;margin-bottom:22px"${ttlMode === 'custom' ? '' : ' hidden'}>
+      <div id="ob-ttl-custom" class="row" style="gap:8px;justify-content:center;margin-bottom:18px"${ttlMode === 'custom' ? '' : ' hidden'}>
         <input class="input" id="ttl-num" type="number" min="1" max="60" value="3" style="max-width:84px" />
         <select class="input" id="ttl-unit" style="max-width:120px"><option value="hours">hours</option><option value="days" selected>days</option></select>
       </div>
+      ${postureFields()}
       <div class="actions">
         <button class="btn primary" data-action="do-create">Create circle</button>
         <button class="btn ghost" data-action="back">Back</button>
@@ -2066,6 +2096,7 @@ function onboardingView(): string {
     inner = `
       <h1>Join a circle</h1>
       <p class="tagline">With them now? Scan the QR they're showing. Otherwise type the six words someone read you — just the first few letters of each finds it — or paste an invite code, or join remotely by sharing your key.</p>
+      ${postureFields()}
       <div class="actions" style="margin-bottom:18px">
         <button class="btn primary" data-action="scan-join">📷 Scan their invite QR</button>
       </div>
@@ -2267,6 +2298,8 @@ function wireOnboard(): void {
         const cust = document.getElementById('ob-ttl-custom')
         if (cust) (cust as HTMLElement).hidden = ttlMode !== 'custom'
       }
+      else if (a === 'ob-track') { onboardTracking = (node as HTMLElement).dataset.track === 'always' ? 'always' : 'private'; render() }
+      else if (a === 'ob-prec') { onboardPrecision = Number((node as HTMLElement).dataset.prec) || 6; render() }
       else if (a === 'cancel-add') { adding = false; onboardStep = 'intro'; render() }
       else if (a === 'do-create') doCreate()
       else if (a === 'do-join') doJoin()
@@ -3711,7 +3744,7 @@ function doCreate(): void {
     const sec = unit === 'hours' ? n * 3600 : n * 86_400
     expiresAt = sec > 0 ? nowSec() + sec : undefined
   }
-  upsertCircle(store.createCircle(name, 'nightout', persisted.identity.pk, persisted.circleRootHex, expiresAt), true)
+  upsertCircle(store.createCircle(name, 'nightout', persisted.identity.pk, persisted.circleRootHex, expiresAt, { trackingDefault: onboardTracking, sharePrecision: onboardPrecision }), true)
   onboardStep = 'intro'
   adding = false
   ttlMode = 'ongoing'
@@ -3740,6 +3773,7 @@ function doJoin(): void {
     circle.members = [persisted.identity.pk]
     circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
     circle.pingConsent = false // remote exact location is opt-in
+    applyJoinPosture(circle)
     upsertCircle(circle, true)
     onboardStep = 'intro'
     adding = false
@@ -4217,6 +4251,10 @@ async function autoEmit(): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id || !fix) { refresh(); return }
+  // Private posture (chosen at create/join): never a continuous beacon. Location
+  // still goes out on an explicit event — a check-in answer, a "come to me", a
+  // breach — through their own paths; the ambient share is simply off here.
+  if ((c.trackingDefault ?? 'always') === 'private') { refresh(); return }
   const f = fix
   // Mode is pinned to the share-live path regardless of the circle's stored mode
   // (legacy 'family' circles behave the same) — the slider drives the precision,
