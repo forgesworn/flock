@@ -300,6 +300,7 @@ let pinsOpen = false // the pins list sheet is open
 let placing = false // placement mode: a finger-draggable pin is on the map
 let placingKind: PinKind = 'meet' // the kind the draggable pin will drop
 let placingPos: { lat: number; lon: number } | null = null // the draggable pin's live spot (full precision)
+let editingPinId: string | null = null // when set, placement is MOVING this existing pin (not dropping a new one)
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
 let resetConfirm = false // inline confirm for the destructive "sign out & reset this device"
 let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
@@ -406,16 +407,16 @@ function landPin(circleId: string, pin: Pin): void {
   refresh()
 }
 
-/** Drop a pin of `kind` at a spot for the active circle — the caller's current
- *  fix, or a point they placed on the map. Exact by construction (precision 9).
- *  Optimistic: it lands locally first, then publishes. */
-async function dropPin(kind: PinKind, lat: number, lon: number): Promise<void> {
+/** Drop a pin of `kind` at a spot for the active circle. Exact by construction
+ *  (precision 9). Pass `reuseId` to MOVE an existing pin (same id, newer timestamp
+ *  → latest-wins replaces it everywhere). Optimistic: lands locally then publishes. */
+async function dropPin(kind: PinKind, lat: number, lon: number, reuseId?: string): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id) return
   const precision = 9
   const pin: Pin = {
-    id: Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join(''),
+    id: reuseId ?? Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join(''),
     from: id.pk,
     kind,
     geohash: encode(lat, lon, precision),
@@ -423,7 +424,7 @@ async function dropPin(kind: PinKind, lat: number, lon: number): Promise<void> {
     timestamp: nowSec(),
   }
   landPin(c.id, pin) // optimistic — see sendGroupSignal
-  toast(`Dropped ${pinKindLabel(kind)}`)
+  toast(reuseId ? `Moved ${pinKindLabel(kind)}` : `Dropped ${pinKindLabel(kind)}`)
   try {
     await publishSignal(await buildPinSignal({ groupId: c.id, seedHex: c.seedHex, ...pin }), c)
   } catch { toast("Pin saved — but couldn't reach the network.") }
@@ -441,50 +442,162 @@ async function removePin(circleId: string, pin: Pin): Promise<void> {
   } catch { /* the local tombstone stands; a re-broadcast can retry */ }
 }
 
-/** Enter placement mode: drop a finger-DRAGGABLE pin on the live map right at my
- *  exact location, then let me grab it and drag it — or tap elsewhere to jump it —
- *  to the precise spot. Drop lands it there at full precision. Fetches a fresh fix
- *  if I haven't got one; falls back to the map's centre if location is unavailable. */
+/** Enter placement mode: show a pin on the map IMMEDIATELY (at my last fix, else
+ *  the map centre — never blocking on a location lookup, or there'd be nothing to
+ *  grab), then long-press + drag it to the precise spot. Drop lands it there at full
+ *  precision. A fresh fix, if it lands, recentres and moves the pin onto me. */
 async function enterPlacement(kind?: PinKind): Promise<void> {
   if (!activeCircle()) return
   if (kind) placingKind = kind
   pinsOpen = false
   mountPinsSheet() // tear down the list sheet
   placing = true
-  mountPlacement() // the aim bar
+  mountPlacement() // the aim bar + drag surface
+  // Pin appears RIGHT NOW — on my last fix (recentre there) or the current centre.
+  if (fix) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true })
+  const start = fix ? { lat: fix.lat, lon: fix.lon } : mapView?.center()
+  if (start) raiseDraftPin(start.lat, start.lon)
+  // Refresh the fix in the background; if we didn't have one and it arrives, recentre
+  // and move the pin onto me — but never make the user wait to start dragging.
   if (!fix) {
     const f = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 15_000, timeoutMs: 8000 }).catch(() => null)
-    if (f) fix = f
+    if (f && placing) { fix = f; mapView?.flyTo({ lat: f.lat, lon: f.lon }, { instant: true }); raiseDraftPin(f.lat, f.lon) }
   }
-  if (!placing) return // cancelled while we awaited the fix
-  if (fix) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true }) // centre on me
-  const start = mapView?.center() ?? (fix ? { lat: fix.lat, lon: fix.lon } : null)
-  if (start) raiseDraftPin(start.lat, start.lon) // pin sits dead-centre → always visible
 }
 
-/** Show the pin and keep placingPos tracking it — showDraftPin wires the finger-
- *  follow (press+drag the map moves the pin), so onMove fires as the user moves it. */
+/** Show the pin at (lat,lon); the drag-catcher overlay (mountPlacement) then drives
+ *  its position as the user presses/drags anywhere over the map. */
 function raiseDraftPin(lat: number, lon: number): void {
   placingPos = { lat, lon }
-  mapView?.showDraftPin(lat, lon, (la, lo) => { placingPos = { lat: la, lon: lo } })
+  mapView?.showDraftPin(lat, lon)
 }
 
-/** Leave placement mode without dropping. */
+/** MOVE an existing pin: enter placement seeded from that pin (its kind, at its
+ *  spot), hiding the original so only the draggable copy shows. Long-pressed on the
+ *  map. Only my own pins are movable. Drop re-publishes it at the new spot. */
+function editPin(pinId: string): void {
+  const c = activeCircle()
+  if (!c) return
+  const pin = cstate(c.id).pins.find((p) => p.id === pinId)
+  if (!pin || pin.from !== persisted.identity?.pk) return
+  editingPinId = pinId
+  placingKind = pin.kind
+  pinsOpen = false
+  mountPinsSheet()
+  placing = true
+  mountPlacement()
+  updateMapData() // re-draw the pin layer WITHOUT the one we're moving
+  const d = decode(pin.geohash)
+  raiseDraftPin(d.lat, d.lon)
+}
+
+/** Wire the full-screen touch surface (over the map) that drives placement.
+ *  It's OUR element, so maplibre's gesture handling is entirely out of the loop —
+ *  every gesture the mode needs is recreated here deliberately:
+ *    · press-and-HOLD (≈0.3s, a buzz) picks the pin up; drag slides it; lift sets it
+ *    · a plain one-finger drag pans the MAP, so you can line up the exact spot
+ *    · a two-finger pinch zooms the map around the fingers' midpoint
+ *  A quick tap does nothing, so the pin is never nudged by accident.
+ *  pointer-capture keeps move events flowing for every tracked finger. */
+function wireDraftDrag(catcher: HTMLElement): void {
+  const fingers = new Map<number, { x: number; y: number }>() // pointerId → last seen
+  let firstId: number | null = null // the finger that can hold-grab the pin
+  let grabbed = false
+  let panning = false
+  let holdTimer = 0
+  let start = { x: 0, y: 0 }
+  let pinchD0 = 0 // finger separation when the pinch began (0 = no pinch active)
+  let pinchZ0 = 0 // zoom level when the pinch began
+  const put = (e: PointerEvent): void => { const p = mapView?.moveDraftPinToClient(e.clientX, e.clientY); if (p) placingPos = p }
+  const flag = (): Element | null => document.querySelector('.draft-pin')
+  const grab = (e: PointerEvent): void => {
+    grabbed = true
+    try { navigator.vibrate?.(15) } catch { /* no haptics — fine */ }
+    flag()?.classList.add('grabbed')
+    put(e) // the pin comes to your finger the instant it's picked up
+  }
+  const release = (): void => {
+    grabbed = false
+    window.clearTimeout(holdTimer)
+    flag()?.classList.remove('grabbed')
+  }
+  const two = (): { x: number; y: number }[] => [...fingers.values()]
+  const pinchDist = (): number => { const [a, b] = two(); return Math.hypot(a.x - b.x, a.y - b.y) }
+  catcher.addEventListener('pointerdown', (e) => {
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    try { catcher.setPointerCapture(e.pointerId) } catch { /* ok */ }
+    if (fingers.size === 1) {
+      firstId = e.pointerId
+      panning = false
+      start = { x: e.clientX, y: e.clientY }
+      holdTimer = window.setTimeout(() => grab(e), 280) // hold ≈0.3s to pick it up
+    } else if (fingers.size === 2 && !grabbed) {
+      // A second finger → pinch-zoom, definitely not a pick-up or a pan.
+      window.clearTimeout(holdTimer)
+      panning = false
+      pinchD0 = pinchDist()
+      pinchZ0 = mapView?.zoomLevel() ?? 0
+    }
+  })
+  catcher.addEventListener('pointermove', (e) => {
+    const f = fingers.get(e.pointerId)
+    if (!f) return
+    const prev = { x: f.x, y: f.y }
+    f.x = e.clientX; f.y = e.clientY
+    if (grabbed) { if (e.pointerId === firstId) put(e); return }
+    if (fingers.size >= 2) {
+      if (pinchD0 > 0) {
+        const [a, b] = two()
+        mapView?.zoomAtClient(pinchZ0 + Math.log2(pinchDist() / pinchD0), (a.x + b.x) / 2, (a.y + b.y) / 2)
+      }
+      return
+    }
+    // One finger, no pin in hand: past the slop it's a map pan — and no longer a
+    // pick-up, so a stray swipe never nudges the pin.
+    if (!panning && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) {
+      window.clearTimeout(holdTimer)
+      panning = true
+    }
+    if (panning) mapView?.panByPixels(prev.x - e.clientX, prev.y - e.clientY)
+  })
+  const end = (e: PointerEvent): void => {
+    if (!fingers.delete(e.pointerId)) return
+    try { catcher.releasePointerCapture(e.pointerId) } catch { /* ok */ }
+    if (e.pointerId === firstId) { firstId = null; release() }
+    if (fingers.size === 1) {
+      // Pinch down to one finger — it carries on as a plain pan.
+      pinchD0 = 0
+      panning = true
+    }
+    if (fingers.size === 0) { panning = false; pinchD0 = 0 }
+  }
+  catcher.addEventListener('pointerup', end)
+  catcher.addEventListener('pointercancel', end)
+}
+
+/** Leave placement mode without dropping (or without moving, when editing). */
 function exitPlacement(): void {
+  const wasEditing = editingPinId
   placing = false
   placingPos = null
+  editingPinId = null
   mapView?.hideDraftPin()
   mountPlacement()
+  if (wasEditing) updateMapData() // bring the un-moved pin back
 }
 
-/** Drop the selected kind exactly where the draggable pin sits now (precision 9). */
+/** Drop the pin exactly where it sits now (precision 9). When editing, reuse the
+ *  pin's id so this MOVES it rather than adding a new one. */
 async function confirmPlacement(): Promise<void> {
   const pos = placingPos ?? mapView?.draftPinPos() ?? null
+  const reuseId = editingPinId ?? undefined
   placing = false
   placingPos = null
+  editingPinId = null
   mapView?.hideDraftPin()
   mountPlacement()
-  if (pos) await dropPin(placingKind, pos.lat, pos.lon)
+  if (reuseId) updateMapData() // the moved pin returns via dropPin's landPin below
+  if (pos) await dropPin(placingKind, pos.lat, pos.lon, reuseId)
 }
 
 /** Switch which kind will drop, repainting the aim bar in place so the map and the
@@ -1548,18 +1661,29 @@ function mountPinsSheet(): void {
  *  to sit over the map centre. Lives INSIDE .home-shell so the `.placing` fade can
  *  quiet the other overlays while you position the pin. */
 function placementUi(): string {
+  // A full-screen touch surface OVER the map catches the drag (id=pin-catch); the
+  // aim bar sits above it. Both are inside #pin-place (which is pointer-events:none).
+  // Zoom buttons sit AFTER the catcher so they stack above it and take their own
+  // taps (pointer-events:auto), letting you frame the map while positioning a pin.
   return `<div id="pin-place">
+    <div class="pin-catch" id="pin-catch" aria-hidden="true"></div>
+    <div class="pin-zoom">
+      <button class="pin-zoom-btn" data-action="pin-zoom-in" aria-label="Zoom in">＋</button>
+      <button class="pin-zoom-btn" data-action="pin-zoom-out" aria-label="Zoom out">－</button>
+    </div>
     <div class="pin-place-bar" id="pin-place-bar">${placementBarInner()}</div>
   </div>`
 }
 
 function placementBarInner(): string {
   const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}">${esc(pinKindLabel(k))}</button>`).join('')
-  return `<div class="place-hint">Drag anywhere to move the 📌 to the exact spot</div>
+  const editing = editingPinId != null
+  return `<div class="place-hint">Hold the 📌 to lift it · drag or pinch the map to line up</div>
     <div class="pin-kind-row">${chips}</div>
     <div class="place-actions">
       <button class="btn ghost" data-action="pin-cancel">Cancel</button>
-      <button class="btn primary" data-action="pin-drop">Drop pin here</button>
+      ${editing ? '<button class="btn ghost pin-edit-del" data-action="pin-remove-editing" aria-label="Remove this pin">🗑</button>' : ''}
+      <button class="btn primary" data-action="pin-drop">${editing ? 'Move pin here' : 'Drop pin here'}</button>
     </div>`
 }
 
@@ -1576,6 +1700,8 @@ function mountPlacement(): void {
   if (!el) return
   shell.appendChild(el)
   wirePinActions(el)
+  const catcher = el.querySelector('#pin-catch') as HTMLElement | null
+  if (catcher) wireDraftDrag(catcher)
 }
 
 /** Wire every [data-action] within a freshly-built pins element (sheet or bar). */
@@ -2684,6 +2810,7 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   // Tap a member's pin → their private thread (skip my own pin — that's just me).
   mapView.onMemberClick((pk) => { if (pk && pk !== persisted.identity?.pk) openDmThread(pk) })
   mapView.onPinClick((pinId) => navigateToPin(pinId))
+  mapView.onPinLongPress((pinId) => editPin(pinId)) // press-and-hold a dropped pin → move it
   // A full re-init mid-placement (rare — an external render) builds a fresh map;
   // put the pin back where it was (raiseDraftPin re-wires the finger-follow too).
   if (placing && placingPos) raiseDraftPin(placingPos.lat, placingPos.lon)
@@ -2763,10 +2890,13 @@ function pinPoints(): DroppedPinPoint[] {
   const c = activeCircle()
   if (!c) return []
   const me = persisted.identity?.pk
-  return cstate(c.id).pins.map((p) => {
-    const d = decode(p.geohash)
-    return { id: p.id, lat: d.lat, lon: d.lon, label: pinKindLabel(p.kind), mine: p.from === me }
-  })
+  return cstate(c.id).pins
+    .filter((p) => p.id !== editingPinId) // the pin being moved shows as the draggable draft instead
+    .map((p) => {
+      const d = decode(p.geohash)
+      const mine = p.from === me
+      return { id: p.id, lat: d.lat, lon: d.lon, label: pinKindLabel(p.kind), mine, who: mine ? undefined : nameFor(p.from) }
+    })
 }
 
 function updateMapData(): void {
@@ -3752,6 +3882,15 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'pin-kind': { const k = node.dataset.kind; if (isPinKind(k)) setPlacingKind(k); break }
     case 'pin-cancel': exitPlacement(); break
     case 'pin-drop': void confirmPlacement(); break
+    case 'pin-zoom-in': mapView?.zoomIn(); break
+    case 'pin-zoom-out': mapView?.zoomOut(); break
+    case 'pin-remove-editing': { // delete the pin being moved, straight from the map
+      const ec = activeCircle()
+      const ep = ec && editingPinId ? cstate(ec.id).pins.find((x) => x.id === editingPinId) : null
+      if (ec && ep) { void removePin(ec.id, ep); toast(`Removed ${pinKindLabel(ep.kind)}`) }
+      exitPlacement()
+      break
+    }
     case 'nav-pin': pinsOpen = false; mountPinsSheet(); navigateToPin(node.dataset.id ?? ''); break
     case 'remove-pin': {
       const rc = activeCircle()

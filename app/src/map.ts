@@ -45,6 +45,9 @@ export interface DroppedPinPoint {
   /** Local label (glyph + provider-defined name) — never free text. */
   label: string
   mine: boolean
+  /** Dropper's petname, shown on OTHERS' pins so everyone knows whose pin is
+   *  whose (mine read as mine by their green tag). Untrusted — textContent only. */
+  who?: string
 }
 
 // Below this the area is smaller than the pin itself, so it reads as a point —
@@ -120,9 +123,9 @@ export class MapView {
   private contribMarkers: maplibregl.Marker[] = []
   private pinMarkers: maplibregl.Marker[] = []
   private draftMarker: maplibregl.Marker | null = null
-  private draftTeardown: (() => void) | null = null // unwire finger-follow + re-enable dragPan
   private pendingPins: DroppedPinPoint[] | null = null
   private pinClickCb: ((id: string) => void) | null = null
+  private pinLongPressCb: ((id: string) => void) | null = null
   private mapClickCb: ((lat: number, lon: number) => void) | null = null
   private ready = false
   private pendingFences: Geofence[] | null = null
@@ -235,6 +238,23 @@ export class MapView {
 
   /** Tap a dropped pin → its id (open radar / navigate to it). */
   onPinClick(cb: (id: string) => void): void { this.pinClickCb = cb }
+
+  /** Press-and-hold a dropped pin → its id (move it). */
+  onPinLongPress(cb: (id: string) => void): void { this.pinLongPressCb = cb }
+
+  zoomIn(): void { this.map.zoomIn() }
+  zoomOut(): void { this.map.zoomOut() }
+  zoomLevel(): number { return this.map.getZoom() }
+
+  /** Slide the camera by a screen-pixel delta (placement overlay pan gesture). */
+  panByPixels(dx: number, dy: number): void { this.map.panBy([dx, dy], { duration: 0 }) }
+
+  /** Jump to a zoom level keeping the map point under (clientX, clientY) fixed —
+   *  the anchor of the placement overlay's pinch gesture. */
+  zoomAtClient(zoom: number, clientX: number, clientY: number): void {
+    const r = this.map.getCanvasContainer().getBoundingClientRect()
+    this.map.easeTo({ zoom, around: this.map.unproject([clientX - r.left, clientY - r.top]), duration: 0 })
+  }
 
   /** Tap the empty map (not a marker) → the lat/lon tapped. Drives "place a pin
    *  here"; pass null to disarm. Markers stopPropagation, so this only fires on
@@ -376,68 +396,50 @@ export class MapView {
       // The label is a fixed glyph+name, but textContent keeps the marker path
       // uniformly injection-proof like the member/rendezvous pins.
       el.innerHTML = '<span class="tag"></span><span class="flag">📌</span>'
-      ;(el.querySelector('.tag') as HTMLElement).textContent = p.label
+      ;(el.querySelector('.tag') as HTMLElement).textContent = p.who ? `${p.label} · ${p.who}` : p.label
       const pinId = p.id
+      const canMove = p.mine
       el.style.cursor = 'pointer'
-      el.addEventListener('click', (ev) => { ev.stopPropagation(); this.pinClickCb?.(pinId) })
+      // Tap → navigate (radar); press-and-HOLD → move it (my own pins only), the
+      // same gesture as placing. Pointer-based so a hold is told apart from a tap.
+      el.addEventListener('pointerdown', (ev) => {
+        ev.stopPropagation() // touching a pin must not start a map pan
+        const sx = ev.clientX, sy = ev.clientY
+        let moved = false, longFired = false
+        const timer = canMove ? window.setTimeout(() => { longFired = true; this.pinLongPressCb?.(pinId) }, 450) : 0
+        const mv = (e2: PointerEvent): void => { if (Math.hypot(e2.clientX - sx, e2.clientY - sy) > 10) { moved = true; window.clearTimeout(timer) } }
+        const up = (): void => {
+          window.clearTimeout(timer)
+          el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up)
+          if (!moved && !longFired) this.pinClickCb?.(pinId)
+        }
+        el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up)
+      })
       this.pinMarkers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(this.map))
     }
   }
 
-  /** Raise a "place this pin" marker at (lat,lon) that FOLLOWS YOUR FINGER. Dragging
-   *  a tiny maplibre marker with a fingertip is unreliable (a near-miss pans the map
-   *  instead), so during placement we take over the gestures entirely: press+drag
-   *  ANYWHERE on the map and the pin tracks your finger to that exact point (a tap
-   *  drops it there). Implemented with raw POINTER events + pointer-capture on the
-   *  map container and `unproject` — deterministic, no dependency on maplibre's own
-   *  drag recognition — and every built-in gesture is disabled so nothing fights it
-   *  (zoom stays on the +/- buttons). `onMove` reports the live spot; full precision.
-   *  Replaces any existing draft. See app.ts placement. */
-  showDraftPin(lat: number, lon: number, onMove?: (lat: number, lon: number) => void): void {
-    this.hideDraftPin()
+  /** Show the "place this pin" marker at (lat,lon). It's just a visual marker
+   *  (pointer-events:none); the placement flow lays its OWN full-screen touch
+   *  surface OVER the map and drives the position via moveDraftPinToClient, so
+   *  maplibre's touch handling is never in the loop. Replaces any existing draft. */
+  showDraftPin(lat: number, lon: number): void {
+    this.draftMarker?.remove()
     const el = document.createElement('div')
     el.className = 'draft-pin'
     el.innerHTML = '<span class="flag">📌</span>'
-    const m = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([lon, lat]).addTo(this.map)
-    this.draftMarker = m
-    const map = this.map
-    const container = map.getCanvasContainer()
-    // Silence every built-in interaction so a one-finger drag can only mean "move
-    // the pin". Guarded — not all handlers exist in every build.
-    const gestures = [map.dragPan, map.touchZoomRotate, map.scrollZoom, map.doubleClickZoom, map.dragRotate, map.keyboard, map.boxZoom]
-    gestures.forEach((g) => { try { (g as { disable?: () => void })?.disable?.() } catch { /* absent */ } })
-    const prevTouchAction = container.style.touchAction
-    container.style.touchAction = 'none' // the browser must not treat the drag as a scroll/zoom
-    let pid: number | null = null
-    const put = (e: PointerEvent): void => {
-      const r = container.getBoundingClientRect()
-      const ll = map.unproject([e.clientX - r.left, e.clientY - r.top])
-      m.setLngLat(ll); onMove?.(ll.lat, ll.lng)
-    }
-    const down = (e: PointerEvent): void => {
-      if (pid !== null) return // already tracking a finger; ignore a second
-      pid = e.pointerId
-      try { container.setPointerCapture(e.pointerId) } catch { /* ok */ }
-      put(e) // a tap alone places the pin right there
-    }
-    const move = (e: PointerEvent): void => { if (e.pointerId === pid) put(e) }
-    const up = (e: PointerEvent): void => {
-      if (e.pointerId !== pid) return
-      pid = null
-      try { container.releasePointerCapture(e.pointerId) } catch { /* ok */ }
-    }
-    container.addEventListener('pointerdown', down)
-    container.addEventListener('pointermove', move)
-    container.addEventListener('pointerup', up)
-    container.addEventListener('pointercancel', up)
-    this.draftTeardown = (): void => {
-      container.removeEventListener('pointerdown', down)
-      container.removeEventListener('pointermove', move)
-      container.removeEventListener('pointerup', up)
-      container.removeEventListener('pointercancel', up)
-      container.style.touchAction = prevTouchAction
-      gestures.forEach((g) => { try { (g as { enable?: () => void })?.enable?.() } catch { /* absent */ } })
-    }
+    this.draftMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([lon, lat]).addTo(this.map)
+  }
+
+  /** Move the draft pin to a SCREEN point (client px) and return its new spot. The
+   *  placement overlay owns the pointer events and just tells us where the finger
+   *  is; we unproject that to a coordinate. Full precision. */
+  moveDraftPinToClient(clientX: number, clientY: number): { lat: number; lon: number } | null {
+    if (!this.draftMarker) return null
+    const r = this.map.getCanvasContainer().getBoundingClientRect()
+    const ll = this.map.unproject([clientX - r.left, clientY - r.top])
+    this.draftMarker.setLngLat(ll)
+    return { lat: ll.lat, lon: ll.lng }
   }
 
   /** The draft pin's current spot (full precision), or null if none is up. */
@@ -447,10 +449,7 @@ export class MapView {
     return { lat: p.lat, lon: p.lng }
   }
 
-  hideDraftPin(): void {
-    this.draftTeardown?.(); this.draftTeardown = null // unwire finger-follow + re-enable pan
-    this.draftMarker?.remove(); this.draftMarker = null
-  }
+  hideDraftPin(): void { this.draftMarker?.remove(); this.draftMarker = null }
 
   /**
    * Show (or clear) the meeting-point contributors — each person's cell at its
