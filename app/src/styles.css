@@ -620,12 +620,11 @@ a.btn { text-decoration: none; }
    NB: maplibre owns .draft-pin's own `transform` (positioning) — never animate it
    here; the bob/pulse animate the inner .flag and the ::before/::after only. */
 .draft-pin {
-  font-size: 40px; line-height: 1; cursor: grab; touch-action: none;
+  font-size: 40px; line-height: 1; pointer-events: none; /* the MAP handles the
+  drag and moves this pin, so presses must pass straight through it */
   filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.6));
 }
-.draft-pin:active { cursor: grabbing; }
 .draft-pin .flag { display: block; animation: pinbob 1.6s ease-in-out infinite; }
-.draft-pin:active .flag { animation: none; }
 .draft-pin::before { /* a pulsing halo behind the pin — reads as "active / movable" */
   content: ''; position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%);
   width: 30px; height: 30px; border-radius: 50%;

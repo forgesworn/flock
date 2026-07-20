@@ -120,6 +120,7 @@ export class MapView {
   private contribMarkers: maplibregl.Marker[] = []
   private pinMarkers: maplibregl.Marker[] = []
   private draftMarker: maplibregl.Marker | null = null
+  private draftTeardown: (() => void) | null = null // unwire finger-follow + re-enable dragPan
   private pendingPins: DroppedPinPoint[] | null = null
   private pinClickCb: ((id: string) => void) | null = null
   private mapClickCb: ((lat: number, lon: number) => void) | null = null
@@ -383,26 +384,41 @@ export class MapView {
     }
   }
 
-  /** Raise a single, finger-DRAGGABLE "place this pin" marker at (lat,lon). Grab it
-   *  and drag it anywhere — direct manipulation — or pan/zoom the map underneath and
-   *  it stays put geographically. Its lngLat is full precision, so the pin lands
-   *  exactly where it sits. `onMove` fires live through the drag (and on drop) so the
-   *  caller can track the spot. Replaces any existing draft. See app.ts placement. */
+  /** Raise a "place this pin" marker at (lat,lon) that FOLLOWS YOUR FINGER. Dragging
+   *  a tiny maplibre marker with a fingertip is fiddly (a near-miss pans the map
+   *  instead), so we flip it: map panning is turned OFF and a single-finger press +
+   *  drag ANYWHERE on the map moves the pin to wherever the finger is — a tap drops
+   *  it right there, a drag slides it. Two-finger gestures fall through so pinch-zoom
+   *  still works (as do the zoom buttons). Full precision; `onMove` reports the live
+   *  spot. Replaces any existing draft. See app.ts placement. */
   showDraftPin(lat: number, lon: number, onMove?: (lat: number, lon: number) => void): void {
-    this.draftMarker?.remove()
+    this.hideDraftPin()
     const el = document.createElement('div')
     el.className = 'draft-pin'
     el.innerHTML = '<span class="flag">📌</span>'
-    const m = new maplibregl.Marker({ element: el, anchor: 'bottom', draggable: true })
-      .setLngLat([lon, lat]).addTo(this.map)
-    const report = (): void => { const p = m.getLngLat(); onMove?.(p.lat, p.lng) }
-    m.on('drag', report)
-    m.on('dragend', report)
+    const m = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([lon, lat]).addTo(this.map)
     this.draftMarker = m
+    const map = this.map
+    map.dragPan.disable() // a one-finger drag moves the PIN, not the view
+    let dragging = false
+    const oneFinger = (e: { originalEvent: Event }): boolean => {
+      const t = (e.originalEvent as TouchEvent).touches
+      return !t || t.length <= 1 // mouse, or a single touch — ignore pinch
+    }
+    const put = (ll: maplibregl.LngLat): void => { m.setLngLat(ll); onMove?.(ll.lat, ll.lng) }
+    const down = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent): void => { if (oneFinger(e)) { dragging = true; put(e.lngLat) } }
+    const move = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent): void => { if (dragging && oneFinger(e)) put(e.lngLat) }
+    const end = (): void => { dragging = false }
+    map.on('mousedown', down); map.on('touchstart', down)
+    map.on('mousemove', move); map.on('touchmove', move)
+    map.on('mouseup', end); map.on('touchend', end)
+    this.draftTeardown = (): void => {
+      map.off('mousedown', down); map.off('touchstart', down)
+      map.off('mousemove', move); map.off('touchmove', move)
+      map.off('mouseup', end); map.off('touchend', end)
+      map.dragPan.enable()
+    }
   }
-
-  /** Jump the draft pin to a new spot without recreating it (e.g. a map tap). */
-  moveDraftPin(lat: number, lon: number): void { this.draftMarker?.setLngLat([lon, lat]) }
 
   /** The draft pin's current spot (full precision), or null if none is up. */
   draftPinPos(): { lat: number; lon: number } | null {
@@ -411,7 +427,10 @@ export class MapView {
     return { lat: p.lat, lon: p.lng }
   }
 
-  hideDraftPin(): void { this.draftMarker?.remove(); this.draftMarker = null }
+  hideDraftPin(): void {
+    this.draftTeardown?.(); this.draftTeardown = null // unwire finger-follow + re-enable pan
+    this.draftMarker?.remove(); this.draftMarker = null
+  }
 
   /**
    * Show (or clear) the meeting-point contributors — each person's cell at its
@@ -471,7 +490,7 @@ export class MapView {
     this.contribMarkers.forEach((m) => m.remove())
     this.rzvMarker?.remove()
     this.venueMarker?.remove()
-    this.draftMarker?.remove()
+    this.hideDraftPin() // unwire finger-follow handlers + re-enable pan before teardown
     this.map.remove()
   }
 }
