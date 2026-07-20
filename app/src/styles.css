@@ -610,25 +610,39 @@ a.btn { text-decoration: none; }
 .pin-row .pin-del { flex: none; width: auto; padding: 12px 14px; }
 
 /* Placement: a focused "aim, then drop" state laid over the live map. The other
-   overlays fade so the map + crosshair + aim bar are all there is. */
+   overlays fade so the map + draggable pin + aim bar are all there is. */
 .home-shell.placing #home-alerts,
 .home-shell.placing .home-overlay-bottom { opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
 #pin-place { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
-/* Anchored at the map's exact centre (bottom tip = map.getCenter(), where the pin
-   lands). A gentle bob + a shadow dot sell "this hovers over that spot". */
-.place-crosshair {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -100%);
-  font-size: 34px; line-height: 1; pointer-events: none;
-  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.6));
-  animation: pinbob 1.5s ease-in-out infinite;
+/* The draggable "place this pin" marker (a maplibre marker, so it lives on the map,
+   not in #pin-place). Big enough to grab with a fingertip; a pulsing halo + shadow
+   dot say "grab and move me"; the emoji's point (anchor: bottom) is the exact spot.
+   NB: maplibre owns .draft-pin's own `transform` (positioning) — never animate it
+   here; the bob/pulse animate the inner .flag and the ::before/::after only. */
+.draft-pin {
+  font-size: 40px; line-height: 1; cursor: grab; touch-action: none;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.6));
 }
-.place-crosshair::after {
-  content: ''; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%);
-  width: 10px; height: 4px; border-radius: 50%; background: rgba(0, 0, 0, 0.45);
+.draft-pin:active { cursor: grabbing; }
+.draft-pin .flag { display: block; animation: pinbob 1.6s ease-in-out infinite; }
+.draft-pin:active .flag { animation: none; }
+.draft-pin::before { /* a pulsing halo behind the pin — reads as "active / movable" */
+  content: ''; position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%);
+  width: 30px; height: 30px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(110,168,254,0.35), rgba(110,168,254,0) 70%);
+  animation: draftpulse 1.6s ease-in-out infinite; pointer-events: none;
+}
+.draft-pin::after { /* the ground dot the pin's point rests on */
+  content: ''; position: absolute; left: 50%; bottom: 1px; transform: translateX(-50%);
+  width: 9px; height: 4px; border-radius: 50%; background: rgba(0, 0, 0, 0.45); pointer-events: none;
 }
 @keyframes pinbob {
-  0%, 100% { transform: translate(-50%, -100%); }
-  50% { transform: translate(-50%, -112%); }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+@keyframes draftpulse {
+  0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(0.85); }
+  50% { opacity: 0.9; transform: translateX(-50%) scale(1.15); }
 }
 .pin-place-bar {
   position: absolute; left: 12px; right: 12px;
