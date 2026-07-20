@@ -45,6 +45,9 @@ export interface DroppedPinPoint {
   /** Local label (glyph + provider-defined name) — never free text. */
   label: string
   mine: boolean
+  /** Dropper's petname, shown on OTHERS' pins so everyone knows whose pin is
+   *  whose (mine read as mine by their green tag). Untrusted — textContent only. */
+  who?: string
 }
 
 // Below this the area is smaller than the pin itself, so it reads as a point —
@@ -122,6 +125,7 @@ export class MapView {
   private draftMarker: maplibregl.Marker | null = null
   private pendingPins: DroppedPinPoint[] | null = null
   private pinClickCb: ((id: string) => void) | null = null
+  private pinLongPressCb: ((id: string) => void) | null = null
   private mapClickCb: ((lat: number, lon: number) => void) | null = null
   private ready = false
   private pendingFences: Geofence[] | null = null
@@ -234,6 +238,23 @@ export class MapView {
 
   /** Tap a dropped pin → its id (open radar / navigate to it). */
   onPinClick(cb: (id: string) => void): void { this.pinClickCb = cb }
+
+  /** Press-and-hold a dropped pin → its id (move it). */
+  onPinLongPress(cb: (id: string) => void): void { this.pinLongPressCb = cb }
+
+  zoomIn(): void { this.map.zoomIn() }
+  zoomOut(): void { this.map.zoomOut() }
+  zoomLevel(): number { return this.map.getZoom() }
+
+  /** Slide the camera by a screen-pixel delta (placement overlay pan gesture). */
+  panByPixels(dx: number, dy: number): void { this.map.panBy([dx, dy], { duration: 0 }) }
+
+  /** Jump to a zoom level keeping the map point under (clientX, clientY) fixed —
+   *  the anchor of the placement overlay's pinch gesture. */
+  zoomAtClient(zoom: number, clientX: number, clientY: number): void {
+    const r = this.map.getCanvasContainer().getBoundingClientRect()
+    this.map.easeTo({ zoom, around: this.map.unproject([clientX - r.left, clientY - r.top]), duration: 0 })
+  }
 
   /** Tap the empty map (not a marker) → the lat/lon tapped. Drives "place a pin
    *  here"; pass null to disarm. Markers stopPropagation, so this only fires on
@@ -375,10 +396,25 @@ export class MapView {
       // The label is a fixed glyph+name, but textContent keeps the marker path
       // uniformly injection-proof like the member/rendezvous pins.
       el.innerHTML = '<span class="tag"></span><span class="flag">📌</span>'
-      ;(el.querySelector('.tag') as HTMLElement).textContent = p.label
+      ;(el.querySelector('.tag') as HTMLElement).textContent = p.who ? `${p.label} · ${p.who}` : p.label
       const pinId = p.id
+      const canMove = p.mine
       el.style.cursor = 'pointer'
-      el.addEventListener('click', (ev) => { ev.stopPropagation(); this.pinClickCb?.(pinId) })
+      // Tap → navigate (radar); press-and-HOLD → move it (my own pins only), the
+      // same gesture as placing. Pointer-based so a hold is told apart from a tap.
+      el.addEventListener('pointerdown', (ev) => {
+        ev.stopPropagation() // touching a pin must not start a map pan
+        const sx = ev.clientX, sy = ev.clientY
+        let moved = false, longFired = false
+        const timer = canMove ? window.setTimeout(() => { longFired = true; this.pinLongPressCb?.(pinId) }, 450) : 0
+        const mv = (e2: PointerEvent): void => { if (Math.hypot(e2.clientX - sx, e2.clientY - sy) > 10) { moved = true; window.clearTimeout(timer) } }
+        const up = (): void => {
+          window.clearTimeout(timer)
+          el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up)
+          if (!moved && !longFired) this.pinClickCb?.(pinId)
+        }
+        el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up)
+      })
       this.pinMarkers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(this.map))
     }
   }

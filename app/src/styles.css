@@ -649,7 +649,23 @@ a.btn { text-decoration: none; }
 /* Our own full-screen drag surface over the map: it catches the touch (so maplibre
    never sees it) and touch-action:none stops the browser treating it as a scroll. */
 .pin-catch { position: absolute; inset: 0; pointer-events: auto; touch-action: none; }
-.place-dbg { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* Own zoom controls during placement — the catcher covers MapLibre's, so re-expose
+   +/- here. They sit above the catcher and take their own taps. */
+.pin-zoom {
+  position: absolute; right: 12px; top: 38%;
+  display: flex; flex-direction: column; gap: 8px; pointer-events: auto;
+}
+.pin-zoom-btn {
+  width: 44px; height: 44px; border-radius: 12px;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg);
+  font: inherit; font-size: 22px; font-weight: 600; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; box-shadow: var(--shadow); touch-action: manipulation;
+}
+.pin-zoom-btn:active { background: var(--surface-2); }
+/* MapLibre's own top-right controls are dead during placement (the catcher covers
+   them), so hide them — .pin-zoom is the live control while positioning a pin. */
+.home-shell.placing .maplibregl-ctrl-top-right { display: none; }
 .pin-place-bar {
   position: absolute; left: 12px; right: 12px;
   bottom: calc(var(--nav-h) + 12px + env(safe-area-inset-bottom));
@@ -668,6 +684,7 @@ a.btn { text-decoration: none; }
 .pin-kind.on { background: var(--safe-dim); border-color: var(--safe); color: var(--safe); }
 .place-actions { display: flex; gap: 10px; }
 .place-actions .btn { flex: 1; }
+.place-actions .pin-edit-del { flex: 0 0 auto; }
 
 /* Meeting-point contributor pin — soft violet, distinct from live presence (blue). */
 .map-pin.contrib .dot { background: #a78bfa; box-shadow: 0 0 0 1px rgba(255,255,255,0.25); }
