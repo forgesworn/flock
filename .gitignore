@@ -59,3 +59,4 @@ docs/private/
 
 # Local deploy config — real host/user, never committed
 deploy/deploy.local.sh
+native/vectors/
