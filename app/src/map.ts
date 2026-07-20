@@ -119,6 +119,7 @@ export class MapView {
   private venueMarker: maplibregl.Marker | null = null
   private contribMarkers: maplibregl.Marker[] = []
   private pinMarkers: maplibregl.Marker[] = []
+  private draftMarker: maplibregl.Marker | null = null
   private pendingPins: DroppedPinPoint[] | null = null
   private pinClickCb: ((id: string) => void) | null = null
   private mapClickCb: ((lat: number, lon: number) => void) | null = null
@@ -382,6 +383,36 @@ export class MapView {
     }
   }
 
+  /** Raise a single, finger-DRAGGABLE "place this pin" marker at (lat,lon). Grab it
+   *  and drag it anywhere — direct manipulation — or pan/zoom the map underneath and
+   *  it stays put geographically. Its lngLat is full precision, so the pin lands
+   *  exactly where it sits. `onMove` fires live through the drag (and on drop) so the
+   *  caller can track the spot. Replaces any existing draft. See app.ts placement. */
+  showDraftPin(lat: number, lon: number, onMove?: (lat: number, lon: number) => void): void {
+    this.draftMarker?.remove()
+    const el = document.createElement('div')
+    el.className = 'draft-pin'
+    el.innerHTML = '<span class="flag">📌</span>'
+    const m = new maplibregl.Marker({ element: el, anchor: 'bottom', draggable: true })
+      .setLngLat([lon, lat]).addTo(this.map)
+    const report = (): void => { const p = m.getLngLat(); onMove?.(p.lat, p.lng) }
+    m.on('drag', report)
+    m.on('dragend', report)
+    this.draftMarker = m
+  }
+
+  /** Jump the draft pin to a new spot without recreating it (e.g. a map tap). */
+  moveDraftPin(lat: number, lon: number): void { this.draftMarker?.setLngLat([lon, lat]) }
+
+  /** The draft pin's current spot (full precision), or null if none is up. */
+  draftPinPos(): { lat: number; lon: number } | null {
+    if (!this.draftMarker) return null
+    const p = this.draftMarker.getLngLat()
+    return { lat: p.lat, lon: p.lng }
+  }
+
+  hideDraftPin(): void { this.draftMarker?.remove(); this.draftMarker = null }
+
   /**
    * Show (or clear) the meeting-point contributors — each person's cell at its
    * disclosed precision (exact = a dot, coarse = a "rough area" blob), in a distinct
@@ -440,6 +471,7 @@ export class MapView {
     this.contribMarkers.forEach((m) => m.remove())
     this.rzvMarker?.remove()
     this.venueMarker?.remove()
+    this.draftMarker?.remove()
     this.map.remove()
   }
 }

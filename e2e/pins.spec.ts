@@ -1,10 +1,11 @@
-// The redesigned pins flow: a bottom-right FAB opens a clean list sheet; "Drop a
-// pin" enters a placement mode with a fixed crosshair over the map's centre that
-// the user positions by dragging the map, a single kind picker, then Drop. Fixed
-// vocabulary only — no free text — so the no-free-form property still holds.
+// The pins flow: a bottom-right FAB opens a clean list sheet; "Drop a pin" enters
+// placement mode with a finger-DRAGGABLE pin on the map (starts on your exact
+// location; grab it, or tap the map, to move it), a single kind picker, then Drop
+// — which lands it at full precision. Fixed vocabulary only, so the no-free-form
+// property still holds. (The drag gesture itself is verified on-device.)
 import { test, expect, newPerson, createCircle, gotoTab } from './fixtures'
 
-test('pins: FAB → sheet → drag-to-aim placement → listed', async ({ browser }) => {
+test('pins: FAB → sheet → draggable-pin placement → listed', async ({ browser }) => {
   const page = await newPerson(browser)
   await page.setViewportSize({ width: 390, height: 844 }) // a real phone form factor
   await createCircle(page, { name: 'Weekend crew' })
@@ -22,20 +23,20 @@ test('pins: FAB → sheet → drag-to-aim placement → listed', async ({ browse
   await expect(page.locator('.pin-empty')).toBeVisible()
   await expect(page.locator('.pin-drop-cta')).toBeVisible()
 
-  // Enter placement: a crosshair over the map centre + an aim bar; the shell
+  // Enter placement: a draggable pin appears on the map + an aim bar; the shell
   // enters its focused "placing" state.
   await page.click('[data-action="pin-place-start"]')
   await expect(page.locator('#pins-sheet')).toHaveCount(0) // the list sheet stepped aside
-  await expect(page.locator('.place-crosshair')).toBeVisible()
+  await expect(page.locator('.draft-pin')).toBeVisible() // the finger-draggable pin
   await expect(page.locator('#pin-place-bar')).toBeVisible()
   await expect(page.locator('.home-shell.placing')).toBeVisible()
 
   // Pick a kind (single row, no duplicate "drop here / place on map" chips), then
-  // drop at wherever the crosshair — the map's centre — is now.
+  // drop the pin exactly where it sits.
   await page.click('[data-action="pin-kind"][data-kind="car"]')
   await expect(page.locator('.pin-kind.on')).toHaveText(/Car/i)
   await page.click('[data-action="pin-drop"]')
-  await expect(page.locator('.place-crosshair')).toHaveCount(0) // placement closed
+  await expect(page.locator('.draft-pin')).toHaveCount(0) // placement closed
 
   // The FAB now carries a count, and the pin is listed and navigable.
   await expect(page.locator('.pins-fab .fab-count')).toHaveText('1')
@@ -59,9 +60,9 @@ test('pins: Cancel leaves placement without dropping', async ({ browser }) => {
 
   await page.locator('.pins-fab').click()
   await page.click('[data-action="pin-place-start"]')
-  await expect(page.locator('.place-crosshair')).toBeVisible()
+  await expect(page.locator('.draft-pin')).toBeVisible()
   await page.click('[data-action="pin-cancel"]')
-  await expect(page.locator('.place-crosshair')).toHaveCount(0)
+  await expect(page.locator('.draft-pin')).toHaveCount(0)
   await expect(page.locator('.home-shell.placing')).toHaveCount(0)
   await expect(page.locator('.pins-fab .fab-count')).toHaveCount(0) // nothing dropped
 })

@@ -297,8 +297,9 @@ let ttlMode: 'ongoing' | 'today' | 'custom' = 'ongoing' // chosen lifetime for a
 let onboardTracking: 'always' | 'private' = 'private'
 let onboardPrecision = 6 // geohash precision my shares default to (= PRECISION_DEFAULT, inlined — declared later)
 let pinsOpen = false // the pins list sheet is open
-let placing = false // placement mode: a centre crosshair is up; drag the map to aim
-let placingKind: PinKind = 'meet' // the kind the placement crosshair will drop
+let placing = false // placement mode: a finger-draggable pin is on the map
+let placingKind: PinKind = 'meet' // the kind the draggable pin will drop
+let placingPos: { lat: number; lon: number } | null = null // the draggable pin's live spot (full precision)
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
 let resetConfirm = false // inline confirm for the destructive "sign out & reset this device"
 let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
@@ -440,40 +441,57 @@ async function removePin(circleId: string, pin: Pin): Promise<void> {
   } catch { /* the local tombstone stands; a re-broadcast can retry */ }
 }
 
-/** Enter placement mode: raise a centre crosshair over the live map and let the
- *  user drag the map under it to aim (finger fine-tuning), like every maps app.
- *  Starts on my current location, so the simplest gesture — drop without moving —
- *  lands the pin right where I am. Fetches a fresh fix if I haven't got one. */
+/** Enter placement mode: drop a finger-DRAGGABLE pin on the live map right at my
+ *  exact location, then let me grab it and drag it — or tap elsewhere to jump it —
+ *  to the precise spot. Drop lands it there at full precision. Fetches a fresh fix
+ *  if I haven't got one; falls back to the map's centre if location is unavailable. */
 async function enterPlacement(kind?: PinKind): Promise<void> {
   if (!activeCircle()) return
   if (kind) placingKind = kind
   pinsOpen = false
   mountPinsSheet() // tear down the list sheet
   placing = true
-  mountPlacement() // raise the crosshair + aim bar over the map
+  mountPlacement() // the aim bar
   if (!fix) {
     const f = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 15_000, timeoutMs: 8000 }).catch(() => null)
     if (f) fix = f
   }
-  if (fix && placing) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true })
+  if (!placing) return // cancelled while we awaited the fix
+  const start = fix ? { lat: fix.lat, lon: fix.lon } : mapView?.center() ?? null
+  if (fix) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true }) // start centred on me
+  if (start) raiseDraftPin(start.lat, start.lon)
+  // Tap the bare map to jump the pin there (drag fine-tunes) — "click and move".
+  mapView?.onMapClick((lat, lon) => { placingPos = { lat, lon }; mapView?.moveDraftPin(lat, lon) })
+}
+
+/** Show the draggable pin and keep placingPos tracking it live as the user drags. */
+function raiseDraftPin(lat: number, lon: number): void {
+  placingPos = { lat, lon }
+  mapView?.showDraftPin(lat, lon, (la, lo) => { placingPos = { lat: la, lon: lo } })
 }
 
 /** Leave placement mode without dropping. */
 function exitPlacement(): void {
   placing = false
+  placingPos = null
+  mapView?.hideDraftPin()
+  mapView?.onMapClick(null)
   mountPlacement()
 }
 
-/** Drop the selected kind wherever the crosshair (the map's centre) is now. */
+/** Drop the selected kind exactly where the draggable pin sits now (precision 9). */
 async function confirmPlacement(): Promise<void> {
-  const centre = mapView?.center()
+  const pos = placingPos ?? mapView?.draftPinPos() ?? null
   placing = false
+  placingPos = null
+  mapView?.hideDraftPin()
+  mapView?.onMapClick(null)
   mountPlacement()
-  if (centre) await dropPin(placingKind, centre.lat, centre.lon)
+  if (pos) await dropPin(placingKind, pos.lat, pos.lon)
 }
 
-/** Switch which kind the crosshair will drop, repainting the aim bar in place so
- *  the map and crosshair underneath are never disturbed mid-aim. */
+/** Switch which kind will drop, repainting the aim bar in place so the map and the
+ *  draggable pin underneath are never disturbed mid-aim. */
 function setPlacingKind(kind: PinKind): void {
   placingKind = kind
   const bar = document.getElementById('pin-place-bar')
@@ -1528,19 +1546,19 @@ function mountPinsSheet(): void {
   wirePinActions(el)
 }
 
-/** The placement overlay: a fixed centre crosshair over the map plus the aim bar.
- *  Lives INSIDE .home-shell (the map's own box), so the crosshair sits exactly at
- *  map.getCenter() — where the pin will land — regardless of the nav bar below. */
+/** The placement overlay: just the aim bar (kind + Cancel/Drop). The pin itself is
+ *  a draggable maplibre marker on the map (see raiseDraftPin), so nothing here needs
+ *  to sit over the map centre. Lives INSIDE .home-shell so the `.placing` fade can
+ *  quiet the other overlays while you position the pin. */
 function placementUi(): string {
   return `<div id="pin-place">
-    <div class="place-crosshair" aria-hidden="true">📌</div>
     <div class="pin-place-bar" id="pin-place-bar">${placementBarInner()}</div>
   </div>`
 }
 
 function placementBarInner(): string {
   const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}">${esc(pinKindLabel(k))}</button>`).join('')
-  return `<div class="place-hint">Drag the map to aim, then drop</div>
+  return `<div class="place-hint">Drag the 📌 to the exact spot — or tap the map to move it</div>
     <div class="pin-kind-row">${chips}</div>
     <div class="place-actions">
       <button class="btn ghost" data-action="pin-cancel">Cancel</button>
@@ -2669,6 +2687,12 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   // Tap a member's pin → their private thread (skip my own pin — that's just me).
   mapView.onMemberClick((pk) => { if (pk && pk !== persisted.identity?.pk) openDmThread(pk) })
   mapView.onPinClick((pinId) => navigateToPin(pinId))
+  // A full re-init mid-placement (rare — an external render) builds a fresh map;
+  // put the draggable pin back where it was so the user doesn't lose their spot.
+  if (placing && placingPos) {
+    raiseDraftPin(placingPos.lat, placingPos.lon)
+    mapView.onMapClick((lat, lon) => { placingPos = { lat, lon }; mapView?.moveDraftPin(lat, lon) })
+  }
   if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
   // Restore the prior zoom before data draws (create only takes a centre), so a
   // soft reopen returns at the same scale. A hard `camera` restore (below) also
