@@ -624,7 +624,10 @@ a.btn { text-decoration: none; }
   drag and moves this pin, so presses must pass straight through it */
   filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.6));
 }
-.draft-pin .flag { display: block; animation: pinbob 1.6s ease-in-out infinite; }
+.draft-pin .flag { display: block; animation: pinbob 1.6s ease-in-out infinite; transition: transform 0.12s ease; }
+/* Picked up: lift + enlarge so it's obvious the pin is now following your finger. */
+.draft-pin.grabbed .flag { animation: none; transform: scale(1.35) translateY(-6px); }
+.draft-pin.grabbed::before { animation-duration: 0.8s; }
 .draft-pin::before { /* a pulsing halo behind the pin — reads as "active / movable" */
   content: ''; position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%);
   width: 30px; height: 30px; border-radius: 50%;

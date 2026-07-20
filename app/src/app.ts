@@ -441,10 +441,10 @@ async function removePin(circleId: string, pin: Pin): Promise<void> {
   } catch { /* the local tombstone stands; a re-broadcast can retry */ }
 }
 
-/** Enter placement mode: drop a finger-DRAGGABLE pin on the live map right at my
- *  exact location, then let me grab it and drag it — or tap elsewhere to jump it —
- *  to the precise spot. Drop lands it there at full precision. Fetches a fresh fix
- *  if I haven't got one; falls back to the map's centre if location is unavailable. */
+/** Enter placement mode: show a pin on the map IMMEDIATELY (at my last fix, else
+ *  the map centre — never blocking on a location lookup, or there'd be nothing to
+ *  grab), then long-press + drag it to the precise spot. Drop lands it there at full
+ *  precision. A fresh fix, if it lands, recentres and moves the pin onto me. */
 async function enterPlacement(kind?: PinKind): Promise<void> {
   if (!activeCircle()) return
   if (kind) placingKind = kind
@@ -453,14 +453,16 @@ async function enterPlacement(kind?: PinKind): Promise<void> {
   placing = true
   dragDbg = { down: 0, move: 0, cancel: 0, up: 0 }
   mountPlacement() // the aim bar + drag surface
+  // Pin appears RIGHT NOW — on my last fix (recentre there) or the current centre.
+  if (fix) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true })
+  const start = fix ? { lat: fix.lat, lon: fix.lon } : mapView?.center()
+  if (start) raiseDraftPin(start.lat, start.lon)
+  // Refresh the fix in the background; if we didn't have one and it arrives, recentre
+  // and move the pin onto me — but never make the user wait to start dragging.
   if (!fix) {
     const f = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 15_000, timeoutMs: 8000 }).catch(() => null)
-    if (f) fix = f
+    if (f && placing) { fix = f; mapView?.flyTo({ lat: f.lat, lon: f.lon }, { instant: true }); raiseDraftPin(f.lat, f.lon) }
   }
-  if (!placing) return // cancelled while we awaited the fix
-  if (fix) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true }) // centre on me
-  const start = mapView?.center() ?? (fix ? { lat: fix.lat, lon: fix.lon } : null)
-  if (start) raiseDraftPin(start.lat, start.lon) // pin sits dead-centre → always visible
 }
 
 /** Show the pin at (lat,lon); the drag-catcher overlay (mountPlacement) then drives
@@ -475,24 +477,50 @@ function raiseDraftPin(lat: number, lon: number): void {
 let dragDbg = { down: 0, move: 0, cancel: 0, up: 0 }
 
 /** Wire the full-screen touch surface (over the map) that drives the draft pin.
- *  It's OUR element, so maplibre's touch handling is entirely out of the loop —
- *  pointer events on it are the whole story. A press snaps the pin to the finger,
- *  a drag slides it (pointer-capture keeps move events flowing), a tap places it. */
+ *  It's OUR element, so maplibre's touch handling is entirely out of the loop.
+ *  Interaction (as requested): PRESS-AND-HOLD to pick the pin up — a short hold
+ *  buzzes and the pin lifts — then drag to slide it to the exact spot; lift to
+ *  drop it there. A quick tap or a stray swipe does nothing, so you never nudge
+ *  the pin by accident. pointer-capture keeps the move events flowing mid-drag. */
 function wireDraftDrag(catcher: HTMLElement): void {
   let pid: number | null = null
-  const dbg = (): void => { const el = document.getElementById('place-dbg'); if (el) el.textContent = `▾${dragDbg.down} ↔${dragDbg.move} ▴${dragDbg.up} ✕${dragDbg.cancel}` }
+  let grabbed = false
+  let holdTimer = 0
+  let start = { x: 0, y: 0 }
+  const dbg = (): void => { const el = document.getElementById('place-dbg'); if (el) el.textContent = `▾${dragDbg.down} ↔${dragDbg.move} ▴${dragDbg.up} ✕${dragDbg.cancel}${grabbed ? ' ✊' : ''}` }
   const put = (e: PointerEvent): void => { const p = mapView?.moveDraftPinToClient(e.clientX, e.clientY); if (p) placingPos = p }
+  const flag = (): Element | null => document.querySelector('.draft-pin')
+  const grab = (e: PointerEvent): void => {
+    grabbed = true; dbg()
+    try { navigator.vibrate?.(15) } catch { /* no haptics — fine */ }
+    flag()?.classList.add('grabbed')
+    put(e) // the pin comes to your finger the instant it's picked up
+  }
+  const release = (): void => {
+    grabbed = false
+    window.clearTimeout(holdTimer)
+    flag()?.classList.remove('grabbed')
+  }
   catcher.addEventListener('pointerdown', (e) => {
     if (pid !== null) return
     pid = e.pointerId; dragDbg.down++; dbg()
+    start = { x: e.clientX, y: e.clientY }
     try { catcher.setPointerCapture(e.pointerId) } catch { /* ok */ }
-    put(e)
+    holdTimer = window.setTimeout(() => grab(e), 280) // hold ≈0.3s to pick it up
   })
-  catcher.addEventListener('pointermove', (e) => { if (e.pointerId === pid) { dragDbg.move++; dbg(); put(e) } })
+  catcher.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pid) return
+    dragDbg.move++; dbg()
+    if (grabbed) { put(e); return }
+    // Moved before the hold completed → a swipe, not a pick-up: cancel the grab so
+    // the pin isn't nudged by accident.
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) window.clearTimeout(holdTimer)
+  })
   const end = (which: 'up' | 'cancel') => (e: PointerEvent): void => {
     if (e.pointerId !== pid) return
-    pid = null; dragDbg[which]++; dbg()
+    pid = null; dragDbg[which]++; release()
     try { catcher.releasePointerCapture(e.pointerId) } catch { /* ok */ }
+    dbg()
   }
   catcher.addEventListener('pointerup', end('up'))
   catcher.addEventListener('pointercancel', end('cancel'))
@@ -1587,7 +1615,7 @@ function placementUi(): string {
 
 function placementBarInner(): string {
   const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}">${esc(pinKindLabel(k))}</button>`).join('')
-  return `<div class="place-hint">Drag anywhere to move the 📌 to the exact spot <span class="place-dbg" id="place-dbg"></span></div>
+  return `<div class="place-hint">Press &amp; hold, then drag the 📌 to the exact spot <span class="place-dbg" id="place-dbg"></span></div>
     <div class="pin-kind-row">${chips}</div>
     <div class="place-actions">
       <button class="btn ghost" data-action="pin-cancel">Cancel</button>
