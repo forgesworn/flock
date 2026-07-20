@@ -288,8 +288,9 @@ let ttlMode: 'ongoing' | 'today' | 'custom' = 'ongoing' // chosen lifetime for a
 // (disclosure-on-event) is the safety-first default; the user picks explicitly.
 let onboardTracking: 'always' | 'private' = 'private'
 let onboardPrecision = 6 // geohash precision my shares default to (= PRECISION_DEFAULT, inlined — declared later)
-let pinsOpen = false // the drop-a-pin panel is expanded
-let placingPinKind: PinKind | null = null // armed to drop this kind at the next map tap
+let pinsOpen = false // the pins list sheet is open
+let placing = false // placement mode: a centre crosshair is up; drag the map to aim
+let placingKind: PinKind = 'meet' // the kind the placement crosshair will drop
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
 let resetConfirm = false // inline confirm for the destructive "sign out & reset this device"
 let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
@@ -431,31 +432,44 @@ async function removePin(circleId: string, pin: Pin): Promise<void> {
   } catch { /* the local tombstone stands; a re-broadcast can retry */ }
 }
 
-/** Drop a pin at my CURRENT location — fetch a fresh fix if I haven't got one. */
-async function dropPinHere(kind: PinKind): Promise<void> {
+/** Enter placement mode: raise a centre crosshair over the live map and let the
+ *  user drag the map under it to aim (finger fine-tuning), like every maps app.
+ *  Starts on my current location, so the simplest gesture — drop without moving —
+ *  lands the pin right where I am. Fetches a fresh fix if I haven't got one. */
+async function enterPlacement(kind?: PinKind): Promise<void> {
+  if (!activeCircle()) return
+  if (kind) placingKind = kind
+  pinsOpen = false
+  mountPinsSheet() // tear down the list sheet
+  placing = true
+  mountPlacement() // raise the crosshair + aim bar over the map
   if (!fix) {
     const f = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 15_000, timeoutMs: 8000 }).catch(() => null)
     if (f) fix = f
   }
-  if (!fix) { toast("Couldn't get your location — try again by a window."); return }
-  await dropPin(kind, fix.lat, fix.lon)
-  pinsOpen = false
-  armPinPlacement(null)
-  refresh()
+  if (fix && placing) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true })
 }
 
-/** Arm (or disarm, with null) placing a pin by tapping the map — a one-shot: the
- *  next tap on bare map drops `kind` there and disarms. */
-function armPinPlacement(kind: PinKind | null): void {
-  placingPinKind = kind
-  if (!kind) { mapView?.onMapClick(null); return }
-  mapView?.onMapClick((lat, lon) => {
-    void dropPin(kind, lat, lon)
-    armPinPlacement(null)
-    pinsOpen = false
-    refresh()
-  })
-  toast(`Tap the map to place your ${pinKindLabel(kind)}`)
+/** Leave placement mode without dropping. */
+function exitPlacement(): void {
+  placing = false
+  mountPlacement()
+}
+
+/** Drop the selected kind wherever the crosshair (the map's centre) is now. */
+async function confirmPlacement(): Promise<void> {
+  const centre = mapView?.center()
+  placing = false
+  mountPlacement()
+  if (centre) await dropPin(placingKind, centre.lat, centre.lon)
+}
+
+/** Switch which kind the crosshair will drop, repainting the aim bar in place so
+ *  the map and crosshair underneath are never disturbed mid-aim. */
+function setPlacingKind(kind: PinKind): void {
+  placingKind = kind
+  const bar = document.getElementById('pin-place-bar')
+  if (bar) { bar.innerHTML = placementBarInner(); wirePinActions(bar) }
 }
 
 // ── Active circle + writers ──────────────────────────────────────────────────
@@ -1205,6 +1219,10 @@ function render(opts?: { animate?: boolean }): void {
     mapView = null
     rememberCamera(mounted) // reopen this view when we land back on Home
     mounted?.destroy()
+    // Pins live only over the map — leaving Home cancels an in-flight placement
+    // and closes the list sheet so neither lingers over another tab.
+    if (placing) placing = false
+    if (pinsOpen) { pinsOpen = false; mountPinsSheet() }
   }
   const keep = captureFocusedInput()
   if (!legalAccepted) {
@@ -1239,6 +1257,9 @@ function render(opts?: { animate?: boolean }): void {
   // no longer drops them — they persist untouched, with no re-mount and no
   // replayed entrance animation. Their content is refreshed in place at the
   // points that actually change it (updateDmThread on a new message, etc.).
+  // The placement crosshair lives INSIDE the freshly-built .home-shell, so a full
+  // render drops it — re-raise it if we're still aiming.
+  if (placing && tab === 'home') mountPlacement()
   restoreFocusedInput(keep)
   // Being ON the Chat tab with the thread in view IS reading it (Signal-style).
   if (tab === 'chat' && !document.hidden && activeCircle()) markThreadRead(chatKeyOf((activeCircle() as store.Circle).id))
@@ -1439,33 +1460,100 @@ function dmUnreadTotal(): number {
  *  settings (precision, find-each-other, invite) live on the Circle tab; the
  *  conversation lives on the Chat tab. Tap anyone below to zoom to them; tap
  *  their PIN on the map itself to message them privately. */
-/** Drop-a-pin panel over the map: pick a fixed kind to drop where you are, place
- *  one by tapping the map, or navigate to / remove existing pins. Fixed
- *  vocabulary only — the label is a glyph + provider name, never free text. */
-function pinsCard(): string {
+// ── Pins: a bottom-right button, a clean list sheet, and a drag-to-aim placer ──
+// Fixed vocabulary only — every label is a glyph + provider-defined name, never
+// free text, so the no-free-form property holds. The old two-chip-row panel that
+// crowded the top overlay is gone; pins now live off the map's edge.
+
+/** The floating pins button on Home — bottom-right, above the people strip, out
+ *  of the crowded top stack. A count badge when the circle has any. */
+function pinsFab(): string {
+  const c = activeCircle()
+  if (!c) return ''
+  const n = cstate(c.id).pins.length
+  return `<button class="pins-fab" data-action="open-pins" aria-label="Pins${n ? ` (${n})` : ''}">📌${n ? `<span class="fab-count">${n}</span>` : ''}</button>`
+}
+
+/** The pins list sheet: drop a new one, or navigate to / remove existing ones.
+ *  A modal bottom sheet (compose-sheet idiom) mounted in overlayLayer so a
+ *  background render never tears it. */
+function pinsSheet(): string {
   const c = activeCircle()
   if (!c) return ''
   const me = persisted.identity?.pk
   const pins = cstate(c.id).pins
-  const toggle = `<button class="btn small pins-toggle${pinsOpen ? ' primary' : ''}" data-action="toggle-pins">📌 Pins${pins.length ? ` · ${pins.length}` : ''}</button>`
-  if (!pinsOpen) return `<div class="pins-bar">${toggle}</div>`
-  const dropChip = (k: PinKind): string => `<button class="btn small" data-action="drop-pin" data-kind="${k}">${esc(pinKindLabel(k))}</button>`
-  const placeChip = (k: PinKind): string => `<button class="btn small${placingPinKind === k ? ' primary' : ''}" data-action="place-pin" data-kind="${k}">${esc(pinKindLabel(k))}</button>`
   const list = pins.length
     ? pins.map((p) => `<div class="pin-row">
-        <button class="btn small ghost pin-nav" data-action="nav-pin" data-id="${p.id}">🧭 ${esc(pinKindLabel(p.kind))}${p.from === me ? '' : ` · ${esc(nameFor(p.from))}`}</button>
-        ${p.from === me ? `<button class="btn small ghost" data-action="remove-pin" data-id="${p.id}" aria-label="Remove this pin">🗑</button>` : ''}
+        <button class="btn pin-nav" data-action="nav-pin" data-id="${p.id}">🧭 <span>${esc(pinKindLabel(p.kind))}</span>${p.from === me ? '' : `<span class="pin-who">${esc(nameFor(p.from))}</span>`}</button>
+        ${p.from === me ? `<button class="btn ghost pin-del" data-action="remove-pin" data-id="${p.id}" aria-label="Remove this pin">🗑</button>` : ''}
       </div>`).join('')
-    : '<div class="note">No pins yet.</div>'
-  return `<div class="pins-bar">${toggle}</div>
-    <div class="card stack pins-panel">
-      <div class="field" style="margin-bottom:4px"><label>Drop where you are</label></div>
-      <div class="chip-row">${PIN_KIND_LIST.map(dropChip).join('')}</div>
-      <div class="field" style="margin:8px 0 4px"><label>${placingPinKind ? `Tap the map to place ${esc(pinKindLabel(placingPinKind))}` : 'Or place on the map'}</label></div>
-      <div class="chip-row">${PIN_KIND_LIST.map(placeChip).join('')}</div>
-      <div class="section-title" style="margin-top:10px">Pins in ${esc(c.name)}</div>
-      ${list}
+    : '<div class="note pin-empty">No pins here yet. Drop one to mark a spot — your car, a meeting point, somewhere to steer clear of.</div>'
+  return `<div class="compose-sheet" id="pins-sheet" role="dialog" aria-modal="true">
+    <div class="compose-card pins-card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <strong>📌 Pins in ${esc(c.name)}</strong>
+        <button class="bz-x" data-action="pins-close" aria-label="Close">✕</button>
+      </div>
+      <button class="btn primary pin-drop-cta" data-action="pin-place-start">＋ Drop a pin</button>
+      <div class="pin-list">${list}</div>
+    </div>
+  </div>`
+}
+
+/** Mount (or, when closed, remove) the pins list sheet in overlayLayer. Tapping
+ *  the dimmed backdrop closes it, matching every other sheet. */
+function mountPinsSheet(): void {
+  document.getElementById('pins-sheet')?.remove()
+  if (!pinsOpen || !activeCircle()) return
+  const tmp = document.createElement('div')
+  tmp.innerHTML = pinsSheet()
+  const el = tmp.firstElementChild as HTMLElement | null
+  if (!el) return
+  overlayLayer.appendChild(el)
+  el.addEventListener('click', (e) => { if (e.target === el) { pinsOpen = false; mountPinsSheet() } })
+  wirePinActions(el)
+}
+
+/** The placement overlay: a fixed centre crosshair over the map plus the aim bar.
+ *  Lives INSIDE .home-shell (the map's own box), so the crosshair sits exactly at
+ *  map.getCenter() — where the pin will land — regardless of the nav bar below. */
+function placementUi(): string {
+  return `<div id="pin-place">
+    <div class="place-crosshair" aria-hidden="true">📌</div>
+    <div class="pin-place-bar" id="pin-place-bar">${placementBarInner()}</div>
+  </div>`
+}
+
+function placementBarInner(): string {
+  const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}">${esc(pinKindLabel(k))}</button>`).join('')
+  return `<div class="place-hint">Drag the map to aim, then drop</div>
+    <div class="pin-kind-row">${chips}</div>
+    <div class="place-actions">
+      <button class="btn ghost" data-action="pin-cancel">Cancel</button>
+      <button class="btn primary" data-action="pin-drop">Drop pin here</button>
     </div>`
+}
+
+/** Mount (or remove) the placement overlay inside the live map's shell. A `placing`
+ *  class on .home-shell fades the other overlays so aiming is a clean, focused act. */
+function mountPlacement(): void {
+  document.getElementById('pin-place')?.remove()
+  const shell = document.querySelector('.home-shell')
+  if (!placing || !shell || tab !== 'home') { shell?.classList.remove('placing'); return }
+  shell.classList.add('placing')
+  const tmp = document.createElement('div')
+  tmp.innerHTML = placementUi()
+  const el = tmp.firstElementChild as HTMLElement | null
+  if (!el) return
+  shell.appendChild(el)
+  wirePinActions(el)
+}
+
+/** Wire every [data-action] within a freshly-built pins element (sheet or bar). */
+function wirePinActions(scope: HTMLElement): void {
+  scope.querySelectorAll('[data-action]').forEach((node) => {
+    node.addEventListener('click', () => handleAction(node.getAttribute('data-action') as string, node as HTMLElement))
+  })
 }
 
 function homeView(): string {
@@ -1478,9 +1566,9 @@ function homeView(): string {
         ${topbar()}
         <div class="home-share-bar" id="home-share-bar">${homeShareBarInner()}</div>
         <div id="home-alerts">${geoIssueCard()}${batteryCard()}${rollCallCard()}${lostCard(c)}</div>
-        <div id="home-pins">${pinsCard()}</div>
       </div>
       <div class="home-overlay home-overlay-bottom">
+        <div class="home-fabs">${pinsFab()}</div>
         <div id="home-strip">${memberStrip()}</div>
       </div>
     </div>`
@@ -2760,9 +2848,11 @@ function refreshHomeOverlays(): void {
   if (alerts) alerts.innerHTML = `${geoIssueCard()}${batteryCard()}${rollCallCard()}${lostCard(c)}`
   const strip = document.getElementById('home-strip')
   if (strip) { strip.innerHTML = memberStrip(); wireMemberStrip(strip) }
+  const fabs = document.querySelector('.home-fabs')
+  if (fabs) fabs.innerHTML = pinsFab() // keep the pins count badge honest as pins land/leave
   const shareBar = document.getElementById('home-share-bar')
   if (shareBar) shareBar.innerHTML = homeShareBarInner()
-  ;[alerts, shareBar].forEach((el) => el?.querySelectorAll('[data-action]').forEach((node) => {
+  ;[alerts, shareBar, fabs].forEach((el) => el?.querySelectorAll('[data-action]').forEach((node) => {
     const action = node.getAttribute('data-action') as string
     node.addEventListener('click', () => handleAction(action, node as HTMLElement))
   }))
@@ -3616,14 +3706,17 @@ function handleAction(action: string, node: HTMLElement): void {
       break
     }
     case 'check-in': void doCheckIn(); break
-    case 'toggle-pins': pinsOpen = !pinsOpen; if (!pinsOpen) armPinPlacement(null); render(); break
-    case 'drop-pin': { const k = node.dataset.kind; if (isPinKind(k)) void dropPinHere(k); break }
-    case 'place-pin': { const k = node.dataset.kind; if (isPinKind(k)) { armPinPlacement(k); render() } break }
-    case 'nav-pin': navigateToPin(node.dataset.id ?? ''); break
+    case 'open-pins': pinsOpen = true; mountPinsSheet(); break
+    case 'pins-close': pinsOpen = false; mountPinsSheet(); break
+    case 'pin-place-start': void enterPlacement(); break
+    case 'pin-kind': { const k = node.dataset.kind; if (isPinKind(k)) setPlacingKind(k); break }
+    case 'pin-cancel': exitPlacement(); break
+    case 'pin-drop': void confirmPlacement(); break
+    case 'nav-pin': pinsOpen = false; mountPinsSheet(); navigateToPin(node.dataset.id ?? ''); break
     case 'remove-pin': {
       const rc = activeCircle()
       const rp = rc && cstate(rc.id).pins.find((x) => x.id === node.dataset.id)
-      if (rc && rp) void removePin(rc.id, rp)
+      if (rc && rp) { void removePin(rc.id, rp); mountPinsSheet() } // the tombstone landed synchronously — repaint the list
       break
     }
     case 'open-dm': openDmThread(node.dataset.pk ?? ''); break

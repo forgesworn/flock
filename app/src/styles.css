@@ -581,12 +581,73 @@ a.btn { text-decoration: none; }
 .drop-pin .flag { font-size: 18px; line-height: 1; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
 .drop-pin.mine .tag { background: rgba(95,208,168,0.16); border-color: var(--safe); color: #a9e9d2; }
 
-/* Drop-a-pin panel over the map. */
-.pins-bar { display: flex; justify-content: flex-end; margin-top: 8px; }
-.pins-panel { margin-top: 8px; }
-.pins-panel .chip-row { flex-wrap: wrap; gap: 6px; }
-.pin-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; margin-top: 4px; }
-.pin-row .pin-nav { flex: 1; text-align: left; }
+/* ── Pins: a floating button, a list sheet, and a drag-to-aim placer ─────────── */
+/* The floating pins button — bottom-right, above the people strip, off the map's
+   crowded top edge. */
+.home-fabs { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.pins-fab {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 52px; height: 52px; border-radius: 50%; flex: none;
+  background: rgba(11, 14, 18, 0.9); backdrop-filter: blur(8px);
+  border: 1px solid var(--line-strong); color: var(--text);
+  font-size: 22px; line-height: 1; cursor: pointer; box-shadow: var(--shadow);
+}
+.pins-fab:active { transform: scale(0.94); }
+.pins-fab .fab-count {
+  position: absolute; top: -3px; right: -3px; min-width: 19px; height: 19px;
+  padding: 0 5px; border-radius: 999px; background: var(--calm); color: #06202a;
+  font-size: 11px; font-weight: 800; line-height: 19px; text-align: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+/* The list sheet (a compose-sheet variant). */
+.pins-card { gap: 12px; }
+.pin-drop-cta { width: 100%; }
+.pin-list { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; }
+.pin-empty { margin: 2px 0; }
+.pin-row { display: flex; align-items: center; gap: 8px; }
+.pin-row .pin-nav { flex: 1; display: inline-flex; align-items: center; gap: 8px; justify-content: flex-start; text-align: left; }
+.pin-row .pin-nav .pin-who { color: var(--muted); font-weight: 500; }
+.pin-row .pin-del { flex: none; width: auto; padding: 12px 14px; }
+
+/* Placement: a focused "aim, then drop" state laid over the live map. The other
+   overlays fade so the map + crosshair + aim bar are all there is. */
+.home-shell.placing #home-alerts,
+.home-shell.placing .home-overlay-bottom { opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
+#pin-place { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
+/* Anchored at the map's exact centre (bottom tip = map.getCenter(), where the pin
+   lands). A gentle bob + a shadow dot sell "this hovers over that spot". */
+.place-crosshair {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -100%);
+  font-size: 34px; line-height: 1; pointer-events: none;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.6));
+  animation: pinbob 1.5s ease-in-out infinite;
+}
+.place-crosshair::after {
+  content: ''; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%);
+  width: 10px; height: 4px; border-radius: 50%; background: rgba(0, 0, 0, 0.45);
+}
+@keyframes pinbob {
+  0%, 100% { transform: translate(-50%, -100%); }
+  50% { transform: translate(-50%, -112%); }
+}
+.pin-place-bar {
+  position: absolute; left: 12px; right: 12px;
+  bottom: calc(var(--nav-h) + 12px + env(safe-area-inset-bottom));
+  pointer-events: auto; display: flex; flex-direction: column; gap: 10px;
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--radius); padding: 12px 14px 14px; box-shadow: var(--shadow);
+}
+.place-hint { color: var(--muted); font-size: 13px; text-align: center; }
+.pin-kind-row { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.pin-kind-row::-webkit-scrollbar { display: none; }
+.pin-kind {
+  flex: 0 0 auto; border: 1px solid var(--line); background: var(--surface-2);
+  color: var(--muted); font: inherit; font-size: 13px; font-weight: 600;
+  padding: 9px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+}
+.pin-kind.on { background: var(--safe-dim); border-color: var(--safe); color: var(--safe); }
+.place-actions { display: flex; gap: 10px; }
+.place-actions .btn { flex: 1; }
 
 /* Meeting-point contributor pin — soft violet, distinct from live presence (blue). */
 .map-pin.contrib .dot { background: #a78bfa; box-shadow: 0 0 0 1px rgba(255,255,255,0.25); }
