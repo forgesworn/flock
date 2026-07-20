@@ -460,11 +460,10 @@ async function enterPlacement(kind?: PinKind): Promise<void> {
   const start = fix ? { lat: fix.lat, lon: fix.lon } : mapView?.center() ?? null
   if (fix) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true }) // start centred on me
   if (start) raiseDraftPin(start.lat, start.lon)
-  // Tap the bare map to jump the pin there (drag fine-tunes) — "click and move".
-  mapView?.onMapClick((lat, lon) => { placingPos = { lat, lon }; mapView?.moveDraftPin(lat, lon) })
 }
 
-/** Show the draggable pin and keep placingPos tracking it live as the user drags. */
+/** Show the pin and keep placingPos tracking it — showDraftPin wires the finger-
+ *  follow (press+drag the map moves the pin), so onMove fires as the user moves it. */
 function raiseDraftPin(lat: number, lon: number): void {
   placingPos = { lat, lon }
   mapView?.showDraftPin(lat, lon, (la, lo) => { placingPos = { lat: la, lon: lo } })
@@ -475,7 +474,6 @@ function exitPlacement(): void {
   placing = false
   placingPos = null
   mapView?.hideDraftPin()
-  mapView?.onMapClick(null)
   mountPlacement()
 }
 
@@ -485,13 +483,12 @@ async function confirmPlacement(): Promise<void> {
   placing = false
   placingPos = null
   mapView?.hideDraftPin()
-  mapView?.onMapClick(null)
   mountPlacement()
   if (pos) await dropPin(placingKind, pos.lat, pos.lon)
 }
 
 /** Switch which kind will drop, repainting the aim bar in place so the map and the
- *  draggable pin underneath are never disturbed mid-aim. */
+ *  pin underneath are never disturbed mid-aim. */
 function setPlacingKind(kind: PinKind): void {
   placingKind = kind
   const bar = document.getElementById('pin-place-bar')
@@ -1558,7 +1555,7 @@ function placementUi(): string {
 
 function placementBarInner(): string {
   const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}">${esc(pinKindLabel(k))}</button>`).join('')
-  return `<div class="place-hint">Drag the 📌 to the exact spot — or tap the map to move it</div>
+  return `<div class="place-hint">Drag anywhere to move the 📌 to the exact spot</div>
     <div class="pin-kind-row">${chips}</div>
     <div class="place-actions">
       <button class="btn ghost" data-action="pin-cancel">Cancel</button>
@@ -2688,11 +2685,8 @@ async function initMap(camera?: { lng: number; lat: number; zoom: number }): Pro
   mapView.onMemberClick((pk) => { if (pk && pk !== persisted.identity?.pk) openDmThread(pk) })
   mapView.onPinClick((pinId) => navigateToPin(pinId))
   // A full re-init mid-placement (rare — an external render) builds a fresh map;
-  // put the draggable pin back where it was so the user doesn't lose their spot.
-  if (placing && placingPos) {
-    raiseDraftPin(placingPos.lat, placingPos.lon)
-    mapView.onMapClick((lat, lon) => { placingPos = { lat, lon }; mapView?.moveDraftPin(lat, lon) })
-  }
+  // put the pin back where it was (raiseDraftPin re-wires the finger-follow too).
+  if (placing && placingPos) raiseDraftPin(placingPos.lat, placingPos.lon)
   if (import.meta.env.DEV) (window as unknown as { flockMapView?: unknown }).flockMapView = mapView // e2e seam (dev only)
   // Restore the prior zoom before data draws (create only takes a centre), so a
   // soft reopen returns at the same scale. A hard `camera` restore (below) also
