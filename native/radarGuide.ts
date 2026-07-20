@@ -14,6 +14,9 @@ export interface RadarGuideTarget {
   uncertaintyMetres: number
   /** Unix milliseconds of the disclosure — ages on the native clock. */
   timestampMs: number
+  /** A stationary waypoint (dropped pin): the native guide re-stamps its own age
+   *  from the live GPS clock so it never decays to the "stale" cue while locked. */
+  evergreen?: boolean
 }
 
 interface RadarGuidePluginApi {

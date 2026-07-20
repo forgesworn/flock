@@ -15,6 +15,9 @@ class RadarGuidePlugin : Plugin() {
     @PluginMethod
     fun start(call: PluginCall) {
         RadarGuideService.muted = call.getBoolean("muted") ?: false
+        // A dropped-pin waypoint never ages to "stale" while locked (see the JS
+        // openRadarForPin). Defaults false so a member target is unchanged.
+        RadarGuideService.evergreen = call.getBoolean("evergreen") ?: false
         val lat = call.getDouble("lat")
         val lon = call.getDouble("lon")
         if (lat != null && lon != null) {

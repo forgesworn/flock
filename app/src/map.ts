@@ -36,6 +36,17 @@ export interface MapPoint {
   cell?: CellBounds
 }
 
+/** A dropped pin (Feature: droppable pins) — a fixed kind rendered as a labelled
+ *  marker the circle can tap to navigate to. `mine` styles my own pins apart. */
+export interface DroppedPinPoint {
+  id: string
+  lat: number
+  lon: number
+  /** Local label (glyph + provider-defined name) — never free text. */
+  label: string
+  mine: boolean
+}
+
 // Below this the area is smaller than the pin itself, so it reads as a point —
 // don't draw one (an exact share is full-precision "we know exactly").
 const HALO_MIN_METRES = 30
@@ -107,6 +118,10 @@ export class MapView {
   private rzvMarker: maplibregl.Marker | null = null
   private venueMarker: maplibregl.Marker | null = null
   private contribMarkers: maplibregl.Marker[] = []
+  private pinMarkers: maplibregl.Marker[] = []
+  private pendingPins: DroppedPinPoint[] | null = null
+  private pinClickCb: ((id: string) => void) | null = null
+  private mapClickCb: ((lat: number, lon: number) => void) | null = null
   private ready = false
   private pendingFences: Geofence[] | null = null
   private pendingNoReport: NoReportZone[] | null = null
@@ -201,8 +216,12 @@ export class MapView {
       if (this.pendingNoReport) this.setNoReportZones(this.pendingNoReport)
       if (this.pendingMembers) this.setMembers(this.pendingMembers)
       if (this.pendingContrib) this.setContributorPins(this.pendingContrib)
+      if (this.pendingPins) this.setPins(this.pendingPins)
       if (this.pendingTrail) this.setTrail(this.pendingTrail)
       this.setPreview(this.pendingPreview)
+      // Bare-map tap → "place a pin here" (markers stopPropagation, so this only
+      // fires off empty map). Registered once; the callback is nulled when not arming.
+      this.map.on('click', (e) => this.mapClickCb?.(e.lngLat.lat, e.lngLat.lng))
     })
   }
 
@@ -211,6 +230,14 @@ export class MapView {
   /** Tap a member's pin → their pubkey. Used to open a private message to them.
    *  Set once; every marker (rebuilt on each setMembers) reads this at click time. */
   onMemberClick(cb: (member: string) => void): void { this.memberClickCb = cb }
+
+  /** Tap a dropped pin → its id (open radar / navigate to it). */
+  onPinClick(cb: (id: string) => void): void { this.pinClickCb = cb }
+
+  /** Tap the empty map (not a marker) → the lat/lon tapped. Drives "place a pin
+   *  here"; pass null to disarm. Markers stopPropagation, so this only fires on
+   *  bare map. */
+  onMapClick(cb: ((lat: number, lon: number) => void) | null): void { this.mapClickCb = cb }
 
   center(): { lat: number; lon: number } {
     const c = this.map.getCenter()
@@ -332,6 +359,27 @@ export class MapView {
     el.innerHTML = '<span class="tag"></span><span class="flag">⚑</span>'
     ;(el.querySelector('.tag') as HTMLElement).textContent = point.label || 'Meet'
     this.rzvMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([point.lon, point.lat]).addTo(this.map)
+  }
+
+  /** Show (or clear) the circle's dropped pins — a distinct, persistent, tappable
+   *  layer that survives setMembers rebuilds. Each is a labelled flag; tapping it
+   *  routes into radar navigation. See app/src/pin.ts. */
+  setPins(points: DroppedPinPoint[]): void {
+    if (!this.ready) { this.pendingPins = points; return }
+    this.pinMarkers.forEach((m) => m.remove())
+    this.pinMarkers = []
+    for (const p of points) {
+      const el = document.createElement('div')
+      el.className = `drop-pin${p.mine ? ' mine' : ''}`
+      // The label is a fixed glyph+name, but textContent keeps the marker path
+      // uniformly injection-proof like the member/rendezvous pins.
+      el.innerHTML = '<span class="tag"></span><span class="flag">📌</span>'
+      ;(el.querySelector('.tag') as HTMLElement).textContent = p.label
+      const pinId = p.id
+      el.style.cursor = 'pointer'
+      el.addEventListener('click', (ev) => { ev.stopPropagation(); this.pinClickCb?.(pinId) })
+      this.pinMarkers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(this.map))
+    }
   }
 
   /**

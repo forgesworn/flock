@@ -189,7 +189,10 @@ class RadarGuideService : Service() {
     private fun targetObservation(): TargetObservation? {
         val lat = targetLat ?: return null
         val lon = targetLon ?: return null
-        val ageSec = (System.currentTimeMillis() - targetAtMs).coerceAtLeast(0) / 1000.0
+        // A stationary waypoint (a dropped pin) is always perfectly known — it
+        // never moves and there is no JS beacon path to re-stamp it while locked,
+        // so hold its age at zero rather than let it decay to the "stale" cue.
+        val ageSec = if (evergreen) 0.0 else (System.currentTimeMillis() - targetAtMs).coerceAtLeast(0) / 1000.0
         return TargetObservation(LatLng(lat, lon), targetUncertaintyMetres, ageSec)
     }
 
@@ -328,6 +331,8 @@ class RadarGuideService : Service() {
         @Volatile private var targetUncertaintyMetres: Double = 0.0
         @Volatile private var targetAtMs: Long = 0
         @Volatile var muted: Boolean = false
+        /** A stationary waypoint (a dropped pin): never age it to "stale". */
+        @Volatile var evergreen: Boolean = false
 
         val active: Boolean get() = instance != null
 
@@ -362,6 +367,7 @@ class RadarGuideService : Service() {
             targetUncertaintyMetres = 0.0
             targetAtMs = 0
             muted = false
+            evergreen = false
         }
     }
 }
