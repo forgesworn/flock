@@ -16,14 +16,27 @@ import { deriveGroupKey, encryptEnvelope, decryptEnvelope } from 'canary-kit/syn
 export const PIN_SIGNAL_TYPE = 'pin'
 
 /** The complete, fixed pin vocabulary. Labels + glyphs are rendered locally; the
- *  wire carries only the key. Add a kind here (never free text). */
+ *  wire carries only the key — so the relay never learns which icon (let alone what
+ *  it means) was dropped, and there is no free-form text to leak. Add a kind here
+ *  (never free text). Key order is the picker order, most-reached first. */
 export const PIN_KINDS = {
-  car: { label: 'Car', glyph: '🚗' },
-  home: { label: 'Home', glyph: '🏠' },
   meet: { label: 'Meet here', glyph: '📍' },
-  picnic: { label: 'Picnic', glyph: '🧺' },
-  view: { label: 'Photo spot', glyph: '📸' },
+  car: { label: 'Car', glyph: '🚗' },
+  parking: { label: 'Parking', glyph: '🅿️' },
+  home: { label: 'Home', glyph: '🏠' },
+  food: { label: 'Food', glyph: '🍽️' },
+  drink: { label: 'Drinks', glyph: '🍺' },
+  coffee: { label: 'Coffee', glyph: '☕' },
   water: { label: 'Water', glyph: '🚰' },
+  toilet: { label: 'Toilets', glyph: '🚻' },
+  picnic: { label: 'Picnic', glyph: '🧺' },
+  tent: { label: 'Camp', glyph: '⛺' },
+  view: { label: 'Photo spot', glyph: '📸' },
+  shop: { label: 'Shop', glyph: '🛍️' },
+  atm: { label: 'Cash', glyph: '🏧' },
+  firstaid: { label: 'First aid', glyph: '⛑️' },
+  kids: { label: 'Kids', glyph: '🧒' },
+  pet: { label: 'Pet', glyph: '🐾' },
   avoid: { label: 'Avoid', glyph: '⚠️' },
 } as const
 

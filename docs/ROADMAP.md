@@ -315,6 +315,31 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
     beep/haptic continuity, compass-under-wakelock behaviour, and the two-phone
     half-mile field walk from the goal doc's success criteria.
 
+## Dropped pins — mark a spot for the circle (2026-07-09 → 2026-07-20)
+
+- [x] **Drop / move / delete on-map, radar-navigable, replay-proof tombstones**
+  (PRs #30–33). A member marks a spot (car, meet, avoid…) as a fixed provider
+  KIND + geohash — never free text, so the no-free-form-content property holds
+  and the relay learns neither the icon nor its meaning. Drag-to-place with
+  pan/pinch while aiming, long-press to move (yours) or remove (anyone's),
+  latest-timestamp-wins merge with retained tombstones so a replayed drop can't
+  resurrect a deleted pin. `app/src/pin.ts` (+ unit), `map.ts` marker layer,
+  `e2e/pins.spec.ts`.
+- [x] **Pick different icons, shown live on the map (2026-07-20).** The fixed
+  vocabulary grew 7 → **18** distinct kinds (meet, car, parking, home, food,
+  drinks, coffee, water, toilets, picnic, camp, photo spot, shop, cash, first
+  aid, kids, pet, avoid) — still an enum on the wire, no new metadata. The
+  placement picker is now an **icon-forward** horizontal strip (glyph + small
+  label, scroll-snap), and the **draggable draft pin wears the chosen icon and
+  live-swaps** the instant you pick another, so you see exactly what will drop as
+  you aim it (was a generic 📌). Selecting a chip moves the highlight in place —
+  no bar rebuild — so a scrolled-to icon stays visible. `pin.ts` vocabulary
+  (+ well-formedness/round-trip unit tests), `map.ts` `showDraftPin(glyph)` +
+  `setDraftPinGlyph`, `app.ts` picker + live wiring, `e2e/pins.spec.ts` asserts
+  the map preview swaps 📍→🚗. Version-skew note: an older peer strictly rejects
+  an unknown kind (drops that pin) — fine for a single-unit private app that
+  updates together.
+
 ## Messaging & map-led Home (2026-07-03)
 
 - [x] **Bugfix — a 1:1 "Come to me" exact share now actually shows on the map

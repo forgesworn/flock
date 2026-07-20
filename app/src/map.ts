@@ -422,16 +422,30 @@ export class MapView {
     }
   }
 
-  /** Show the "place this pin" marker at (lat,lon). It's just a visual marker
-   *  (pointer-events:none); the placement flow lays its OWN full-screen touch
-   *  surface OVER the map and drives the position via moveDraftPinToClient, so
-   *  maplibre's touch handling is never in the loop. Replaces any existing draft. */
-  showDraftPin(lat: number, lon: number): void {
+  /** Show the "place this pin" marker at (lat,lon), wearing the chosen kind's
+   *  glyph so you see the actual icon you're dropping as you aim it (not a generic
+   *  pushpin). It's just a visual marker (pointer-events:none); the placement flow
+   *  lays its OWN full-screen touch surface OVER the map and drives the position via
+   *  moveDraftPinToClient, so maplibre's touch handling is never in the loop.
+   *  Replaces any existing draft. The glyph is fixed provider vocabulary, but
+   *  textContent keeps this path injection-proof like every other marker. */
+  showDraftPin(lat: number, lon: number, glyph = '📌'): void {
     this.draftMarker?.remove()
     const el = document.createElement('div')
     el.className = 'draft-pin'
-    el.innerHTML = '<span class="flag">📌</span>'
+    const flag = document.createElement('span')
+    flag.className = 'flag'
+    flag.textContent = glyph
+    el.appendChild(flag)
     this.draftMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([lon, lat]).addTo(this.map)
+  }
+
+  /** Swap the live draft pin's glyph in place — used when you pick a different kind
+   *  mid-aim, so the icon under your finger updates without recreating the marker
+   *  (which would drop its position and grabbed state). No-op if no draft is up. */
+  setDraftPinGlyph(glyph: string): void {
+    const flag = this.draftMarker?.getElement().querySelector('.flag') as HTMLElement | null
+    if (flag) flag.textContent = glyph
   }
 
   /** Move the draft pin to a SCREEN point (client px) and return its new spot. The

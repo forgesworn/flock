@@ -453,7 +453,7 @@ async function enterPlacement(kind?: PinKind): Promise<void> {
  *  its position as the user presses/drags anywhere over the map. */
 function raiseDraftPin(lat: number, lon: number): void {
   placingPos = { lat, lon }
-  mapView?.showDraftPin(lat, lon)
+  mapView?.showDraftPin(lat, lon, PIN_KINDS[placingKind].glyph)
 }
 
 /** Long-press on a dropped pin. MY pin → move mode: placement seeded from the pin
@@ -598,8 +598,13 @@ async function confirmPlacement(): Promise<void> {
  *  pin underneath are never disturbed mid-aim. */
 function setPlacingKind(kind: PinKind): void {
   placingKind = kind
-  const bar = document.getElementById('pin-place-bar')
-  if (bar) { bar.innerHTML = placementBarInner(); wirePinActions(bar) }
+  // Live-swap the icon under the finger so the map shows exactly what will drop.
+  mapView?.setDraftPinGlyph(PIN_KINDS[kind].glyph)
+  // Move the highlight in place rather than rebuilding the bar — a full rebuild
+  // resets the icon strip's scroll to the start, hiding a chip you scrolled to reach.
+  const chips = document.querySelectorAll<HTMLElement>('#pin-place-bar .pin-kind')
+  if (chips.length) chips.forEach((c) => c.classList.toggle('on', c.dataset.kind === kind))
+  else { const bar = document.getElementById('pin-place-bar'); if (bar) { bar.innerHTML = placementBarInner(); wirePinActions(bar) } }
 }
 
 // ── Active circle + writers ──────────────────────────────────────────────────
@@ -1667,9 +1672,12 @@ function placementBarInner(): string {
       <button class="btn primary" data-action="pin-remove-editing">🗑 Remove pin</button>
     </div>`
   }
-  const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}">${esc(pinKindLabel(k))}</button>`).join('')
+  // Icon-forward chips: the glyph is the choice, the label names it beneath. The
+  // selected kind's icon is also what the draggable pin wears on the map, so the
+  // picker and the map always agree on what you're about to drop.
+  const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}" aria-label="${esc(PIN_KINDS[k].label)}" title="${esc(PIN_KINDS[k].label)}"><span class="pk-glyph">${PIN_KINDS[k].glyph}</span><span class="pk-label">${esc(PIN_KINDS[k].label)}</span></button>`).join('')
   const editing = editingPinId !== null
-  return `<div class="place-hint">Hold the 📌 to lift it · drag or pinch the map to line up</div>
+  return `<div class="place-hint">Pick an icon · hold the pin to lift it · drag or pinch the map to line up</div>
     <div class="pin-kind-row">${chips}</div>
     <div class="place-actions">
       <button class="btn ghost" data-action="pin-cancel">Cancel</button>

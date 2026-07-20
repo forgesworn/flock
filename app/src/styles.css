@@ -688,14 +688,23 @@ a.btn { text-decoration: none; }
   border-radius: var(--radius); padding: 12px 14px 14px; box-shadow: var(--shadow);
 }
 .place-hint { color: var(--muted); font-size: 13px; text-align: center; }
-.pin-kind-row { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+/* A single horizontally-scrolling strip of icon-forward chips: the glyph is the
+   choice, a small label names it. Scroll-snap so each icon settles cleanly. */
+.pin-kind-row { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
 .pin-kind-row::-webkit-scrollbar { display: none; }
 .pin-kind {
-  flex: 0 0 auto; border: 1px solid var(--line); background: var(--surface-2);
-  color: var(--muted); font: inherit; font-size: 13px; font-weight: 600;
-  padding: 9px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  flex: 0 0 auto; scroll-snap-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  width: 60px; border: 1px solid var(--line); background: var(--surface-2);
+  color: var(--muted); font: inherit; font-weight: 600;
+  padding: 8px 4px 6px; border-radius: 14px; cursor: pointer;
+  transition: transform 0.08s ease, background 0.12s ease, border-color 0.12s ease;
 }
+.pin-kind .pk-glyph { font-size: 22px; line-height: 1; }
+.pin-kind .pk-label { font-size: 11px; line-height: 1.1; white-space: nowrap; }
+.pin-kind:active { transform: scale(0.94); }
 .pin-kind.on { background: var(--safe-dim); border-color: var(--safe); color: var(--safe); }
+.pin-kind.on .pk-glyph { transform: scale(1.08); }
 .place-actions { display: flex; gap: 10px; }
 .place-actions .btn { flex: 1; }
 /* .btn sets width:100%, which a flex-basis:auto item would honour — pinning the

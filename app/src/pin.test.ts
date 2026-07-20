@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { deriveGroupKey, encryptEnvelope } from 'canary-kit/sync'
-import { buildPinSignal, decryptPin, withPin, PIN_SIGNAL_TYPE, pinLabel, isPinKind, type Pin } from './pin'
+import { buildPinSignal, decryptPin, withPin, PIN_SIGNAL_TYPE, pinLabel, isPinKind, PIN_KINDS, PIN_KIND_LIST, type Pin } from './pin'
 
 const SEED = '0000000000000000000000000000000000000000000000000000000000000001'
 const A = 'a'.repeat(64)
@@ -35,6 +35,32 @@ describe('pin wire', () => {
     expect(pinLabel('car')).toContain('Car')
     expect(isPinKind('car')).toBe(true)
     expect(isPinKind('meet at the corner')).toBe(false)
+  })
+
+  it('every vocabulary kind is well-formed and self-guarding', () => {
+    // The picker and the map draw straight from this table, so each entry must
+    // carry a non-empty glyph + label and pass its own kind guard — a malformed
+    // entry would render a blank chip / blank map badge with no other signal.
+    expect(PIN_KIND_LIST.length).toBeGreaterThanOrEqual(7)
+    expect(new Set(PIN_KIND_LIST).size).toBe(PIN_KIND_LIST.length) // no dup keys
+    const glyphs = new Set<string>()
+    for (const k of PIN_KIND_LIST) {
+      expect(isPinKind(k)).toBe(true)
+      const { glyph, label } = PIN_KINDS[k]
+      expect(glyph.length).toBeGreaterThan(0)
+      expect(label.trim().length).toBeGreaterThan(0)
+      expect(pinLabel(k)).toBe(`${glyph} ${label}`)
+      glyphs.add(glyph)
+    }
+    // Distinct glyphs — two kinds sharing an icon would be indistinguishable on the map.
+    expect(glyphs.size).toBe(PIN_KIND_LIST.length)
+  })
+
+  it('round-trips the newer vocabulary kinds on the wire', async () => {
+    for (const kind of ['meet', 'parking', 'food', 'toilet', 'firstaid'] as const) {
+      const event = await buildPinSignal({ groupId: 'g', seedHex: SEED, id: ID, from: A, kind, geohash: 'gcpvj0', precision: 9, timestamp: 42 })
+      expect((await decryptPin(SEED, event.content)).kind).toBe(kind)
+    }
   })
 
   it('merges latest-wins per id and applies tombstones', () => {

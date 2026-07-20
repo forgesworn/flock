@@ -30,11 +30,15 @@ test('pins: FAB → sheet → draggable-pin placement → listed', async ({ brow
   await expect(page.locator('.draft-pin')).toBeVisible() // the finger-draggable pin
   await expect(page.locator('#pin-place-bar')).toBeVisible()
   await expect(page.locator('.home-shell.placing')).toBeVisible()
+  // The draggable pin wears the default kind's icon (Meet 📍) — you see what drops.
+  await expect(page.locator('.draft-pin .flag')).toHaveText('📍')
 
-  // Pick a kind (single row, no duplicate "drop here / place on map" chips), then
+  // Pick a kind (single row, no duplicate "drop here / place on map" chips): the
+  // chip highlights AND the draggable pin on the map swaps to that icon live, then
   // drop the pin exactly where it sits.
   await page.click('[data-action="pin-kind"][data-kind="car"]')
   await expect(page.locator('.pin-kind.on')).toHaveText(/Car/i)
+  await expect(page.locator('.draft-pin .flag')).toHaveText('🚗') // map preview updated
   await page.click('[data-action="pin-drop"]')
   await expect(page.locator('.draft-pin')).toHaveCount(0) // placement closed
 
