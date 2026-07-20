@@ -1,8 +1,9 @@
 // The pins flow: a bottom-right FAB opens a clean list sheet; "Drop a pin" enters
-// placement mode with a finger-DRAGGABLE pin on the map (starts on your exact
-// location; grab it, or tap the map, to move it), a single kind picker, then Drop
-// — which lands it at full precision. Fixed vocabulary only, so the no-free-form
-// property still holds. (The drag gesture itself is verified on-device.)
+// placement mode with a finger-DRAGGABLE pin on the map (starts at the map centre —
+// where you've already aimed the view; grab it, or pan the map, to fine-tune, or tap
+// "locate me" first to pin your own spot), a single kind picker, then Drop — which
+// lands it at full precision. Fixed vocabulary only, so the no-free-form property
+// still holds. (The drag gesture itself is verified on-device.)
 import { test, expect, newPerson, createCircle, gotoTab } from './fixtures'
 
 test('pins: FAB → sheet → draggable-pin placement → listed', async ({ browser }) => {

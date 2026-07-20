@@ -438,27 +438,23 @@ async function removePin(circleId: string, pin: Pin): Promise<void> {
   } catch { /* the local tombstone stands; a re-broadcast can retry */ }
 }
 
-/** Enter placement mode: show a pin on the map IMMEDIATELY (at my last fix, else
- *  the map centre — never blocking on a location lookup, or there'd be nothing to
- *  grab), then long-press + drag it to the precise spot. Drop lands it there at full
- *  precision. A fresh fix, if it lands, recentres and moves the pin onto me. */
-async function enterPlacement(kind?: PinKind): Promise<void> {
+/** Enter placement mode: drop a pin at the MIDDLE of the screen, then long-press +
+ *  drag it to the precise spot. Drop lands it there at full precision. The centre is
+ *  the right default because you've usually already panned the map to the spot you
+ *  want — so the pin lands where you're looking, not wherever your phone thinks you
+ *  are. To pin your OWN location, tap "locate me" (recentres the map on you) first,
+ *  then add the pin. We deliberately DON'T fly to a GPS fix or chase a fresh one onto
+ *  the pin — that would yank the map off the spot you carefully lined up. */
+function enterPlacement(kind?: PinKind): void {
   if (!activeCircle()) return
   if (kind) placingKind = kind
   pinsOpen = false
   mountPinsSheet() // tear down the list sheet
   placing = true
   mountPlacement() // the aim bar + drag surface
-  // Pin appears RIGHT NOW — on my last fix (recentre there) or the current centre.
-  if (fix) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true })
-  const start = fix ? { lat: fix.lat, lon: fix.lon } : mapView?.center()
+  // The pin drops at the current map centre — where you've aimed the view.
+  const start = mapView?.center()
   if (start) raiseDraftPin(start.lat, start.lon)
-  // Refresh the fix in the background; if we didn't have one and it arrives, recentre
-  // and move the pin onto me — but never make the user wait to start dragging.
-  if (!fix) {
-    const f = await svc.currentPosition({ enableHighAccuracy: true, maximumAge: 15_000, timeoutMs: 8000 }).catch(() => null)
-    if (f && placing) { fix = f; mapView?.flyTo({ lat: f.lat, lon: f.lon }, { instant: true }); raiseDraftPin(f.lat, f.lon) }
-  }
 }
 
 /** Show the pin at (lat,lon); the drag-catcher overlay (mountPlacement) then drives
