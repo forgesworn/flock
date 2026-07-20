@@ -352,6 +352,16 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
   existing id now carries `max(now, prev+1)`, so a legitimate local change always
   outranks what it replaces. `e2e/pins.spec.ts` gained an edit-changes-icon test
   (caught the bug as flakiness; deterministic after the fix).
+- [x] **A new pin drops at the map centre, not your GPS location (2026-07-20).**
+  The draggable draft pin now starts at the **middle of the screen** — where you've
+  already aimed the view — instead of flying to your last GPS fix and chasing a fresh
+  one onto the pin. You almost always pan the map to the spot you're marking (a car
+  park, a meeting point) before adding a pin, so the old GPS-first default fought the
+  common case: it yanked the camera off the spot you'd lined up. To pin your **own**
+  location, tap "locate me" (recentres on you) first, then drop — a deliberate two-tap
+  path, kept out of the common one. `enterPlacement` now seeds from `mapView.center()`
+  only (dropped the `svc.currentPosition` background fetch + `flyTo`); `e2e/pins.spec.ts`
+  header updated. Released as `adbd606`.
 
 ## Messaging & map-led Home (2026-07-03)
 
