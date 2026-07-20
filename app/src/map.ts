@@ -385,12 +385,14 @@ export class MapView {
   }
 
   /** Raise a "place this pin" marker at (lat,lon) that FOLLOWS YOUR FINGER. Dragging
-   *  a tiny maplibre marker with a fingertip is fiddly (a near-miss pans the map
-   *  instead), so we flip it: map panning is turned OFF and a single-finger press +
-   *  drag ANYWHERE on the map moves the pin to wherever the finger is — a tap drops
-   *  it right there, a drag slides it. Two-finger gestures fall through so pinch-zoom
-   *  still works (as do the zoom buttons). Full precision; `onMove` reports the live
-   *  spot. Replaces any existing draft. See app.ts placement. */
+   *  a tiny maplibre marker with a fingertip is unreliable (a near-miss pans the map
+   *  instead), so during placement we take over the gestures entirely: press+drag
+   *  ANYWHERE on the map and the pin tracks your finger to that exact point (a tap
+   *  drops it there). Implemented with raw POINTER events + pointer-capture on the
+   *  map container and `unproject` — deterministic, no dependency on maplibre's own
+   *  drag recognition — and every built-in gesture is disabled so nothing fights it
+   *  (zoom stays on the +/- buttons). `onMove` reports the live spot; full precision.
+   *  Replaces any existing draft. See app.ts placement. */
   showDraftPin(lat: number, lon: number, onMove?: (lat: number, lon: number) => void): void {
     this.hideDraftPin()
     const el = document.createElement('div')
@@ -399,24 +401,42 @@ export class MapView {
     const m = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([lon, lat]).addTo(this.map)
     this.draftMarker = m
     const map = this.map
-    map.dragPan.disable() // a one-finger drag moves the PIN, not the view
-    let dragging = false
-    const oneFinger = (e: { originalEvent: Event }): boolean => {
-      const t = (e.originalEvent as TouchEvent).touches
-      return !t || t.length <= 1 // mouse, or a single touch — ignore pinch
+    const container = map.getCanvasContainer()
+    // Silence every built-in interaction so a one-finger drag can only mean "move
+    // the pin". Guarded — not all handlers exist in every build.
+    const gestures = [map.dragPan, map.touchZoomRotate, map.scrollZoom, map.doubleClickZoom, map.dragRotate, map.keyboard, map.boxZoom]
+    gestures.forEach((g) => { try { (g as { disable?: () => void })?.disable?.() } catch { /* absent */ } })
+    const prevTouchAction = container.style.touchAction
+    container.style.touchAction = 'none' // the browser must not treat the drag as a scroll/zoom
+    let pid: number | null = null
+    const put = (e: PointerEvent): void => {
+      const r = container.getBoundingClientRect()
+      const ll = map.unproject([e.clientX - r.left, e.clientY - r.top])
+      m.setLngLat(ll); onMove?.(ll.lat, ll.lng)
     }
-    const put = (ll: maplibregl.LngLat): void => { m.setLngLat(ll); onMove?.(ll.lat, ll.lng) }
-    const down = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent): void => { if (oneFinger(e)) { dragging = true; put(e.lngLat) } }
-    const move = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent): void => { if (dragging && oneFinger(e)) put(e.lngLat) }
-    const end = (): void => { dragging = false }
-    map.on('mousedown', down); map.on('touchstart', down)
-    map.on('mousemove', move); map.on('touchmove', move)
-    map.on('mouseup', end); map.on('touchend', end)
+    const down = (e: PointerEvent): void => {
+      if (pid !== null) return // already tracking a finger; ignore a second
+      pid = e.pointerId
+      try { container.setPointerCapture(e.pointerId) } catch { /* ok */ }
+      put(e) // a tap alone places the pin right there
+    }
+    const move = (e: PointerEvent): void => { if (e.pointerId === pid) put(e) }
+    const up = (e: PointerEvent): void => {
+      if (e.pointerId !== pid) return
+      pid = null
+      try { container.releasePointerCapture(e.pointerId) } catch { /* ok */ }
+    }
+    container.addEventListener('pointerdown', down)
+    container.addEventListener('pointermove', move)
+    container.addEventListener('pointerup', up)
+    container.addEventListener('pointercancel', up)
     this.draftTeardown = (): void => {
-      map.off('mousedown', down); map.off('touchstart', down)
-      map.off('mousemove', move); map.off('touchmove', move)
-      map.off('mouseup', end); map.off('touchend', end)
-      map.dragPan.enable()
+      container.removeEventListener('pointerdown', down)
+      container.removeEventListener('pointermove', move)
+      container.removeEventListener('pointerup', up)
+      container.removeEventListener('pointercancel', up)
+      container.style.touchAction = prevTouchAction
+      gestures.forEach((g) => { try { (g as { enable?: () => void })?.enable?.() } catch { /* absent */ } })
     }
   }
 
