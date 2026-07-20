@@ -146,7 +146,7 @@ explicit "I'm in a crowd" festival signal.
 | Chunking pattern (magic+ver+msgId+idx/total header, MTU-probed payload, 30 s reassembly TTL) | **Reuse the pattern**, not the bytes (see envelope note). |
 | meatchat discovery identity (**static** service UUID + `SHA-256('ambient:nearby')` scan-response) | **Do NOT copy** — a stable, trackable beacon. meatchat's own `identity.ts:78-82` concedes transport-layer unlinkability is unsolved. **This is flock's design work.** |
 | meatchat envelope (raw → base64 → JSON `{v,r,t,f,id,d}` → UTF-8 → chunk) | **Do NOT copy** — ~33 %+ overhead, and flock wraps are already JSON/base64; stacking compounds. Use a **flat binary chunk envelope**. |
-| multi-hop store-and-forward | **Nobody built it** (mesh-kit + both native plugins explicitly punt). flock v1 is **single-hop**; multi-hop is a later design. |
+| multi-hop store-and-forward | **Built in the shared stack (2026-07-20):** hop-limited native flood plus bounded, paged `mesh-kit` reconciliation on a learned next-hop route. Flock retains only opaque NIP-59 wraps in crowd mode; real 3-device hardware proof remains pending. |
 
 ## The load-bearing decision: a rotating, members-only advertising identity
 
@@ -223,7 +223,7 @@ a challenge-response proving seed knowledge before exchange as a follow-up.
   on adb; Pixel 10 Pro on adb (per notes). Emulators can't do BLE.
 - **Foreground v1.** meatchat's field test was foreground-only; backgrounded BLE
   advertising/reconnect/battery is an unsolved hard problem everywhere — defer.
-- **Single-hop v1.** Multi-hop store-and-forward is a later design.
+- **Multi-hop needs field proof.** Hop-limited relay and store-and-forward are implemented; a genuine A—B—C three-phone range test is still required before claiming it in shipped copy.
 - **iOS later.** Android ships first (as flock already does).
 
 ## Phasing

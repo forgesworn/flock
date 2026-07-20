@@ -161,8 +161,8 @@ and shipped (release `0294b8c` live on flock.forgesworn.dev).
   never stored parked invites (now kind 8078)** (F4); FLOCK.md/PRIVACY.md
   aligned to the wrap-everything wire model; opt-in fail-loud Tor `.onion`
   toggle (Orbot detection, `ONION_RELAYS` empty until the onion service
-  exists); BLE mesh v2 store-and-forward buffer + manifest reconcile (pure TS,
-  tested; hardware verification per
+  exists); BLE mesh v2 store-and-forward buffer + real learned-peer paged
+  manifest reconciliation (shared stack, mixed-version wire tested; hardware verification per
   `docs/plans/2026-07-04-ble-mesh-v2-test-plan.md`). DM forward secrecy
   deliberately deferred (ratchet crypto deserves its own focused session).
   **Not yet deployed** — the 6-word invite format should ship as a coordinated

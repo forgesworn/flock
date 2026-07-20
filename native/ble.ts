@@ -14,9 +14,78 @@
 
 import { MeshBle } from 'capacitor-mesh-ble'
 import type { PluginListenerHandle } from '@capacitor/core'
+import {
+  MESH_SYNC_KIND,
+  meshScopedToken,
+  withMeshReliability,
+  type MeshFrame,
+  type MeshReliabilityPolicy,
+  type MeshReliabilityStats,
+  type RunningMeshReliability,
+} from 'mesh-kit'
 
 let frameHandle: PluginListenerHandle | null = null
+let peerHandle: PluginListenerHandle | null = null
+let reliability: RunningMeshReliability | null = null
+let reliabilitySubscription: { close(): void } | null = null
 let running = false
+
+const GIFT_WRAP_KIND = 'flock-gift-wrap'
+const RELIABILITY_WIRE_KEY = '_flockMeshSync'
+
+interface ReliabilityWireFrame {
+  _flockMeshSync: 1
+  frame: MeshFrame
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function wrapId(frame: MeshFrame): string | null {
+  if (frame.kind !== GIFT_WRAP_KIND || typeof frame.payload !== 'string') return null
+  try {
+    const event = JSON.parse(frame.payload) as Record<string, unknown>
+    return typeof event.id === 'string' && /^[0-9a-f]{64}$/.test(event.id) ? event.id : null
+  } catch {
+    return null
+  }
+}
+
+/** Exported for compatibility tests; product policy remains encrypted-wrap only. */
+export function flockMeshReliabilityPolicy(room: string): MeshReliabilityPolicy {
+  return {
+    frameId: wrapId,
+    retention: (frame) => wrapId(frame) === null ? null : { ttlSeconds: 15 * 60 },
+    inventoryToken: (id) => meshScopedToken(`flock/reliability-room/v1:${room}`, id),
+  }
+}
+
+/**
+ * Preserve the deployed v1 gift-wrap wire exactly. Only mesh-kit controls use
+ * the reserved wrapper, so an older client ignores them yet still receives
+ * every normal NIP-59 event byte-for-byte.
+ */
+export function encodeBleReliabilityFrame(frame: MeshFrame): string {
+  if (frame.kind === GIFT_WRAP_KIND && typeof frame.payload === 'string') return frame.payload
+  return JSON.stringify({ [RELIABILITY_WIRE_KEY]: 1, frame } satisfies ReliabilityWireFrame)
+}
+
+/** Decode a v2 control, or treat any legacy/raw payload as a normal gift wrap. */
+export function decodeBleReliabilityFrame(data: string, from: string): MeshFrame {
+  try {
+    const wire = record(JSON.parse(data))
+    const frame = record(wire?.[RELIABILITY_WIRE_KEY] === 1 ? wire.frame : null)
+    if (frame?.kind === MESH_SYNC_KIND && typeof frame.kind === 'string') {
+      return { kind: frame.kind, payload: frame.payload, from }
+    }
+  } catch {
+    // Raw legacy gift wraps are handled below.
+  }
+  return { kind: GIFT_WRAP_KIND, payload: data, from }
+}
 
 /** Start BLE-nearby. `serviceUuid === room ===` the discovery UUID — the rotating
  *  members-only advertId (discreet mode) or the common daily meshUuid (crowd mode);
@@ -26,28 +95,85 @@ let running = false
  *  mesh flood/relay. `onFrame` gets each reassembled wrap payload. Throws if BLE is
  *  unavailable/denied — the caller treats that as "BLE off" and uses the relay. */
 export async function startBle(
-  opts: { room: string; selfId: string; serviceUuid: string; hops?: number },
+  opts: { room: string; selfId: string; serviceUuid: string; hops?: number; reconcileGiftWraps?: boolean },
   onFrame: (data: string, from: string) => void,
 ): Promise<void> {
   await stopBle()
-  frameHandle = await MeshBle.addListener('frame', (e) => {
-    if (e && typeof e.data === 'string') onFrame(e.data, typeof e.from === 'string' ? e.from : '')
-  })
-  await MeshBle.start(opts)
-  running = true
+  const handlers = new Set<(frame: MeshFrame) => void>()
+  const rawTransport = {
+    broadcast(frame: MeshFrame): void {
+      void MeshBle.broadcast({ data: encodeBleReliabilityFrame(frame) }).catch(() => {})
+    },
+    send(peer: string, frame: MeshFrame): void {
+      void MeshBle.send({ peer, data: encodeBleReliabilityFrame(frame) }).catch(() => {})
+    },
+    subscribe(handler: (frame: MeshFrame) => void): { close(): void } {
+      handlers.add(handler)
+      return { close: () => void handlers.delete(handler) }
+    },
+  }
+
+  if (opts.reconcileGiftWraps) {
+    reliability = withMeshReliability({
+      selfId: opts.selfId,
+      transport: rawTransport,
+      policy: flockMeshReliabilityPolicy(opts.room),
+      bufferOptions: { maxEntries: 200, ttlSeconds: 15 * 60 },
+    })
+    reliabilitySubscription = reliability.subscribe((frame) => {
+      if (frame.kind === GIFT_WRAP_KIND && typeof frame.payload === 'string') onFrame(frame.payload, frame.from ?? '')
+    })
+  } else {
+    handlers.add((frame) => {
+      if (frame.kind === GIFT_WRAP_KIND && typeof frame.payload === 'string') onFrame(frame.payload, frame.from ?? '')
+    })
+  }
+
+  try {
+    frameHandle = await MeshBle.addListener('frame', (event) => {
+      if (!event || typeof event.data !== 'string') return
+      const frame = decodeBleReliabilityFrame(event.data, typeof event.from === 'string' ? event.from : '')
+      for (const handler of [...handlers]) handler(frame)
+    })
+    if (reliability) {
+      peerHandle = await MeshBle.addListener('peer', (event) => {
+        if (event.connected && typeof event.peer === 'string') reliability?.sync(event.peer)
+      })
+    }
+    await MeshBle.start({
+      room: opts.room,
+      selfId: opts.selfId,
+      serviceUuid: opts.serviceUuid,
+      ...(opts.hops !== undefined ? { hops: opts.hops } : {}),
+    })
+    running = true
+  } catch (error) {
+    await stopBle()
+    throw error
+  }
 }
 
 /** Tear BLE down (idempotent; never throws). */
 export async function stopBle(): Promise<void> {
   running = false
   try { await frameHandle?.remove() } catch { /* already gone */ }
+  try { await peerHandle?.remove() } catch { /* already gone */ }
   frameHandle = null
+  peerHandle = null
+  reliabilitySubscription?.close()
+  reliabilitySubscription = null
+  reliability?.close()
+  reliability = null
   try { await MeshBle.stop() } catch { /* not started / older shell */ }
 }
 
 /** Broadcast an opaque wrap to in-range circle members. Best-effort, never throws. */
 export async function broadcastBle(data: string): Promise<void> {
   if (!running) return
+  if (reliability) {
+    reliability.broadcast({ kind: GIFT_WRAP_KIND, payload: data })
+    return
+  }
   try { await MeshBle.broadcast({ data }) } catch { /* no peers / adapter off */ }
 }
 
@@ -77,5 +203,13 @@ export async function addBleStatusListener(
  *  via broadcastBle; this exercises the plugin's point-to-point write. Never throws. */
 export async function sendBle(peer: string, data: string): Promise<void> {
   if (!running) return
+  if (reliability) {
+    reliability.send(peer, { kind: GIFT_WRAP_KIND, payload: data })
+    return
+  }
   try { await MeshBle.send({ peer, data }) } catch { /* no such peer / adapter off */ }
+}
+
+export function getBleReliabilityStats(): MeshReliabilityStats | null {
+  return reliability?.stats() ?? null
 }

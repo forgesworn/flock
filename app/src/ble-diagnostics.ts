@@ -17,6 +17,7 @@ import {
   broadcastBle,
   sendBle,
   getBleStatus,
+  getBleReliabilityStats,
   addBleStatusListener,
 } from '../../native/ble'
 
@@ -116,6 +117,8 @@ export function renderBleDiagnostics(host: HTMLElement): void {
         <span><b>Queue</b><i data-f="queue">0</i></span>
         <span><b>TX</b><i data-f="tx">0 frames · 0 chunks</i></span>
         <span><b>RX</b><i data-f="rx">0 frames · 0 chunks</i></span>
+        <span><b>Relayed</b><i data-f="relayed">0 frames</i></span>
+        <span><b>Reconcile</b><i data-f="reconcile">off</i></span>
       </div>
       <div class="fbd__flags">
         <span class="fbd__pill" data-flag="running">running</span>
@@ -201,6 +204,11 @@ export function renderBleDiagnostics(host: HTMLElement): void {
     setField('queue', String(num(s, 'queuedChunks')))
     setField('tx', `${num(s, 'txFrames')} frames · ${num(s, 'txChunks')} chunks`)
     setField('rx', `${num(s, 'rxFrames')} frames · ${num(s, 'rxChunks')} chunks`)
+    setField('relayed', `${num(s, 'relayedFrames')} frames`)
+    const reconcile = getBleReliabilityStats()
+    setField('reconcile', reconcile
+      ? `${reconcile.retained} held · ${reconcile.offersReceived} recovered · ${reconcile.duplicatesDropped} deduped`
+      : 'off')
     setField('known', `${num(s, 'knownPeers')} mapped ids`)
     for (const name of ['running', 'advertising', 'scanning', 'gattServer']) {
       host.querySelector(`[data-flag="${name}"]`)?.classList.toggle('fbd__pill--on', flag(s, name))
@@ -240,7 +248,7 @@ export function renderBleDiagnostics(host: HTMLElement): void {
       const room = roomEl.value.trim()
       const selfId = selfEl.value.trim()
       const hops = Number(modeEl.value) || 0
-      await startBle({ room, selfId, serviceUuid: DIAG_SERVICE_UUID, hops }, (data, from) => {
+      await startBle({ room, selfId, serviceUuid: DIAG_SERVICE_UUID, hops, reconcileGiftWraps: hops > 0 }, (data, from) => {
         received += 1
         setField('frames', `${sent} sent · ${received} received`)
         append(`rx ${from ? from.slice(0, 10) : 'unknown'} · ${data.length}B`)
@@ -266,7 +274,7 @@ export function renderBleDiagnostics(host: HTMLElement): void {
       await stopBle(); running = false
       await new Promise((r) => window.setTimeout(r, 600))
       const room = roomEl.value.trim(); const selfId = selfEl.value.trim(); const hops = Number(modeEl.value) || 0
-      await startBle({ room, selfId, serviceUuid: DIAG_SERVICE_UUID, hops }, (data, from) => {
+      await startBle({ room, selfId, serviceUuid: DIAG_SERVICE_UUID, hops, reconcileGiftWraps: hops > 0 }, (data, from) => {
         received += 1
         setField('frames', `${sent} sent · ${received} received`)
         append(`rx ${from ? from.slice(0, 10) : 'unknown'} · ${data.length}B`)

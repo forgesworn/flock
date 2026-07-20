@@ -1,17 +1,20 @@
 # BLE mesh v2 (store-and-forward) — the 2/3-device hardware test plan
 
-**Date:** 2026-07-04 · **Status:** pure-TS logic shipped and fully unit-tested
-(`app/src/meshBuffer.ts`); JS wiring landed (`app/src/app.ts`); hardware
-verification **not done** — this doc is the plan for the session that does it.
+**Date:** 2026-07-04 · **Updated:** 2026-07-20 · **Status:** bounded live
+peer reconciliation is implemented and unit-tested through shared `mesh-kit`
+and `capacitor-mesh-ble`; hardware verification **not done** — this doc is the
+plan for the session that does it.
 Mirrors `docs/plans/2026-06-30-phase0-graphene-spike.md`'s format.
 
 ## Why this exists
 
-Task A of `docs/plans/2026-07-04-mesh-bridge-goal.md` shipped the retention
-buffer, the manifest-diff reconcile, and JS wiring (retain on receipt, re-flood
-the buffer on every mesh (re)start, downlink-bridge a relay-received wrap into
-the mesh) — but explicitly **out of scope for this pass**: proving any of it on
-real radios. The existing BLE-nearby validation (2026-07-04, A32 ↔ Pixel 10
+Task A of `docs/plans/2026-07-04-mesh-bridge-goal.md` first shipped retention
+plus a restart-time full-buffer re-flood. On 2026-07-20 that approximation was
+replaced by the real bounded path: the shared plugin emits a learned `peer`
+route, `mesh-kit/sync/v1` exchanges room-scoped paged manifests, and each side
+unicasts only missing opaque wraps while preserving their original bytes. The
+old raw gift-wrap wire remains unchanged for mixed-version peers. What remains
+is proving it on real radios. The existing BLE-nearby validation (2026-07-04, A32 ↔ Pixel 10
 Pro, see `docs/plans/2026-07-04-ble-nearby-transport.md` phasing item 4) proved
 arbitration, the NOTIFY reverse channel, and single-hop crowd-mesh delivery —
 but not retention, not the manifest exchange, and not multi-hop relay depth
@@ -52,42 +55,33 @@ this one).
 3. On the A32, send a buzz (or let a beacon publish). Confirm the Pixel does
    **not** receive it (out of range — expected).
 4. Walk the Pixel back into range.
-5. **Expected:** on the NEXT mesh (re)start on the A32 (or a scheduled
-   re-flood — see "Tuning follow-ups" below if it doesn't fire promptly
-   enough), the A32 re-broadcasts its buffer and the Pixel receives the
-   earlier buzz it missed, decrypted and rendered.
+5. **Expected:** reconnect learns the Pixel's peer route, immediately exchanges
+   bounded manifests and unicasts the earlier missing wrap; no app/radio restart
+   or full-buffer broadcast is required. The Pixel decrypts and renders it.
 6. Repeat with the roles reversed (Pixel sends while A32 is out of range).
 
 **Pass/fail:** the late-arriving device receives the missed wrap without a
-relay being reachable at any point. **Fail modes to watch for:** the resend
-never fires (re-flood isn't triggering — check whether `syncBle()` is
-actually re-running on the sending device; today it only re-runs on circle
-switch / festival toggle / app foreground, not on a timer — see tuning
-note); or it fires but the receiving device's own `markWrapSeen` already
-consumed the id from a PARTIAL BLE receive earlier and drops it silently
+relay being reachable at any point. **Fail modes to watch for:** the `peer`
+route event never fires after a valid frame; a manifest control is rejected;
+or the receiving device's own `markWrapSeen` already consumed the id from a
+PARTIAL BLE receive earlier and drops it silently
 (check `native/ble.ts`/the Android plugin's chunk-reassembly logs).
 
-### 2. Manifest reconcile — do NOT re-test in this session
-`app/src/meshBuffer.ts`'s `reconcile`/`manifestOf`/`entriesFor` are fully unit
-tested (pure set-diff, no I/O) and don't need hardware to trust the *logic*.
-What genuinely needs hardware and is **not built yet** is the native
-peer-connect hook that would exchange a real manifest over GATT instead of
-just re-flooding the whole live buffer on every mesh restart (today's JS-level
-approximation — see `app/src/app.ts`'s `syncBle`). That native hook is future
-work, tracked here, not blocking this session:
+### 2. Manifest reconcile — prove the real hook (2 devices)
+The logic and mixed-version wire compatibility are unit-tested in
+`native/ble.test.ts`; hardware must now prove the lifecycle edge.
 
-- Extend `FlockBlePlugin.java` to emit a `peer` event on a fresh GATT
-  connection (either role).
-- JS side: on `peer`, call `manifestOf(meshBuffer, now)`, send it as a new
-  frame kind (needs a byte in the envelope to distinguish "manifest" from
-  "wrap" — see the wire-format note in
-  `docs/plans/2026-07-04-ble-nearby-transport.md`), and on receiving a peer's
-  manifest, call `reconcile` and `send()` (unicast, not `broadcast()`) only
-  the entries they're missing.
-- This session should note whether the re-flood-everything approximation is
-  "good enough" in practice (crowds are usually small enough that re-sending
-  the whole live buffer isn't much worse than a diff) before spending the
-  engineering effort on the real manifest exchange.
+1. Start both phones in crowd mode and send distinct wraps from each.
+2. Break the BLE link, send one more wrap on A, then reconnect B.
+3. Open `?diag=ble` in a diagnostic build and confirm `Reconcile` shows held
+   frames and one recovered offer; native status should show a learned peer id.
+4. Confirm the missing wrap is sent directed to the learned route, while a
+   normal gift wrap remains raw NIP-59 JSON (no `_flockMeshSync` wrapper).
+5. Repeat with an old APK on B: ordinary wraps must still deliver; the old app
+   may ignore v2 controls and therefore does not receive the backlog.
+
+**Pass/fail:** two current clients recover only the gap without restarting or
+re-broadcasting the whole buffer, and mixed old/new live traffic is unchanged.
 
 ### 3. Downlink bridging (2 devices, one needs connectivity)
 1. A32: Wi-Fi/data ON, subscribed to the circle's relay as normal. Pixel:
@@ -124,12 +118,10 @@ before spending effort threading a real signature through.
 
 ## Tuning follow-ups to log, not fix blind
 
-- **Re-flood cadence.** Today the buffer only re-floods when `syncBle()`
-  reruns (circle switch, festival toggle, app foreground) — there is
-  deliberately no polling timer (battery-is-a-feature). If the walk-in-late
-  test (§1) shows the resend lagging too far behind a peer coming back into
-  range, consider tying a re-flood to the BLE plugin's own periodic
-  scan/reconnect cycle (native-side signal) rather than adding a JS interval.
+- **Reconcile timing.** There is deliberately no polling timer
+  (battery-is-a-feature). If the `peer` route edge is missed, the first valid
+  inbound frame also starts a bounded manifest round. Log any device where
+  neither trigger occurs; do not add a blind JS interval.
 - **GrapheneOS address rotation** was already flagged in the BLE-nearby doc as
   producing redundant client links (a peer appears under ~3 rotating
   addresses); check whether that churn gets worse now that a reconnect also
@@ -141,7 +133,7 @@ before spending effort threading a real signature through.
 
 ## Acceptance
 
-- §1 (retention) and §3 (downlink bridging) pass on the existing 2-device pair
+- §1 (retention), §2 (real manifest reconciliation), and §3 (downlink bridging) pass on the existing 2-device pair
   — these are the sessions that actually validate the shipped Task A code.
 - §4 (multi-hop) passes once a third device is available — tracked, not
   blocking Task A's completion (the design doc already carried this gap
