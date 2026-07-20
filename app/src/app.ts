@@ -974,17 +974,17 @@ function bootUnlocked(): void {
     void syncTor().then(() => render())
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
-    // Belt-and-braces against a relay subscription going quietly dead even in a
-    // long CONTINUOUSLY-foregrounded session (onForeground's rebuild only fires
-    // on an actual background→foreground transition, which never happens if the
-    // app was simply left open) — force a full teardown + rebuild on a short
-    // cadence regardless. This is the ceiling on how long a message can hide
-    // behind a silently-dead REQ while someone sits watching the screen: it was
-    // 180s (the reported "chat lags by a few minutes"); 60s keeps the passive
-    // wait to a minute at worst while the interactive resubscribes below (opening
-    // Chat, coming forward) make the common case near-instant. resubscribe() is
-    // idempotent-cheap the rest of the time.
-    window.setInterval(() => { resubscribe() }, 60_000)
+    // Belt-and-braces against the relay pool going quietly stale even in a long
+    // CONTINUOUSLY-foregrounded session (onForeground's rebuild only fires on an
+    // actual background→foreground transition, which never happens if the app was
+    // simply left open) — periodically rebuild the pool + subscriptions regardless.
+    // This is the ceiling on how long a message can hide behind a silently-dead
+    // pool while someone sits watching the screen: it was 180s (the reported "chat
+    // lags by a few minutes"). resubscribe() now REBUILDS the pool (fresh sockets),
+    // not just the REQs, so each tick is heavier — 90s balances a low worst-case
+    // wait against the reconnect churn, while the interactive resubscribes below
+    // (opening Chat, coming forward) make the common case near-instant.
+    window.setInterval(() => { resubscribe() }, 90_000)
     // The interval above is unreliable while backgrounded, so also re-check the
     // moment the user brings flock forward — a fresh deploy then shows within
     // seconds of reopening, not up to 6 hours later. Capacitor resume is the
@@ -4808,14 +4808,19 @@ function stopAllSubs(): void {
   subs.clear()
 }
 
-/** Force a fresh subscription: tear every REQ down and rebuild it. Unlike
- *  ensureSubscriptions() — which is idempotent and so can't tell a silently-dead
- *  REQ (socket open, EVENTs stopped) from a healthy one — this is the actual cure
- *  for "messages arrive minutes late". Called on the moments the user is waiting
- *  on others (opening Chat, coming to the foreground) and on a short failsafe. */
+/** Force a fully fresh relay connection AND subscriptions. The disease isn't just
+ *  a dead REQ — the whole SimplePool can go silently stale on mobile (sockets
+ *  ESTABLISHED, but publishes stop landing and EVENTs stop arriving), and closing
+ *  + re-opening REQs on that SAME pool never recovers it. So we also destroy the
+ *  pool (svc.resetPool → fresh WebSockets on the next getPool). Order matters:
+ *  stopAllSubs first CLEARS the subs map so ensureSubscriptions actually rebuilds
+ *  every sub (it skips keys it still holds) on the new pool. Called on the moments
+ *  the user is waiting on others (opening Chat, coming to the foreground) and on a
+ *  short failsafe — the actual cure for "messages just don't arrive". */
 function resubscribe(): void {
-  stopAllSubs()
-  ensureSubscriptions()
+  stopAllSubs()      // release + forget our REQ handles so the rebuild below re-creates them
+  svc.resetPool()    // tear the (possibly-stale) pool down — reconnecting is what actually recovers
+  ensureSubscriptions() // resubscribe on a brand-new pool with fresh connections
 }
 
 async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: string; id?: string }, inboxSk: Uint8Array): Promise<void> {
