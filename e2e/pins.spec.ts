@@ -4,7 +4,7 @@
 // "locate me" first to pin your own spot), a single kind picker, then Drop — which
 // lands it at full precision. Fixed vocabulary only, so the no-free-form property
 // still holds. (The drag gesture itself is verified on-device.)
-import { test, expect, newPerson, createCircle, gotoTab } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, gotoTab } from './fixtures'
 
 test('pins: FAB → sheet → draggable-pin placement → listed', async ({ browser }) => {
   const page = await newPerson(browser)
@@ -87,6 +87,47 @@ test('pins: edit a pin changes its icon in place', async ({ browser }) => {
   await expect(page.locator('.pin-row')).toHaveCount(1)
   await expect(page.locator('.pin-row .pin-nav')).toContainText('Parking')
   await expect(page.locator('.pins-fab .fab-count')).toHaveText('1')
+})
+
+test('pins: a pin one member drops arrives on every other member', async ({ browser }) => {
+  // The whole point of a shared pin: drop it once and the circle sees it. A's drop
+  // is gift-wrapped to the circle inbox (publishSignal) and lands on every member
+  // via onSignalWrap → decryptPin → landPin. Proven here over the live relay, with B
+  // sharing NO location of its own — a pin is a place, not a person.
+  const A = await newPerson(browser)
+  const B = await newPerson(browser)
+  await A.setViewportSize({ width: 390, height: 844 })
+  await B.setViewportSize({ width: 390, height: 844 })
+  await createCircle(A, { name: 'Road trip' })
+  const code = await inviteCode(A)
+  await joinByCode(B, code)
+
+  // A drops a Car pin.
+  await gotoTab(A, 'home')
+  await A.locator('.pins-fab').click()
+  await A.click('[data-action="pin-place-start"]')
+  await A.click('[data-action="pin-kind"][data-kind="car"]')
+  await A.click('[data-action="pin-drop"]')
+  await expect(A.locator('.pins-fab .fab-count')).toHaveText('1')
+
+  // B — who shared nothing — receives it: the FAB counts it, it draws on B's map as
+  // SOMEONE ELSE'S pin (.drop-pin, never .mine), and it's listed as A's Car.
+  await gotoTab(B, 'home')
+  await expect(B.locator('.maplibregl-canvas')).toBeVisible({ timeout: 30_000 })
+  await expect(B.locator('.pins-fab .fab-count')).toHaveText('1', { timeout: 30_000 })
+  await expect(B.locator('.drop-pin')).toBeVisible()
+  await expect(B.locator('.drop-pin.mine')).toHaveCount(0) // it's A's pin, not B's
+  await B.locator('.pins-fab').click()
+  await expect(B.locator('.pin-row .pin-nav')).toContainText('Car')
+  await B.click('[data-action="pins-close"]')
+
+  // A removal propagates the same way (a tombstone the receiver applies): A clears
+  // the pin and it disappears from B's map and count too — no stale pin left behind.
+  await A.locator('.pins-fab').click()
+  await A.click('.pin-row [data-action="remove-pin"]')
+  await expect(A.locator('.pin-row')).toHaveCount(0)
+  await expect(B.locator('.drop-pin')).toHaveCount(0, { timeout: 30_000 })
+  await expect(B.locator('.pins-fab .fab-count')).toHaveCount(0)
 })
 
 test('pins: Cancel leaves placement without dropping', async ({ browser }) => {
