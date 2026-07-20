@@ -50,9 +50,41 @@ describe('pin wire', () => {
     expect(withPin(list, carMoved).find((p) => p.id === car.id)?.geohash).toBe('h')
     expect(withPin(list, { ...car, geohash: 'x', timestamp: 1 })).toBe(list)
 
-    // A tombstone removes it.
+    // A tombstone is RETAINED as an entry (display layers filter `removed`) —
+    // it must keep outranking the drop on every future replay.
     const removed = withPin(list, { ...car, timestamp: 30, removed: true })
-    expect(removed.find((p) => p.id === car.id)).toBeUndefined()
-    expect(removed).toHaveLength(1)
+    expect(removed.find((p) => p.id === car.id)?.removed).toBe(true)
+    expect(removed).toHaveLength(2)
+  })
+
+  it('a replayed drop never resurrects a removed pin', () => {
+    const car: Pin = { id: '1'.repeat(8), from: A, kind: 'car', geohash: 'g', precision: 9, timestamp: 10 }
+    const tomb: Pin = { ...car, timestamp: 30, removed: true }
+
+    // Relays replay wraps in arbitrary order (gift-wrap timestamps are smeared).
+    // Drop → tombstone → drop replay: still removed.
+    let list = withPin(withPin(withPin(undefined, car), tomb), car)
+    expect(list.find((p) => p.id === car.id)?.removed).toBe(true)
+
+    // Tombstone FIRST (before its drop ever arrives), then the drop: never lands.
+    list = withPin(withPin(undefined, tomb), car)
+    expect(list.find((p) => p.id === car.id)?.removed).toBe(true)
+
+    // A genuinely NEWER re-drop of the same id (a move after removal) does land.
+    const reDropped = withPin(list, { ...car, geohash: 'z', timestamp: 40 })
+    expect(reDropped.find((p) => p.id === car.id)?.removed).toBeUndefined()
+    expect(reDropped.find((p) => p.id === car.id)?.geohash).toBe('z')
+  })
+
+  it("another member's tombstone lands on the pin (removal is by id, signed as the remover)", () => {
+    // Receivers bind `from` to the wrap's seal signer, so B removes A's pin by
+    // sending a tombstone with from=B — same id, newer timestamp.
+    const car: Pin = { id: '1'.repeat(8), from: A, kind: 'car', geohash: 'g', precision: 9, timestamp: 10 }
+    const list = withPin(withPin(undefined, car), { ...car, from: B, timestamp: 30, removed: true })
+    const entry = list.find((p) => p.id === car.id)
+    expect(entry?.removed).toBe(true)
+    expect(entry?.from).toBe(B)
+    // And A's original drop replaying later still loses.
+    expect(withPin(list, car)).toBe(list)
   })
 })

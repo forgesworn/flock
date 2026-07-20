@@ -123,12 +123,16 @@ export async function decryptPin(seedHex: string, content: string): Promise<Pin>
   }
 }
 
-/** Merge an incoming pin into a list — latest-timestamp-wins per id, tombstones
- *  drop the pin. Pure; returns a new list (or the same ref when nothing changed). */
+/** Merge an incoming pin into a list — latest-timestamp-wins per id. Tombstones
+ *  are RETAINED as entries, not dropped: relays replay historical wraps in
+ *  arbitrary order (gift-wrap timestamps are deliberately smeared), so a removal
+ *  must keep outranking the original drop on every future replay. Discarding the
+ *  entry — as this once did — let a replayed drop resurrect a deleted pin, and a
+ *  tombstone that arrived before its drop was forgotten entirely. Display layers
+ *  filter `removed`. Pure; returns the same ref when nothing changed. */
 export function withPin(list: readonly Pin[] | undefined, incoming: Pin): Pin[] {
   const cur = list ?? []
   const existing = cur.find((p) => p.id === incoming.id)
   if (existing && existing.timestamp >= incoming.timestamp) return cur as Pin[]
-  const without = cur.filter((p) => p.id !== incoming.id)
-  return incoming.removed ? without : [...without, incoming]
+  return [...cur.filter((p) => p.id !== incoming.id), incoming]
 }

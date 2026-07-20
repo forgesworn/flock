@@ -279,6 +279,7 @@ let placing = false // placement mode: a finger-draggable pin is on the map
 let placingKind: PinKind = 'meet' // the kind the draggable pin will drop
 let placingPos: { lat: number; lon: number } | null = null // the draggable pin's live spot (full precision)
 let editingPinId: string | null = null // when set, placement is MOVING this existing pin (not dropping a new one)
+let removingPinId: string | null = null // when set, placement is a remove-only prompt for SOMEONE ELSE'S pin
 let disbandConfirm = false // inline confirm for the destructive "disband for everyone"
 let resetConfirm = false // inline confirm for the destructive "sign out & reset this device"
 let removeConfirmPk: string | null = null // member pk pending an inline remove confirm
@@ -408,12 +409,17 @@ async function dropPin(kind: PinKind, lat: number, lon: number, reuseId?: string
   } catch { toast("Pin saved — but couldn't reach the network.") }
 }
 
-/** Retract one of MY own pins (a tombstone the circle applies latest-wins). */
+/** Retract a pin (a tombstone the circle applies latest-wins). ANY member may
+ *  remove any pin — shared pins are shared housekeeping: whoever spots a stale
+ *  pin clears it, from whichever phone. The tombstone's `from` is the REMOVER,
+ *  not the original dropper: receivers bind `from` to the wrap's authenticated
+ *  seal signer (no acting as another member), so a removal must be signed as
+ *  yourself — and withPin lands it on the pin by id regardless of dropper. */
 async function removePin(circleId: string, pin: Pin): Promise<void> {
   const c = persisted.circles.find((x) => x.id === circleId)
   const id = persisted.identity
-  if (!c || !id || pin.from !== id.pk) return // only the dropper removes their own
-  const tomb: Pin = { ...pin, timestamp: nowSec(), removed: true }
+  if (!c || !id) return
+  const tomb: Pin = { ...pin, from: id.pk, timestamp: nowSec(), removed: true }
   landPin(circleId, tomb)
   try {
     await publishSignal(await buildPinSignal({ groupId: c.id, seedHex: c.seedHex, ...tomb }), c)
@@ -450,23 +456,31 @@ function raiseDraftPin(lat: number, lon: number): void {
   mapView?.showDraftPin(lat, lon)
 }
 
-/** MOVE an existing pin: enter placement seeded from that pin (its kind, at its
- *  spot), hiding the original so only the draggable copy shows. Long-pressed on the
- *  map. Only my own pins are movable. Drop re-publishes it at the new spot. */
+/** Long-press on a dropped pin. MY pin → move mode: placement seeded from the pin
+ *  (its kind, at its spot), the original hidden so only the draggable copy shows;
+ *  drop re-publishes it at the new spot. SOMEONE ELSE'S pin → a remove-only
+ *  prompt (any member can clear a stale pin, but moving it would silently change
+ *  its owner, so only removal is offered). The pin stays visible — it's the
+ *  subject — and the map still pans/zooms while deciding. */
 function editPin(pinId: string): void {
   const c = activeCircle()
   if (!c) return
-  const pin = cstate(c.id).pins.find((p) => p.id === pinId)
-  if (!pin || pin.from !== persisted.identity?.pk) return
-  editingPinId = pinId
-  placingKind = pin.kind
+  const pin = cstate(c.id).pins.find((p) => p.id === pinId && !p.removed)
+  if (!pin) return
   pinsOpen = false
   mountPinsSheet()
   placing = true
-  mountPlacement()
-  updateMapData() // re-draw the pin layer WITHOUT the one we're moving
-  const d = decode(pin.geohash)
-  raiseDraftPin(d.lat, d.lon)
+  if (pin.from === persisted.identity?.pk) {
+    editingPinId = pinId
+    placingKind = pin.kind
+    mountPlacement()
+    updateMapData() // re-draw the pin layer WITHOUT the one we're moving
+    const d = decode(pin.geohash)
+    raiseDraftPin(d.lat, d.lon)
+  } else {
+    removingPinId = pinId
+    mountPlacement()
+  }
 }
 
 /** Wire the full-screen touch surface (over the map) that drives placement.
@@ -559,6 +573,7 @@ function exitPlacement(): void {
   placing = false
   placingPos = null
   editingPinId = null
+  removingPinId = null
   mapView?.hideDraftPin()
   mountPlacement()
   if (wasEditing) updateMapData() // bring the un-moved pin back
@@ -572,6 +587,7 @@ async function confirmPlacement(): Promise<void> {
   placing = false
   placingPos = null
   editingPinId = null
+  removingPinId = null
   mapView?.hideDraftPin()
   mountPlacement()
   if (reuseId) updateMapData() // the moved pin returns via dropPin's landPin below
@@ -1575,7 +1591,7 @@ function dmUnreadTotal(): number {
 function pinsFab(): string {
   const c = activeCircle()
   if (!c) return ''
-  const n = cstate(c.id).pins.length
+  const n = cstate(c.id).pins.filter((p) => !p.removed).length
   return `<button class="pins-fab" data-action="open-pins" aria-label="Pins${n ? ` (${n})` : ''}">📌${n ? `<span class="fab-count">${n}</span>` : ''}</button>`
 }
 
@@ -1586,11 +1602,11 @@ function pinsSheet(): string {
   const c = activeCircle()
   if (!c) return ''
   const me = persisted.identity?.pk
-  const pins = cstate(c.id).pins
+  const pins = cstate(c.id).pins.filter((p) => !p.removed)
   const list = pins.length
     ? pins.map((p) => `<div class="pin-row">
         <button class="btn pin-nav" data-action="nav-pin" data-id="${p.id}">🧭 <span>${esc(pinKindLabel(p.kind))}</span>${p.from === me ? '' : `<span class="pin-who">${esc(nameFor(p.from))}</span>`}</button>
-        ${p.from === me ? `<button class="btn ghost pin-del" data-action="remove-pin" data-id="${p.id}" aria-label="Remove this pin">🗑</button>` : ''}
+        <button class="btn ghost pin-del" data-action="remove-pin" data-id="${p.id}" aria-label="Remove this pin">🗑</button>
       </div>`).join('')
     : '<div class="note pin-empty">No pins here yet. Drop one to mark a spot — your car, a meeting point, somewhere to steer clear of.</div>'
   return `<div class="compose-sheet" id="pins-sheet" role="dialog" aria-modal="true">
@@ -1639,6 +1655,18 @@ function placementUi(): string {
 }
 
 function placementBarInner(): string {
+  // Remove-only prompt (long-press on someone ELSE's pin): name whose pin it is,
+  // offer only Cancel / Remove — no kinds, no drop, the pin isn't going anywhere.
+  if (removingPinId) {
+    const c = activeCircle()
+    const pin = c ? cstate(c.id).pins.find((p) => p.id === removingPinId) : null
+    const whose = pin ? `${esc(nameFor(pin.from))}'s ${esc(pinKindLabel(pin.kind))} pin` : 'this pin'
+    return `<div class="place-hint">Remove ${whose}?</div>
+    <div class="place-actions">
+      <button class="btn ghost" data-action="pin-cancel">Cancel</button>
+      <button class="btn primary" data-action="pin-remove-editing">🗑 Remove pin</button>
+    </div>`
+  }
   const chips = PIN_KIND_LIST.map((k) => `<button class="pin-kind${k === placingKind ? ' on' : ''}" data-action="pin-kind" data-kind="${k}">${esc(pinKindLabel(k))}</button>`).join('')
   const editing = editingPinId !== null
   return `<div class="place-hint">Hold the 📌 to lift it · drag or pinch the map to line up</div>
@@ -2737,7 +2765,7 @@ function openRadarForPin(pin: Pin): void {
 function navigateToPin(pinId: string): void {
   const c = activeCircle()
   if (!c) return
-  const pin = cstate(c.id).pins.find((p) => p.id === pinId)
+  const pin = cstate(c.id).pins.find((p) => p.id === pinId && !p.removed)
   if (pin) openRadarForPin(pin)
 }
 
@@ -2854,6 +2882,7 @@ function pinPoints(): DroppedPinPoint[] {
   if (!c) return []
   const me = persisted.identity?.pk
   return cstate(c.id).pins
+    .filter((p) => !p.removed) // tombstones are data, not places
     .filter((p) => p.id !== editingPinId) // the pin being moved shows as the draggable draft instead
     .map((p) => {
       const d = decode(p.geohash)
@@ -3849,7 +3878,8 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'pin-zoom-out': mapView?.zoomOut(); break
     case 'pin-remove-editing': { // delete the pin being moved, straight from the map
       const ec = activeCircle()
-      const ep = ec && editingPinId ? cstate(ec.id).pins.find((x) => x.id === editingPinId) : null
+      const targetId = editingPinId ?? removingPinId
+      const ep = ec && targetId ? cstate(ec.id).pins.find((x) => x.id === targetId) : null
       if (ec && ep) { void removePin(ec.id, ep); toast(`Removed ${pinKindLabel(ep.kind)}`) }
       exitPlacement()
       break
