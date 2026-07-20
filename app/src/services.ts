@@ -8,6 +8,7 @@ export {
   fetchGiftWrap,
   subscribeGiftWraps,
   subscribeProfiles,
+  resetPool,
 } from '@forgesworn/roost-kit'
 export type { EventTemplate } from '@forgesworn/roost-kit'
 export interface Fix { lat: number; lon: number; accuracy: number; at: number }

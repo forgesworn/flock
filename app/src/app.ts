@@ -98,6 +98,14 @@ let geoIssue: 'denied' | 'nofix' | null = null // actionable location trouble sh
 let stopWatch: (() => void) | null = null
 let hidden = false // app backgrounded (page hidden) — pause sampling; a hidden PWA can't sample reliably anyway
 const subs = new Map<string, () => void>() // circleId@relay@inboxPk → unsubscribe (one per circle)
+// Pool-staleness recovery: a gift-wrap arriving on the relay pool proves it's live,
+// so we only REBUILD the pool (the heavy, connection-churning recovery) when none
+// has arrived in a while. This keeps an active conversation churn-free (fast) while
+// still healing a genuinely dead pool. See recoverIfStale / resubscribe.
+let lastWrapAt = 0 // unix-sec of the last wrap the relay delivered (0 = none yet)
+let lastPoolReset = 0 // unix-sec of the last pool rebuild — a cooldown so recovery can't hammer reconnects
+const POOL_STALE_SEC = 60 // no wrap for this long ⇒ suspect a dead pool
+const POOL_RESET_COOLDOWN_SEC = 60 // rebuild the pool at most this often on the stale path
 // Last automatic beacon per circle — drives the movement-aware re-emit gate so a
 // stationary member (identical geohash cell) doesn't keep waking the relays.
 const beaconCadence = new Map<string, BeaconCadence>()
@@ -988,14 +996,20 @@ function bootUnlocked(): void {
     void syncTor().then(() => render())
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
-    // Belt-and-braces against a relay subscription going quietly dead even in a
-    // long CONTINUOUSLY-foregrounded session (onForeground's rebuild only fires
-    // on an actual background→foreground transition, which never happens if
-    // the app was simply left open) — force a full teardown + rebuild every
-    // few minutes regardless. ensureSubscriptions() is idempotent by design, so
-    // this is a no-op the rest of the time; it's just insurance for the case
-    // where a subscription looks fine to us but silently stopped delivering.
-    window.setInterval(() => { stopAllSubs(); ensureSubscriptions() }, 180_000)
+    // Seed the staleness clock: the pool we're about to use is freshly built, so
+    // give it a grace period instead of reading lastWrapAt=0 as "stale" and
+    // churning reconnects before its very first wrap has a chance to land.
+    lastWrapAt = nowSec()
+    // Belt-and-braces against the relay pool going quietly stale even in a long
+    // CONTINUOUSLY-foregrounded session (onForeground's rebuild only fires on an
+    // actual background→foreground transition, which never happens if the app was
+    // simply left open). We check often (30s) but recoverIfStale only rebuilds the
+    // pool when NO wrap has arrived for a while — so an active conversation keeps
+    // it live and churn-free, and a genuinely dead pool is healed within ~a minute
+    // (the reported symptom was "chat lags by a few minutes"). Blindly rebuilding
+    // every tick — which an earlier cut did — tore down healthy sockets and made
+    // delivery WORSE; this only reconnects when there's actually nothing arriving.
+    window.setInterval(() => { recoverIfStale() }, 30_000)
     // The interval above is unreliable while backgrounded, so also re-check the
     // moment the user brings flock forward — a fresh deploy then shows within
     // seconds of reopening, not up to 6 hours later. Capacitor resume is the
@@ -3683,7 +3697,15 @@ async function doDmComeToMe(pk: string): Promise<void> {
 
 function handleAction(action: string, node: HTMLElement): void {
   switch (action) {
-    case 'tab': tab = (node.dataset.tab as typeof tab); render(); break
+    case 'tab': {
+      const prev = tab
+      tab = node.dataset.tab as typeof tab
+      // Opening Chat is exactly when you're waiting on a reply — heal the pool if
+      // it's gone stale (no-op on a live one, so no reconnect churn on every open).
+      if (tab === 'chat' && prev !== 'chat') recoverIfStale()
+      render()
+      break
+    }
     case 'switch-circle': if (chipHeldGuard) { chipHeldGuard = false; break } switchCircle(node.dataset.id as string); break
     case 'add-circle': adding = true; onboardStep = 'intro'; render(); break
     case 'go-invite': tab = 'circle'; showInvite = true; render(); break
@@ -4239,8 +4261,7 @@ function onForeground(): void {
   // "healthy" — force a full teardown + rebuild the moment the user actually
   // looks at the app again, when staleness would otherwise show up as
   // "messages just don't arrive" until the next full app restart.
-  stopAllSubs()
-  ensureSubscriptions()
+  resubscribe()
   // A WebGL context is a prime target for the OS to reclaim GPU memory from a
   // backgrounded WebView — reported live as "the map is black" after locking
   // the phone for a few minutes then waking it, fixed only by switching tabs
@@ -4891,7 +4912,35 @@ function stopAllSubs(): void {
   subs.clear()
 }
 
+/** Force a fully fresh relay connection AND subscriptions. The disease isn't just
+ *  a dead REQ — the whole SimplePool can go silently stale on mobile (sockets
+ *  ESTABLISHED, but publishes stop landing and EVENTs stop arriving), and closing
+ *  + re-opening REQs on that SAME pool never recovers it. So we also destroy the
+ *  pool (svc.resetPool → fresh WebSockets on the next getPool). Order matters:
+ *  stopAllSubs first CLEARS the subs map so ensureSubscriptions actually rebuilds
+ *  every sub (it skips keys it still holds) on the new pool. Called on the moments
+ *  the user is waiting on others (opening Chat, coming to the foreground) and on a
+ *  short failsafe — the actual cure for "messages just don't arrive". */
+function resubscribe(): void {
+  lastPoolReset = nowSec() // start the cooldown so the stale-path failsafe won't immediately re-rebuild
+  stopAllSubs()      // release + forget our REQ handles so the rebuild below re-creates them
+  svc.resetPool()    // tear the (possibly-stale) pool down — reconnecting is what actually recovers
+  ensureSubscriptions() // resubscribe on a brand-new pool with fresh connections
+}
+
+/** Rebuild the pool ONLY if it looks stale — no wrap (chat OR presence beacon) has
+ *  arrived for a while — and not more often than the cooldown. During an active
+ *  circle wraps keep lastWrapAt fresh, so this is a no-op and never churns healthy
+ *  connections; it fires only to heal a genuinely dead pool. Used by the periodic
+ *  failsafe and on opening Chat. (Foreground/resume rebuilds unconditionally — a
+ *  backgrounded socket is almost always stale by the time we're back.) */
+function recoverIfStale(): void {
+  const now = nowSec()
+  if (now - lastWrapAt > POOL_STALE_SEC && now - lastPoolReset > POOL_RESET_COOLDOWN_SEC) resubscribe()
+}
+
 async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: string; id?: string }, inboxSk: Uint8Array): Promise<void> {
+  lastWrapAt = nowSec() // the relay just delivered something → the pool is alive (even a dup counts)
   // Dedup a wrap that arrives via BOTH relay and BLE — guarded on bleActive so the
   // relay-only path (web, e2e, anyone not opted in) is never altered. The BLE path
   // (onBleFrame) dedups once up front then calls dispatchWrap per circle directly,
