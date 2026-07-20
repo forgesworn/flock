@@ -457,9 +457,9 @@ async function enterPlacement(kind?: PinKind): Promise<void> {
     if (f) fix = f
   }
   if (!placing) return // cancelled while we awaited the fix
-  const start = fix ? { lat: fix.lat, lon: fix.lon } : mapView?.center() ?? null
-  if (fix) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true }) // start centred on me
-  if (start) raiseDraftPin(start.lat, start.lon)
+  if (fix) mapView?.flyTo({ lat: fix.lat, lon: fix.lon }, { instant: true }) // centre on me
+  const start = mapView?.center() ?? (fix ? { lat: fix.lat, lon: fix.lon } : null)
+  if (start) raiseDraftPin(start.lat, start.lon) // pin sits dead-centre → always visible
 }
 
 /** Show the pin and keep placingPos tracking it — showDraftPin wires the finger-
