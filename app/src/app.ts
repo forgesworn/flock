@@ -982,6 +982,10 @@ function bootUnlocked(): void {
     void syncTor().then(() => render())
     window.setTimeout(() => { void checkForUpdate() }, 15_000)
     window.setInterval(() => { void checkForUpdate() }, 21_600_000)
+    // Seed the staleness clock: the pool we're about to use is freshly built, so
+    // give it a grace period instead of reading lastWrapAt=0 as "stale" and
+    // churning reconnects before its very first wrap has a chance to land.
+    lastWrapAt = nowSec()
     // Belt-and-braces against the relay pool going quietly stale even in a long
     // CONTINUOUSLY-foregrounded session (onForeground's rebuild only fires on an
     // actual background→foreground transition, which never happens if the app was
