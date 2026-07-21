@@ -1,6 +1,26 @@
 # Radar — the road to world's best
 
-**Date:** 2026-07-21 · **Status:** implementation plan · **Owner:** flock-kit + flock + capacitor-mesh-ble
+**Date:** 2026-07-21 · **Status:** items A + C SHIPPED (flock main e32dc7c); B designed, kit core shipped · **Owner:** flock-kit + flock + capacitor-mesh-ble
+
+## Status (end of 2026-07-21 session)
+
+- **A — BLE RSSI assist: SHIPPED.** capacitor-mesh-ble b8f9402 (attributed
+  RSSI + MeshBleRssiBus), flock-kit b8429b0 (banding/blend/hold/voice),
+  flock e32dc7c (JS + locked-phone parity, JVM vectors green). Awaiting the
+  indoor person-in-crowd field test (radar-v2 acceptance test 4).
+- **B — radar session: designed** (`2026-07-21-radar-session-design.md`);
+  kit pure rules shipped (`radarSession` module, kit 41ebde9). App/native
+  implementation is the next slice.
+- **C — quick wins: SHIPPED** in e32dc7c (geo: hand-off chip, wake-lock
+  renewal both sides). The 500 ms tick-lag item remains open.
+- **NEW (field feedback, same day): universal direction callouts SHIPPED** —
+  a changed clock hour ("3 o'clock" → "2 o'clock") is always spoken, every
+  mode, boundary-sticky (6° hysteresis), own 5 s floor, web + locked-phone.
+- **NEW: quality pass SHIPPED** — two-layer sonar ping (web + native PCM
+  parity), phosphor sweep decay, breathing blip + echo ring, CRT overlay.
+  Voice clip set complete 46/46 (OpenAI TTS bake, incl. state-ble-close).
+- **Deploy:** phones still run the pre-session build — needs `apk:release`
+  on a clean tree + deploy, then the field tests.
 **Grounding:** `docs/research/2026-07-21-radar-competitive-landscape.md` (market),
 `docs/plans/2026-07-21-radar-navigation-v2.md` (design, incl. v2.1 addendum),
 `docs/plans/2026-07-09-radar-navigation-goal.md` (privacy model, unchanged and non-negotiable).
