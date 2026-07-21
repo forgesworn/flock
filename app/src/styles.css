@@ -848,7 +848,19 @@ a.btn { text-decoration: none; }
 .map-status { display: flex; align-items: center; gap: 7px; }
 .map-status .ms-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .map-status.state-share .ms-dot { background: var(--calm); box-shadow: 0 0 8px var(--calm); }
+.map-status.state-safe .ms-dot { background: var(--safe); box-shadow: 0 0 8px var(--safe); }
 .map-status .ms-text { font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+/* Posture badge — the circle's Private vs Always-share mode, at a glance. Taps
+   through to Circle where the posture can be changed. */
+.posture-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 34px; padding: 0 12px; border-radius: 999px;
+  font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  border: 1px solid var(--line-strong); color: var(--muted);
+  background: var(--surface-2); flex: none; cursor: pointer;
+}
+.posture-badge.private { color: var(--safe); border-color: var(--safe); background: var(--safe-dim); }
 
 /* ── Find each other (festival mode) — the active boost reads as live ───────── */
 .card.festival-on {

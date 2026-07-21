@@ -1610,6 +1610,24 @@ function homeMapStatusHtml(): string {
   </span>`
 }
 
+/** The circle's location posture — Private (disclosure-on-event) vs Always share
+ *  (continuous while sharing). Chosen at create/join, but editable here so it is
+ *  never a one-way trap: a circle you set Private can be opened up later, and vice
+ *  versa. Device-local, per circle, never synced (each member picks their own). */
+function postureCard(c: store.Circle): string {
+  const posture = store.postureOf(c)
+  const btn = (v: 'always' | 'private', label: string): string =>
+    `<button class="btn small${posture === v ? ' primary' : ''}" data-action="set-posture" data-posture="${v}">${esc(label)}</button>`
+  return `<div class="card stack" style="margin-top:14px">
+    <div class="row" style="justify-content:space-between"><strong>Location sharing</strong></div>
+    <div class="chip-row" role="group" aria-label="Location sharing" style="justify-content:center">${btn('private', 'Private')}${btn('always', 'Always share')}</div>
+    <div class="note">${posture === 'private'
+      ? 'Private — your live location is never broadcast to this circle. It goes out only when you check in or answer a request, at the detail below.'
+      : 'Always share — while sharing is on, your location goes out continuously to this circle at the detail below.'}</div>
+    ${hint('posture', "Private keeps you hidden by default — good for a standing circle like family or flatmates. Always share suits being out together and wanting to see each other live. It's your own choice on your own phone, per circle, and you can change it any time.")}
+  </div>`
+}
+
 /** The precision slider — how closely this circle sees me. Lives on Home next to
  *  the share toggle because it IS the privacy control of the app. The slider shows
  *  my BASE setting; a live "find each other" boost is called out separately. */
@@ -2199,6 +2217,7 @@ function circleView(): string {
     <div class="section-title"${inviteOpen ? ' style="margin-top:22px"' : ''}>Members</div>
     <div class="list">${rows}</div>
 
+    ${postureCard(c)}
     ${precisionCard(c)}
     ${festivalCard(c)}
 
@@ -2803,6 +2822,22 @@ function commitSharePrecision(value: number): void {
   else refresh()
 }
 
+/** Switch this circle's location posture (Private ↔ Always share) after setup —
+ *  so a circle set Private at join isn't locked out of live sharing forever, and
+ *  vice versa. A full render repaints the Circle chips and swaps Home's share bar
+ *  (badge ↔ toggle); it also re-syncs the native mirror, so flipping to Private
+ *  clears the background publisher for this circle the moment it's the focus. */
+function commitPosture(next: 'always' | 'private'): void {
+  const c = activeCircle()
+  if (!c) return
+  if (store.postureOf(c) === next) return
+  patchActive({ trackingDefault: next })
+  beaconCadence.delete(c.id) // take effect now, not on the next cadence tick
+  syncWatch()
+  render()
+  if (next === 'always' && sharing) void autoEmit() // resume the ambient beacon promptly
+}
+
 // ── Find each other (festival mode) ──────────────────────────────────────────
 /** Raise MY detail to Exact spot for this circle for a set window, capped by
  *  the circle's own lifetime. Starts sharing if it wasn't (the whole point is to be
@@ -3145,6 +3180,24 @@ function patchNavBadges(): void {
  *  render and the in-place refresh build identical markup. A compact single
  *  row (icon button, not a full-width one) — Home's hero is the map, not this. */
 function homeShareBarInner(): string {
+  const c = activeCircle() as store.Circle
+  // Private posture never continuously beacons, so a "Share / Sharing live" toggle
+  // here would be a lie (autoEmit + the native publisher both suppress it). Show
+  // the posture badge and the honest event-only state instead; the badge taps
+  // through to Circle, where the posture can be switched to Always share.
+  if (store.postureOf(c) === 'private') {
+    return `<div class="home-share-row">
+      <button class="posture-badge private" data-action="tab" data-tab="circle" aria-label="This circle is Private — open Circle to change">🔒 Private</button>
+      <span class="map-status state-safe" title="Your location goes out only when you check in or answer a request — never continuously.">
+        <span class="ms-dot"></span><span class="ms-text">Shared only when you answer</span>
+      </span>
+    </div>
+    ${hint('home-private', "This circle is Private: your live location is never broadcast. It goes out only when you check in or answer a request, at the detail you set under Circle. Prefer to be seen live? Switch this circle to Always share under Circle.")}`
+  }
+  // Always-share circles keep the live toggle + status unchanged — the toggle's
+  // presence already signals the posture, and a third pill overflows the row on a
+  // 360px phone when the labels grow to "Go private"/"Sharing live". Posture is
+  // shown and edited under Circle; only Private needs an at-a-glance flag here.
   return `<div class="home-share-row">
       <button class="share-toggle${sharing ? ' on' : ''}" data-action="toggle-share" aria-label="${sharing ? 'Go private' : 'Share location'}" aria-pressed="${sharing}">${ICON.pin}<span class="st-label">${sharing ? 'Go private' : 'Share'}</span></button>
       ${homeMapStatusHtml()}
@@ -4110,6 +4163,7 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'find-exact': void askFindPing(node.dataset.pk ?? ''); break
     case 'cancel-findping': cancelFindPing(); break
     case 'toggle-ping-consent': togglePingConsent(); break
+    case 'set-posture': commitPosture(node.dataset.posture === 'always' ? 'always' : 'private'); break
     case 'dm-signal': {
       const signal = node.dataset.signal
       if (isDirectCoordinationAction(signal)) dmSendAction(signal)
@@ -4729,10 +4783,11 @@ async function autoEmit(): Promise<void> {
   const c = activeCircle()
   const id = persisted.identity
   if (!c || !id || !fix) { refresh(); return }
-  // Private posture (chosen at create/join): never a continuous beacon. Location
-  // still goes out on an explicit event — a check-in answer, a "come to me", a
-  // breach — through their own paths; the ambient share is simply off here.
-  if ((c.trackingDefault ?? 'always') === 'private') { refresh(); return }
+  // Private posture (chosen at create/join, editable under Circle): never a
+  // continuous beacon. Location still goes out on an explicit event — a check-in
+  // answer, a "come to me", a breach — through their own paths; the ambient share
+  // is simply off here. The native background publisher mirrors this guard.
+  if (store.postureOf(c) === 'private') { refresh(); return }
   const f = fix
   // Mode is pinned to the share-live path regardless of the circle's stored mode
   // (legacy 'family' circles behave the same) — the slider drives the precision,

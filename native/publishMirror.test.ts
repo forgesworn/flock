@@ -40,6 +40,19 @@ describe('buildNativePublishConfig', () => {
     expect(buildNativePublishConfig(p, true, 7)).toBeNull()
   })
 
+  it('is null when the active circle is Private posture — the background publisher must never beacon it', () => {
+    // `sharing` is global and switchCircle doesn't reset it, so a user who shares
+    // in an Always circle then switches focus to a Private one would otherwise have
+    // the native task keep publishing the Private circle from a killed WebView.
+    const p = base(); p.circles[0].trackingDefault = 'private'
+    expect(buildNativePublishConfig(p, true, 7)).toBeNull()
+  })
+
+  it('still mirrors an explicit Always circle', () => {
+    const p = base(); p.circles[0].trackingDefault = 'always'
+    expect(buildNativePublishConfig(p, true, 7)?.circleId).toBe('c1')
+  })
+
   it('carries festival and off-grid deadlines', () => {
     const p = base()
     p.circles[0].festivalUntil = 123

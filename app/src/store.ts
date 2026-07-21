@@ -99,6 +99,16 @@ export function orderedMembers(members: string[], order?: string[]): string[] {
   return [...ranked, ...members.filter((pk) => !rankedSet.has(pk))]
 }
 
+/** A circle's device-local location posture. `undefined` defaults to `'always'`
+ *  (pre-feature circles beaconed continuously, so the absence of a choice must
+ *  stay continuous for back-compat); `'private'` is disclosure-on-event only —
+ *  never a continuous beacon. Every reader goes through this so the default lives
+ *  in exactly one place — the foreground emitter, the native background publisher
+ *  and the UI must all agree, or a circle set to Private leaks on one path. Pure. */
+export function postureOf(c: Pick<Circle, 'trackingDefault'> | null | undefined): 'always' | 'private' {
+  return (c?.trackingDefault ?? 'always') === 'private' ? 'private' : 'always'
+}
+
 /** Right after we join, relay replay delivers the existing members' history —
  *  discovering THEM is not news to us. Additions within this window of joinedAt
  *  are adopted silently. It only blinds the freshly joined device: every member

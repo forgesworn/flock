@@ -9,7 +9,7 @@
 // journal too — app.ts owns calling us.
 
 import { registerPlugin } from '@capacitor/core'
-import type { Persisted } from '../app/src/store'
+import { postureOf, type Persisted } from '../app/src/store'
 import type { NoReportZone } from '@forgesworn/flock'
 
 interface FlockPublishPlugin {
@@ -50,6 +50,12 @@ export function buildNativePublishConfig(
   if (persisted.torRelay) return null
   const circle = persisted.circles.find((c) => c.id === persisted.activeCircleId)
   if (!circle) return null
+  // Private posture never continuously beacons — the background publisher must
+  // honour that exactly as the foreground autoEmit does (app.ts), or a killed
+  // WebView would keep broadcasting a circle the user set to event-only. `sharing`
+  // is global and switchCircle doesn't reset it, so this is reachable simply by
+  // sharing in one circle then switching focus to a Private one.
+  if (postureOf(circle) === 'private') return null
   return {
     v: 1,
     skHex,
