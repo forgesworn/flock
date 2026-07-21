@@ -32,6 +32,14 @@ export interface NativePublishConfig {
   relayUrls: string[]
   noReportZones: NoReportZone[]
   offGridUntil: number
+  /** Radar session (live navigation) cadence lift — 0s when no session is
+   *  live. The native publisher applies the session floors strictly while
+   *  `now < sessionUntilSec`, so a session expires on the native clock even
+   *  if the WebView never wakes to withdraw it. CADENCE ONLY — precision
+   *  stays `precision` and every policy cap applies exactly as without. */
+  sessionMinIntervalSec: number
+  sessionHeartbeatSec: number
+  sessionUntilSec: number
 }
 
 /** Pure: the config to mirror, or null when background publish must be off
@@ -40,6 +48,7 @@ export function buildNativePublishConfig(
   persisted: Persisted,
   sharing: boolean,
   basePrecision: number,
+  session: { minIntervalSec: number; heartbeatSec: number; untilSec: number } | null = null,
 ): NativePublishConfig | null {
   if (!sharing) return null
   const skHex = persisted.identity?.skHex
@@ -66,6 +75,9 @@ export function buildNativePublishConfig(
     relayUrls: persisted.relayUrls,
     noReportZones: persisted.noReportZones,
     offGridUntil: persisted.offGridUntil ?? 0,
+    sessionMinIntervalSec: session?.minIntervalSec ?? 0,
+    sessionHeartbeatSec: session?.heartbeatSec ?? 0,
+    sessionUntilSec: session?.untilSec ?? 0,
   }
 }
 

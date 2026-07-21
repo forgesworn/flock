@@ -172,6 +172,33 @@ participant's coordinates — and the chosen point is published as an ordinary `
 locationSource, timestamp, scope, originGroupId? }`, with `scope ∈ {group,
 persona, master}` for propagation and `precision` upgraded toward 11.
 
+### Radar sessions (live navigation)
+
+A **radar session** is a mutual, time-boxed **cadence lift** between exactly two
+members: while live, both publish their ordinary circle beacons on a session
+cadence (5 s moving / 30 s stationary keepalive) instead of the ≥45 s floor, so
+an active approach tracks live. **Cadence only** — precision stays each member's
+chosen posture, and no-report zones / off-grid / every policy cap apply exactly
+as without a session (pure rules: `@forgesworn/flock/radarSession`; design:
+`docs/plans/2026-07-21-radar-session-design.md`).
+
+Session signals ride the **same pair-encrypted personal inbox as coordination
+DMs** — the DM `text` is a JSON payload with an `rs` discriminator; clients that
+don't recognise it drop it silently (which *is* the consent model — see below):
+
+| Payload | Content |
+|---|---|
+| `{"rs":1,"k":"req","id",…,"ttl":…}` | ask (one open per pair; a re-ask replaces) |
+| `{"rs":1,"k":"acc","id":…,"ttl":…,"start":…}` | accept — `start` is the acceptor's clock, both countdowns adopt it |
+| `{"rs":1,"k":"stop","id":…}` | courtesy stop — **absence must work** (expiry alone ends a session) |
+
+Consent semantics, enforced by construction: there is **no decline payload** —
+an unanswered ask ages out (120 s window) identically to one never seen; there
+is **no stop reason** — a deliberate stop and an expiry are indistinguishable at
+the other end; TTLs clamp at every read (default 15 min, hard cap 60 min);
+session signals never enter the DM thread and are never persisted — the state is
+transient on both devices.
+
 > Builders return **unsigned** events. The caller signs (NIP-01) and gift-wraps:
 > flock NIP-59 gift-wraps (kind 1059) **every** signal — unconditionally, in
 > both modes — hiding sender + event kind from relays (see `docs/PRIVACY.md`).

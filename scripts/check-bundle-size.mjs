@@ -8,11 +8,14 @@ const budgets = [
   {
     label: 'main',
     match: /^index-[\w-]+\.js$/,
-    // Raised 360k → 364k for radar Phase 3 + universal direction callouts
-    // (2026-07-21) AFTER real splitting (the RSSI window machinery lives in
-    // the lazy native/ble.ts chunk) — what remains is eager radar-path code.
-    // The gzip budget, the delivery metric, is deliberately unchanged.
-    raw: 364_000,
+    // Raised 360k → 364k for radar Phase 3 + universal direction callouts,
+    // then → 369k for the radar-session consent flow (both 2026-07-21). Real
+    // splitting was done first (the RSSI window machinery lives in the lazy
+    // native/ble.ts chunk); what remains is eager code on the DM/radar paths
+    // (the session decode fast-path and consent UI cannot load lazily). The
+    // gzip budget, the delivery metric, is deliberately unchanged — when THAT
+    // threatens, split app.ts properly instead of raising it.
+    raw: 369_000,
     gzip: 125_000,
   },
   {

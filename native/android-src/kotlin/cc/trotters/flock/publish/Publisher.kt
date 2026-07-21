@@ -40,10 +40,17 @@ class FlockPublisher(
         val precision = effectivePrecision(cfg, now)
         val geohash = encodeGeohash(lat, lon, precision)
         val prev = store.getCadence(cfg.circleId)
+        // A live radar session lifts the CADENCE floors only — strictly while
+        // now < sessionUntilSec, so the lift expires on THIS clock even if the
+        // WebView never wakes to withdraw it. Precision and every cap above
+        // (off-grid, no-report, posture) ran exactly as without a session.
+        val sessionLive = cfg.sessionUntilSec > now && cfg.sessionMinIntervalSec > 0
+        val minInterval = if (sessionLive) cfg.sessionMinIntervalSec else COARSE_MIN_INTERVAL
+        val heartbeat = if (sessionLive) cfg.sessionHeartbeatSec else COARSE_HEARTBEAT
         val send = shouldEmitBeacon(
             geohash, prev, now,
-            jitteredSeconds(COARSE_MIN_INTERVAL, CADENCE_JITTER_FRACTION, rand()),
-            jitteredSeconds(COARSE_HEARTBEAT, CADENCE_JITTER_FRACTION, rand()),
+            jitteredSeconds(minInterval, CADENCE_JITTER_FRACTION, rand()),
+            jitteredSeconds(heartbeat, CADENCE_JITTER_FRACTION, rand()),
         )
         if (!send) {
             maybeCover(cfg, precision, now)

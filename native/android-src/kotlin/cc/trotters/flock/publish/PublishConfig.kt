@@ -15,6 +15,13 @@ data class PublishConfig(
     val relayUrls: List<String>,
     val zones: List<NoReportZone>,
     val offGridUntil: Long,
+    // Radar session (live navigation) cadence lift — all 0 when none is live.
+    // Applied strictly while now < sessionUntilSec, so a session expires on
+    // THIS clock even if the WebView never wakes to withdraw it. Cadence
+    // only: precision and every policy cap apply exactly as without.
+    val sessionMinIntervalSec: Long = 0,
+    val sessionHeartbeatSec: Long = 0,
+    val sessionUntilSec: Long = 0,
 )
 
 private const val PRECISION_MIN = 3
@@ -50,6 +57,9 @@ fun parsePublishConfig(json: String): PublishConfig? = try {
             }
         } ?: emptyList(),
         offGridUntil = o.optLong("offGridUntil", 0),
+        sessionMinIntervalSec = o.optLong("sessionMinIntervalSec", 0),
+        sessionHeartbeatSec = o.optLong("sessionHeartbeatSec", 0),
+        sessionUntilSec = o.optLong("sessionUntilSec", 0),
     )
 } catch (_: Exception) { null }
 

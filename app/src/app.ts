@@ -78,6 +78,24 @@ import {
   type GroupCoordinationAction,
   type DirectCoordinationAction,
 } from '@forgesworn/flock'
+import {
+  RADAR_SESSION,
+  requestOpen,
+  supersedes,
+  acceptSession,
+  sessionActive,
+  sessionRemainingSec,
+} from '@forgesworn/flock/radarSession'
+import {
+  encodeSessionText,
+  decodeSessionText,
+  sessionCadenceOptions,
+  sessionUntilSec,
+  newSessionRequestId,
+  type SessionSignal,
+  type LiveRadarSession,
+  type IncomingSessionAsk,
+} from './radarSession'
 
 // ── State ──────────────────────────────────────────────────────────────────
 let persisted = store.load()
@@ -270,6 +288,14 @@ let batteryAsked = false // shown the system exemption dialog this session — d
 // Only ever answered by an explicit tap; expires quietly (see LOC_ASK_WINDOW_SEC).
 let locAsk: { circleId: string; from: string; at: number } | null = null
 const LOC_ASK_WINDOW_SEC = 15 * 60
+// ── Radar sessions (live navigation) — TRANSIENT state ONLY, by design: no
+// history, no persistence, nothing for a searched phone to show (see
+// docs/plans/2026-07-21-radar-session-design.md). Keyed by peer pk — one live
+// session and one open ask per pair; asks replace, never stack. There is no
+// decline state anywhere: an unanswered ask ages out of requestOpen silently.
+const radarSessions = new Map<string, LiveRadarSession>()
+const radarAsksIn = new Map<string, IncomingSessionAsk>()
+const radarAsksOut = new Map<string, { requestId: string; ttlSec: number; sentAtSec: number; circleId: string }>()
 // Only a FRESH incoming message rings/notifies — a relay replaying history on a
 // re-subscribe (reconnect, reboot) must repopulate the thread silently.
 const MSG_FRESH_SEC = 3600
@@ -1248,6 +1274,9 @@ function bootUnlocked(): void {
     // every tick — which an earlier cut did — tore down healthy sockets and made
     // delivery WORSE; this only reconnects when there's actually nothing arriving.
     window.setInterval(() => { recoverIfStale() }, 30_000)
+  // Radar sessions/asks expire on their own clocks — no push needed. 5 s keeps
+  // an expiring pill honest to within a beat of its countdown.
+  window.setInterval(() => { sweepRadarSessions() }, 5_000)
     // The interval above is unreliable while backgrounded, so also re-check the
     // moment the user brings flock forward — a fresh deploy then shows within
     // seconds of reopening, not up to 6 hours later. Capacitor resume is the
@@ -1539,9 +1568,14 @@ function render(opts?: { animate?: boolean }): void {
   // Native shell: keep the background-publish mirror in step with state. Diffed
   // inside the module — this is a cheap no-op unless something changed.
   if (isNativeShell()) {
-    void import('../../native/publishMirror').then((m) =>
-      m.syncNativePublishConfig(m.buildNativePublishConfig(persisted, sharing, baseSharePrecision(activeCircle()))),
-    ).catch(() => { /* plugin unavailable */ })
+    void import('../../native/publishMirror').then((m) => {
+      const c = activeCircle()
+      const untilSec = c ? sessionUntilSec(radarSessions, c.id) : 0
+      const session = untilSec > 0
+        ? { minIntervalSec: RADAR_SESSION.cadenceMovingSec, heartbeatSec: RADAR_SESSION.cadenceStationarySec, untilSec }
+        : null
+      return m.syncNativePublishConfig(m.buildNativePublishConfig(persisted, sharing, baseSharePrecision(c), session))
+    }).catch(() => { /* plugin unavailable */ })
   }
 }
 
@@ -3900,6 +3934,29 @@ function dmSheet(): string {
          <button class="btn small ghost" data-action="dm-come-to-me-cancel">Cancel</button>
        </div>`
     : ''
+  // Live navigation (radar session): the pill while live, the Start button on
+  // an open ask (ignoring it is the only "no" — there is no decline button),
+  // "asked…" while mine is open, else the ask chip. Never in the thread.
+  const nowS = nowSec()
+  const liveSession = radarSessions.get(dmPeer)
+  const askIn = radarAsksIn.get(dmPeer)
+  const askOut = radarAsksOut.get(dmPeer)
+  const livePill = liveSession
+    ? `<div class="card row dm-live-pill" style="justify-content:space-between;align-items:center">
+        <span>🧭 <strong>Live with ${esc(nameFor(dmPeer))}</strong> · ${Math.max(1, Math.ceil(sessionRemainingSec(liveSession, nowS) / 60))} min left</span>
+        <button class="btn small ghost" data-action="dm-live-stop">Stop</button>
+      </div>`
+    : askIn && requestOpen(askIn, nowS)
+      ? `<div class="card row dm-live-pill" style="justify-content:space-between;align-items:center">
+          <span>🧭 ${esc(nameFor(dmPeer))} asks to navigate live — both share exactly, every few seconds, for ${Math.round(askIn.ttlSec / 60)} min</span>
+          <button class="btn small primary" data-action="dm-live-accept">Start</button>
+        </div>`
+      : ''
+  const liveChip = liveSession || (askIn && requestOpen(askIn, nowS))
+    ? ''
+    : askOut && requestOpen(askOut, nowS)
+      ? `<button class="btn small" disabled>🧭 Live navigation asked…</button>`
+      : `<button class="btn small" data-action="dm-live-ask">🧭 Live navigation</button>`
   return `<div class="compose-sheet" id="dm-sheet" role="dialog" aria-modal="true">
     <div class="compose-card dm-card">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
@@ -3907,7 +3964,8 @@ function dmSheet(): string {
         <button class="bz-x" data-action="dm-close" aria-label="Close">✕</button>
       </div>
       <div class="chat-thread dm-thread" id="dm-thread">${thread}</div>
-      <div class="chip-row chat-presets">${findBtn}${DM_QUICK_ACTIONS.map(chip).join('')}</div>
+      ${livePill}
+      <div class="chip-row chat-presets">${findBtn}${liveChip}${DM_QUICK_ACTIONS.map(chip).join('')}</div>
       ${confirm}
       <div class="note">Private: encrypted so only they can read it. It stays out of the circle signal log.</div>
     </div>
@@ -3957,6 +4015,11 @@ function onIncomingDm(dm: DirectMessage): void {
   if (me && dm.from === me.pk) return // my own action echoed back — never notify myself
   const c = persisted.circles.find((x) => x.id === dm.circleId)
   if (!c || !(c.members ?? []).includes(dm.from)) return // not a fellow circle member — drop
+  // Radar-session signals ride the same pair-encrypted inbox but never enter
+  // the thread (no history by design). Anything that doesn't parse falls
+  // through to the coordination path exactly as before.
+  const sessionSig = decodeSessionText(dm.text)
+  if (sessionSig) { onRadarSessionSignal(dm, c, sessionSig); return }
   const action = coordinationActionFromLabel(dm.text)
   if (!isDirectCoordinationAction(action)) return // not a provider-defined private action — drop
   const label = coordinationLabel(action)
@@ -3977,6 +4040,119 @@ function onIncomingDm(dm: DirectMessage): void {
   notifyIfHidden(label, { kind: 'dm', title: nameFor(dm.from), group: `dm:${dm.from}`, sender: nameFor(dm.from) })
   try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ }
   refresh()
+}
+
+// ── Radar session (live navigation) — the consent flow over the pair inbox ───
+
+/** Send one session signal to a peer over the pair-encrypted inbox. False on
+ *  failure (the caller unwinds its optimistic state). */
+async function sendRadarSessionSignal(pk: string, circleId: string, text: string): Promise<boolean> {
+  const signer = getSigner()
+  const id = persisted.identity
+  if (!signer || !id || pk === id.pk) return false
+  try {
+    const wrap = await buildDmWrap(signer, pk, { circleId, text })
+    await svc.publishSigned(activeRelays(), wrap as never)
+    return true
+  } catch { return false }
+}
+
+/** "Live navigation" ask: one open ask per pair (a re-ask replaces it), shown
+ *  as "asked…" until it is accepted or quietly ages out. No decline exists. */
+async function askRadarSession(pk: string): Promise<void> {
+  const c = activeCircle()
+  if (!c || radarSessions.has(pk)) return
+  const req = { requestId: newSessionRequestId(), ttlSec: RADAR_SESSION.defaultTtlSec, sentAtSec: nowSec(), circleId: c.id }
+  radarAsksOut.set(pk, req)
+  mountDmSheet()
+  const ok = await sendRadarSessionSignal(pk, c.id, encodeSessionText({ kind: 'req', requestId: req.requestId, ttlSec: req.ttlSec }))
+  if (!ok) { radarAsksOut.delete(pk); mountDmSheet(); toast('Ask failed — check your connection') }
+}
+
+/** Accept an open ask → live session on MY clock, told to the asker. A raced
+ *  or aged-out ask accepts to nothing — never resurrected. */
+function acceptRadarSession(pk: string): void {
+  const ask = radarAsksIn.get(pk)
+  if (!ask) return
+  radarAsksIn.delete(pk)
+  const s = acceptSession(ask, nowSec())
+  if (!s) { mountDmSheet(); return }
+  void sendRadarSessionSignal(pk, ask.circleId, encodeSessionText({ kind: 'acc', requestId: s.sessionId, ttlSec: s.ttlSec, startAtSec: s.startAtSec }))
+  startRadarSessionLocal({ ...s, peer: pk, circleId: ask.circleId })
+}
+
+function startRadarSessionLocal(s: LiveRadarSession): void {
+  radarSessions.set(s.peer, s)
+  toast(`Live with ${nameFor(s.peer)} — ${Math.round(Math.min(s.ttlSec, RADAR_SESSION.maxTtlSec) / 60)} min`)
+  if (dmPeer === s.peer) mountDmSheet()
+  refresh() // re-render + (native) publish-mirror resync pick up the lift
+}
+
+/** End a session. ONE copy for every path — my stop sends a courtesy signal,
+ *  their stop and an expiry send nothing — so the other end can never tell a
+ *  deliberate stop from time running out (the coercion rule). */
+function endRadarSession(pk: string, mine: boolean): void {
+  const s = radarSessions.get(pk)
+  if (!s) return
+  radarSessions.delete(pk)
+  if (mine) void sendRadarSessionSignal(pk, s.circleId, encodeSessionText({ kind: 'stop', sessionId: s.sessionId }))
+  toast('Live navigation ended')
+  if (dmPeer === pk) mountDmSheet()
+  refresh()
+}
+
+/** Age out asks and sessions — called on a short interval so expiry needs no
+ *  push. Expiry runs the SAME ending as a stop, minus any signal. */
+function sweepRadarSessions(): void {
+  const now = nowSec()
+  for (const [pk, a] of radarAsksIn) if (!requestOpen(a, now)) radarAsksIn.delete(pk)
+  for (const [pk, a] of radarAsksOut) {
+    if (!requestOpen(a, now)) {
+      radarAsksOut.delete(pk)
+      if (dmPeer === pk) mountDmSheet() // "asked…" quietly becomes the plain chip
+    }
+  }
+  for (const [pk, s] of radarSessions) {
+    if (!sessionActive(s, now)) endRadarSession(pk, false)
+  }
+}
+
+function onRadarSessionSignal(dm: DirectMessage, c: store.Circle, sig: SessionSignal): void {
+  const pk = dm.from
+  switch (sig.kind) {
+    case 'req': {
+      const next: IncomingSessionAsk = { requestId: sig.requestId, ttlSec: sig.ttlSec, sentAtSec: dm.at, peer: pk, circleId: c.id }
+      if (!supersedes(radarAsksIn.get(pk) ?? null, next)) return
+      radarAsksIn.set(pk, next)
+      // A relay replaying an old ask repopulates nothing audible — the ask is
+      // already outside its window and the sweep drops it on the next pass.
+      if (!requestOpen(next, nowSec())) { refresh(); return }
+      if (dmPeer === pk && !document.hidden) { mountDmSheet(); refresh(); return }
+      raiseBuzz({ from: pk, reason: 'asks for live navigation', mine: true, circle: c.name, private: true })
+      notifyIfHidden('Live navigation?', { kind: 'dm', title: nameFor(pk), group: `dm:${pk}`, sender: nameFor(pk) })
+      try { navigator.vibrate?.([300, 120, 300]) } catch { /* no haptics */ }
+      refresh()
+      return
+    }
+    case 'acc': {
+      const mine = radarAsksOut.get(pk)
+      if (!mine || mine.requestId !== sig.requestId) return // not my ask (or superseded) — drop
+      radarAsksOut.delete(pk)
+      // The acceptor's clock starts both countdowns; clamp an absurd start
+      // (hostile or badly skewed) to MY now so a session can never be pinned
+      // live into the far future.
+      const now = nowSec()
+      const startAtSec = Math.abs(sig.startAtSec - now) > RADAR_SESSION.clockSkewSec ? now : sig.startAtSec
+      startRadarSessionLocal({ sessionId: sig.requestId, ttlSec: Math.min(sig.ttlSec, mine.ttlSec), startAtSec, peer: pk, circleId: mine.circleId })
+      return
+    }
+    case 'stop': {
+      const s = radarSessions.get(pk)
+      if (!s || s.sessionId !== sig.sessionId) return
+      endRadarSession(pk, false) // their stop reads exactly like an expiry here
+      return
+    }
+  }
 }
 
 /** A PM "Come to me" exact-location share just arrived on my personal inbox —
@@ -4180,6 +4356,9 @@ function handleAction(action: string, node: HTMLElement): void {
     case 'dm-come-to-me': dmComeToMeArmed = !dmComeToMeArmed; mountDmSheet(); break
     case 'dm-come-to-me-cancel': dmComeToMeArmed = false; mountDmSheet(); break
     case 'dm-come-to-me-confirm': dmComeToMeArmed = false; void doDmComeToMe(dmPeer ?? ''); break
+    case 'dm-live-ask': if (dmPeer) void askRadarSession(dmPeer); break
+    case 'dm-live-accept': if (dmPeer) acceptRadarSession(dmPeer); break
+    case 'dm-live-stop': if (dmPeer) endRadarSession(dmPeer, true); break
     case 'copy-invite': void copyInvite(); break
     case 'share-word-code': case 'new-word-code': void shareWordCode(); break
     case 'copy-word-code': void copyWordCode(); break
@@ -4814,11 +4993,15 @@ async function autoEmit(): Promise<void> {
   const geohash = encode(f.lat, f.lon, plan.precision)
   const prev = beaconCadence.get(c.id) ?? { lastGeohash: null, lastSentAt: 0 }
   const now = nowSec()
+  // A live radar session lifts the CADENCE floors (5 s moving / 30 s still) —
+  // and nothing else: precision stays the chosen posture, no-report zones and
+  // the whole policy above ran exactly as without a session.
+  const sessionOpts = sessionCadenceOptions(radarSessions, c.id, now)
   // Timing hygiene (audit F1): re-roll the cadence each tick so the interval
   // itself isn't perfectly periodic on the wire.
   if (!shouldEmitBeacon(geohash, prev, now, {
-    minIntervalSeconds: jitteredSeconds(COARSE_MIN_INTERVAL, CADENCE_JITTER_FRACTION, Math.random()),
-    heartbeatSeconds: jitteredSeconds(COARSE_HEARTBEAT, CADENCE_JITTER_FRACTION, Math.random()),
+    minIntervalSeconds: jitteredSeconds(sessionOpts?.minIntervalSeconds ?? COARSE_MIN_INTERVAL, CADENCE_JITTER_FRACTION, Math.random()),
+    heartbeatSeconds: jitteredSeconds(sessionOpts?.heartbeatSeconds ?? COARSE_HEARTBEAT, CADENCE_JITTER_FRACTION, Math.random()),
   })) {
     // The real gate just said no (standing still, inside the heartbeat window) —
     // consider a low-rate decoy instead, narrowing the moving-vs-still cadence
