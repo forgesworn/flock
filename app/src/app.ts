@@ -242,6 +242,17 @@ function markWrapSeen(id: string): boolean {
   if (seenWrapIds.size > 1000) seenWrapIds.delete(seenWrapIds.values().next().value as string)
   return true
 }
+// Dedup on the CONTENT-BOUND rumor id too (roost-kit recomputes it on unwrap), not
+// just the outer wrap id: a replay re-wrapped under a fresh ephemeral key carries a
+// NEW wrap id but the SAME rumor id, so wrap-id dedup alone would re-deliver a stale
+// signal (an old beacon or all-clear) as if it were current.
+const seenRumorIds = new Set<string>()
+function markRumorSeen(id: string): boolean {
+  if (seenRumorIds.has(id)) return false
+  seenRumorIds.add(id)
+  if (seenRumorIds.size > 1000) seenRumorIds.delete(seenRumorIds.values().next().value as string)
+  return true
+}
 // Crowd mode adds mesh-kit's bounded reconciliation in native/ble.ts: opaque
 // signed gift wraps are retained for at most 15 minutes (200 entries), while
 // room-scoped inventory tokens and a learned peer-route event recover missed
@@ -4187,14 +4198,22 @@ async function joinWithWords(): Promise<void> {
   if (jw) jw.value = raw
   try {
     const codeSeed = await deriveWordCodeSeed(words)
-    const refEvent = await svc.fetchWordInvite(activeRelays(), WORD_INVITE.kind, wordInviteTag(codeSeed))
-    if (!refEvent) { toast('No invite found for those words. They expire after 15 minutes, so ask for a fresh code.'); return }
-    const ref = await readWordInviteRef(codeSeed, refEvent)
+    // Try EACH candidate, not a single max-created_at pick: the word-code tag is
+    // low-entropy/guessable, so a junk event could otherwise shadow the real
+    // reference, and a gift wrap's created_at is randomised (no reliable order).
+    const refEvents = await svc.fetchWordInvites(activeRelays(), WORD_INVITE.kind, wordInviteTag(codeSeed))
+    let refEvent: { id: string; content: string; created_at: number } | null = null
+    let ref: Awaited<ReturnType<typeof readWordInviteRef>> | null = null
+    for (const e of refEvents) {
+      try { const r = await readWordInviteRef(codeSeed, e); if (r?.ref) { ref = r; refEvent = e; break } } catch { /* junk — try the next candidate */ }
+    }
+    if (!ref || !refEvent) { toast('No invite found for those words. They expire after 15 minutes, so ask for a fresh code.'); return }
     const refSk = store.fromHex(ref.ref)
     const refPk = getPublicKey(refSk)
-    const inviteWrap = await svc.fetchGiftWrap(activeRelays(), personalInboxTag(refPk))
-    if (!inviteWrap) { toast("The invite is still on its way. Wait a moment and try the same words again."); return }
-    const p = await readInviteViaRef(refSk, inviteWrap)
+    const inviteWraps = await svc.fetchGiftWraps(activeRelays(), personalInboxTag(refPk))
+    if (!inviteWraps.length) { toast("The invite is still on its way. Wait a moment and try the same words again."); return }
+    let p: Awaited<ReturnType<typeof readInviteViaRef>> | null = null
+    for (const w of inviteWraps) { p = await readInviteViaRef(refSk, w); if (p) break }
     if (!p) throw new Error('invalid invite')
     const circle: store.Circle = { id: p.id, seedHex: p.s, name: p.n || 'Circle', mode: p.m === 'nightout' ? 'nightout' : 'family', ...(typeof p.x === 'number' ? { expiresAt: p.x } : {}) }
     ensureIdentity()
@@ -5217,7 +5236,11 @@ async function onSignalWrap(circleId: string, wrap: { pubkey: string; content: s
  *  caller owns that (onSignalWrap for relay; onBleFrame once, then all circles). */
 async function dispatchWrap(circleId: string, wrap: { pubkey: string; content: string; id?: string }, inboxSk: Uint8Array): Promise<void> {
   const rumor = await giftUnwrap(rawNip44Decrypt(inboxSk), wrap)
-  if (rumor) await onIncoming(circleId, rumor)
+  if (!rumor) return
+  // A re-wrapped replay slips past the wrap-id dedup but not the content-bound
+  // rumor id — drop it so a stale signal is never re-delivered as current.
+  if (rumor.id && !markRumorSeen(rumor.id)) return
+  await onIncoming(circleId, rumor)
 }
 
 async function onIncoming(circleId: string, e: { pubkey: string; content: string; tags: string[][]; created_at: number }): Promise<void> {
