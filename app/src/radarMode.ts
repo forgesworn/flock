@@ -88,12 +88,10 @@ const RATE_ALPHA = 0.3
 const VOICE_MIN_INTERVAL_MS = RADAR.voiceMinIntervalSec * 1000
 /** A sustained relative-bearing swing beyond this (VECTOR) re-announces the side. */
 const BEARING_CHANGE_DEGREES = 30
-/** BLE RSSI sampling interval — battery-conscious, plenty for a median window. */
+/** BLE RSSI sampling interval — battery-conscious, plenty for a median window.
+ *  The window's age/depth caps (12 s / 10 samples) live in native/ble.ts's
+ *  armRssiWindow, alongside the sampling it starts. */
 const BLE_SAMPLE_INTERVAL_MS = 2000
-/** Samples older than this age out of the proximity window. */
-const BLE_WINDOW_MAX_AGE_MS = 12_000
-/** Window depth cap — a rolling median, not a full history. */
-const BLE_WINDOW_MAX_SAMPLES = 10
 
 const SILENT_CUE: RadarCue = { pattern: 'silent', periodMs: 0, toneHz: 0, vibrateMs: [], pan: 0, sign: null, trend: null }
 
@@ -155,17 +153,13 @@ interface RadarSession {
   nativeGuide: boolean
   nativeCheck: number
   // ── Phase 3: BLE RSSI proximity assist ──
-  /** Is sampling currently ON (startRssiSampling called and not yet stopped)?
-   *  Re-evaluated every tick against the live disclosure — armed only for a
-   *  MEMBER target (never a pin) whose current share is not coarse. */
-  bleArmed: boolean
+  /** The live peer-filtered window (native/ble.ts), or null when not armed —
+   *  re-evaluated every tick against the live disclosure (armed only for a
+   *  MEMBER target whose current share is not coarse; see syncBleArm). */
+  bleWindow: { values: () => number[]; stop: () => void } | null
   /** Guards overlapping arm/disarm calls (both are async). */
   bleArming: boolean
-  bleListenerAttached: boolean
-  removeBleListener: (() => void) | null
-  bleSamples: { rssi: number; atMs: number }[]
   bleProximity: BleProximity
-  lastBleProximity: BleProximity
   /** mode === 'homing' AND the band is honestly usable AND immediate — the
    *  combined "very close, by radio" claim the status line and voice share. */
   bleClose: boolean
@@ -173,20 +167,22 @@ interface RadarSession {
   closed: boolean
 }
 
-/** The native guide bridge, when the shell provides it (lazy, cached). */
-const nativeGuideApi = async (): Promise<typeof import('../../native/radarGuide') | null> => {
-  if (!isNativeShell()) return null
-  try { return await import('../../native/radarGuide') } catch { return null }
+/** A lazy, native-shell-only module loader: null outside the shell or on any
+ *  import failure (older shell). Both bridges below share this shape. */
+function nativeModule<T>(loader: () => Promise<T>): () => Promise<T | null> {
+  return async () => {
+    if (!isNativeShell()) return null
+    try { return await loader() } catch { return null }
+  }
 }
 
-/** The mesh-BLE bridge, when the shell provides it (lazy, cached like
- *  nativeGuideApi) — radar's own RSSI window is a THIN consumer of the mesh
- *  the app already owns (app.ts syncBle); it never starts/stops the mesh
- *  itself, only the opt-in RSSI sampler layered on top of it. */
-const bleApi = async (): Promise<typeof import('../../native/ble') | null> => {
-  if (!isNativeShell()) return null
-  try { return await import('../../native/ble') } catch { return null }
-}
+/** The native guide bridge, when the shell provides it. */
+const nativeGuideApi = nativeModule(() => import('../../native/radarGuide'))
+/** The mesh-BLE bridge, when the shell provides it — radar's own RSSI window
+ *  is a THIN consumer of the mesh the app already owns (app.ts syncBle); it
+ *  never starts/stops the mesh itself, only the opt-in RSSI sampler layered
+ *  on top of it. */
+const bleApi = nativeModule(() => import('../../native/ble'))
 
 let session: RadarSession | null = null
 
@@ -212,11 +208,9 @@ export function closeRadar(): void {
   void s.audio?.close().catch(() => { /* already closed */ })
   if (s.nativeGuide) void nativeGuideApi().then((m) => m?.stopRadarGuide())
   // BLE RSSI sampling: always stop on close (the only consumer today — no
-  // arm-tracking needed to avoid fighting another feature). Idempotent even
-  // if never started (never armed for a pin / mesh off / coarse share).
-  s.removeBleListener?.()
-  s.removeBleListener = null
-  if (s.host.meshPeerId) void bleApi().then((m) => m?.stopRssiSampling())
+  // arm-tracking needed to avoid fighting another feature).
+  s.bleWindow?.stop()
+  s.bleWindow = null
   s.el.remove()
   s.host.onClosed()
 }
@@ -276,13 +270,9 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
     wakeLock: null,
     nativeGuide: false,
     nativeCheck: 0,
-    bleArmed: false,
+    bleWindow: null,
     bleArming: false,
-    bleListenerAttached: false,
-    removeBleListener: null,
-    bleSamples: [],
     bleProximity: null,
-    lastBleProximity: null,
     bleClose: false,
     lastBleClose: false,
     closed: false,
@@ -305,7 +295,7 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
   void nativeGuideApi().then((m) => {
     if (!m || s.closed) return
     const t = host.getTarget()
-    void m.startRadarGuide(t ? { lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, evergreen: s.evergreen } : null, s.muted, s.voice)
+    void m.startRadarGuide(t ? { lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, evergreen: s.evergreen, meshPeerId: host.meshPeerId ?? null } : null, s.muted, s.voice)
       .then(() => { if (s.closed) void m.stopRadarGuide(); else s.nativeGuide = true })
   })
   void startOrientation(s)
@@ -333,66 +323,34 @@ async function acquireWakeLock(s: RadarSession): Promise<void> {
 }
 
 // ── BLE proximity (radar-v2 Phase 3) ───────────────────────────────────────
-// A THIN consumer of the mesh app.ts already owns: this never starts or stops
-// the mesh transport itself, only the opt-in RSSI sampler layered on top of
-// it, and only while radar has an armed MEMBER target. Attribution comes from
-// the plugin (an RSSI sample is only ever tagged with a mesh peer id already
-// bound to that member by an authenticated frame exchange — never a raw,
-// unattributed advert), so filtering on `sample.peer === meshPeerId` here is
-// exactly the "identified GATT link" rule from the design doc, not an
-// additional trust decision.
-
-/** Start sampling + attach the peer-filtered listener, if not already armed.
- *  Best-effort throughout: BLE unavailable/denied/older-shell just leaves the
- *  proximity window empty (the honesty gates already treat that as "no band"). */
-async function armBle(s: RadarSession): Promise<void> {
-  const peer = s.host.meshPeerId
-  if (!peer) return
-  const ble = await bleApi()
-  if (!ble || s.closed || !ble.bleRunning()) return
-  if (!s.bleListenerAttached) {
-    const handle = await ble.addRssiListener((sample) => {
-      if (s.closed || sample.peer !== peer) return
-      s.bleSamples = [...s.bleSamples, { rssi: sample.rssi, atMs: sample.at }].slice(-BLE_WINDOW_MAX_SAMPLES)
-    })
-    if (s.closed) { void handle.remove().catch(() => { /* gone */ }); return }
-    s.bleListenerAttached = true
-    s.removeBleListener = () => { void handle.remove().catch(() => { /* already removed */ }) }
-  }
-  await ble.startRssiSampling({ intervalMs: BLE_SAMPLE_INTERVAL_MS })
-  if (s.closed) { void ble.stopRssiSampling(); return }
-  s.bleArmed = true
-}
-
-/** Stop sampling and drop the window immediately — a disclosure going coarse
- *  (or the mesh dropping) must decay the band to null on THIS tick, not linger
- *  on stale samples until they age out on their own. */
-async function disarmBle(s: RadarSession): Promise<void> {
-  s.bleSamples = []
-  s.bleProximity = null
-  const ble = await bleApi()
-  if (ble) await ble.stopRssiSampling()
-  s.bleArmed = false
-}
+// A THIN consumer: native/ble.ts owns starting/stopping sampling and the
+// peer-filtered rolling window (armRssiWindow) — this only decides WHEN to
+// arm/disarm against the live disclosure and turns the window into a band
+// every tick. Attribution comes from the plugin (an RSSI sample is only ever
+// tagged with a mesh peer id already bound to that member by an authenticated
+// frame exchange — never a raw, unattributed advert), so armRssiWindow's peer
+// filter is exactly the "identified GATT link" rule, not an extra trust call.
 
 /** Re-evaluate arm/disarm against the LIVE disclosure every tick — never start
  *  sampling for a pin (no `meshPeerId`) or a deliberately coarse share, and
  *  disarm immediately if a share that was precise becomes coarse mid-session. */
 function syncBleArm(s: RadarSession, target: { uncertaintyMetres: number } | null): void {
   const wantArmed = !!s.host.meshPeerId && target !== null && target.uncertaintyMetres <= RADAR.coarseUncertaintyMetres
-  if (wantArmed === s.bleArmed || s.bleArming) return
+  if (wantArmed === !!s.bleWindow || s.bleArming) return
   s.bleArming = true
-  void (wantArmed ? armBle(s) : disarmBle(s)).finally(() => { s.bleArming = false })
+  if (!wantArmed) s.bleProximity = null
+  const peer = wantArmed ? (s.host.meshPeerId as string) : null
+  void bleApi()
+    .then((ble) => ble?.syncRssiWindow(s.bleWindow, peer, { intervalMs: BLE_SAMPLE_INTERVAL_MS, isClosed: () => s.closed }) ?? null)
+    .then((w) => { s.bleWindow = w })
+    .finally(() => { s.bleArming = false })
 }
 
-/** Age out + cap the rolling window, then re-derive the band. Runs every tick
- *  regardless of arm state so a window that goes quiet (mesh drops, member
- *  walks out of range) decays to null within one window's width — an empty
- *  window is exactly what a disarm leaves behind too. */
+/** Re-derive the band from the live window every tick — an armed window ages
+ *  its own samples, so a quiet mesh (dropped, out of range) decays to null
+ *  within one window's width without any extra bookkeeping here. */
 function updateBleWindow(s: RadarSession): void {
-  const cutoff = Date.now() - BLE_WINDOW_MAX_AGE_MS
-  s.bleSamples = s.bleSamples.filter((x) => x.atMs >= cutoff).slice(-BLE_WINDOW_MAX_SAMPLES)
-  s.bleProximity = bleProximityFromRssi(s.bleSamples.map((x) => x.rssi))
+  s.bleProximity = s.bleWindow ? bleProximityFromRssi(s.bleWindow.values()) : null
 }
 
 // ── Sensors ──────────────────────────────────────────────────────────────────
@@ -506,7 +464,7 @@ function syncTarget(s: RadarSession): void {
     }
     if (s.nativeGuide) {
       void nativeGuideApi().then((m) =>
-        m?.updateRadarTarget({ lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000 }))
+        m?.updateRadarTarget({ lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, meshPeerId: s.host.meshPeerId ?? null }))
     }
   }
   s.lastObservation = { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres, timestamp: t.timestamp }
@@ -607,7 +565,6 @@ function tick(s: RadarSession): void {
   s.lastState = g.state
   s.lastHeadingStatus = s.headingStatus
   s.lastAnnouncedMode = mode
-  s.lastBleProximity = s.bleProximity
   s.lastBleClose = s.bleClose
   if (g.distanceMetres !== null) { s.lastDistance = g.distanceMetres; s.lastDistanceAtMs = nowMs }
   s.cue = cueFor(g, { mode, closingRateMps: s.closingRate, bleProximity: s.bleProximity })

@@ -2,7 +2,7 @@
 // unit-tested without a DOM. The controller (radarMode.ts) owns sensors,
 // audio and rendering; everything decidable from plain values lives here.
 
-import type { RadarGuidance, RadarMode, HeadingStatus, Trend } from '@forgesworn/flock'
+import { voiceLine, type RadarGuidance, type RadarMode, type HeadingStatus, type Trend } from '@forgesworn/flock'
 
 /** Normalise an angle to [0, 360). */
 const norm360 = (deg: number): number => {
@@ -133,8 +133,9 @@ export function statusCopy(
       }
       // BLE confirms "very close" (Phase 3) — radio words, never a distance,
       // and it takes priority over the GPS-only warmer/colder fallback below.
+      // Reuses the voice channel's own copy (voiceLine) so the two never drift.
       if (extra.mode === 'homing' && extra.bleClose) {
-        return 'Very close — by Bluetooth'
+        return voiceLine({ kind: 'ble-close' }, g, fmt)
       }
       // HOMING with the arrow dropped (bearing is GPS fiction): warmer/colder.
       if (extra.mode === 'homing' && !g.bearingUsable) {
