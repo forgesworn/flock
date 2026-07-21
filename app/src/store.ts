@@ -14,6 +14,7 @@ import {
   type Geofence,
   type NoReportZone,
   type MemberBeacon,
+  type LostReport,
 } from '@forgesworn/flock'
 import { resolveRelays } from './relays'
 import { deriveCircleSeed } from '@forgesworn/covey-kit'
@@ -152,6 +153,12 @@ export interface Persisted {
    *  local cache of the ephemeral pin signals so they survive a refresh; pruned
    *  by circle existence on load. On-device only, like presence. */
   pins?: Record<string, Pin[]>
+  /** A member's lost-phone flag per circle (id → reports). Persisted so the standing
+   *  "this phone is lost" state — and the newest-wins guard that rejects a replayed
+   *  old report — survive a relaunch (the live Map is per-session). Pruned by circle
+   *  existence on load; never age-pruned (a lost flag stands until it is cleared).
+   *  On-device only, like presence. */
+  lost?: Record<string, LostReport[]>
   /** Opt-in: fetch public kind:0 profiles (names/avatars) from public relays. Default off. */
   showProfiles?: boolean
   /** How distances read across the app (location-detail sizes etc.). Undefined = metric.
@@ -338,6 +345,23 @@ export function prunePresence(
 }
 
 /**
+ * Keep lost-phone flags only for circles that still exist — never leak a "was lost"
+ * flag from a circle you've left / disbanded / reseeded. Deliberately NOT age-pruned:
+ * a lost flag is standing state that stands until a "found" clears it. Pure.
+ */
+export function pruneLostByCircle(
+  lost: Record<string, LostReport[]>,
+  circleIds: string[],
+): Record<string, LostReport[]> {
+  const live = new Set(circleIds)
+  const out: Record<string, LostReport[]> = {}
+  for (const [cid, list] of Object.entries(lost)) {
+    if (live.has(cid) && list.length) out[cid] = list
+  }
+  return out
+}
+
+/**
  * Migrate legacy device-global safe places into any circle without its own set.
  * Pure. The old device-global list applied to every family circle on this device,
  * so a per-circle copy preserves breach behaviour exactly; night-out circles never
@@ -401,6 +425,9 @@ function hydrate(o: Partial<Persisted> & { circle?: Circle | null; relayUrl?: st
   }
   // Rehydrate cached presence, but drop ancient pins and any circle we've since left.
   state.presence = prunePresence(o.presence ?? {}, state.circles.map((c) => c.id), now, PRESENCE_MAX_AGE_SEC)
+  // Standing lost-phone flags survive a relaunch (so the newest-wins guard against a
+  // replayed old report has something to compare), scoped to circles we still hold.
+  state.lost = pruneLostByCircle(o.lost ?? {}, state.circles.map((c) => c.id))
   // Chat threads follow their circle / their person — an expired night-out
   // takes its conversation with it, and a 1:1 with someone no longer in any
   // circle doesn't linger on disk.

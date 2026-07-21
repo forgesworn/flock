@@ -273,6 +273,18 @@ const LOC_ASK_WINDOW_SEC = 15 * 60
 // Only a FRESH incoming message rings/notifies — a relay replaying history on a
 // re-subscribe (reconnect, reboot) must repopulate the thread silently.
 const MSG_FRESH_SEC = 3600
+// A "lost phone" alarm only sounds if the report is this recent. Generous enough to
+// clear the mesh's late-delivery window (a real SOS relayed store-and-forward must
+// still ring), tight enough that a captured report replayed hours later — after the
+// per-session dedup resets on relaunch — stays silent. Anchored on the mesh retention
+// TTL (15 min) + skew. The state still updates via newest-wins; only the alarm gates.
+const LOST_ALARM_FRESH_SEC = 20 * 60
+// A find-my-phone ask is answered (a one-shot exact-location disclosure) only if this
+// recent — it is a LIVE request, so a stale/replayed copy must not trigger a
+// disclosure. Tighter than the lost alarm because the cost of dropping a late one is
+// merely that the asker re-asks (the request is repeatable and rate-limited), while
+// the cost of answering a stale one is an unwanted location reveal. Fail-closed.
+const FIND_PING_FRESH_SEC = 5 * 60
 // Long-press-a-chip action sheet, when open: the id of the circle it acts on. Like
 // compose, mounted as an overlay so it survives the re-renders around it.
 let circleMenu: string | null = null
@@ -378,6 +390,13 @@ function rehydratePresence(): void {
     for (const b of list) st.beacons.set(b.member, b)
   }
   for (const [cid, list] of Object.entries(persisted.pins ?? {})) cstate(cid).pins = [...list]
+  // Standing lost-phone flags too, so the newest-wins guard against a replayed old
+  // report has the last real state to compare after a relaunch. Silent — this only
+  // seeds state; the alarm lives on the incoming-report path, never on rehydration.
+  for (const [cid, list] of Object.entries(persisted.lost ?? {})) {
+    const st = cstate(cid)
+    for (const r of list) st.lost.set(r.member, r)
+  }
 }
 
 /** Persist a circle's dropped pins (they're ephemeral on the wire — the local
@@ -385,6 +404,14 @@ function rehydratePresence(): void {
 function savePins(circleId: string): void {
   persisted.pins ??= {}
   persisted.pins[circleId] = cstate(circleId).pins
+  store.save(persisted)
+}
+
+/** Persist a circle's lost-phone flags so the standing state — and the newest-wins
+ *  guard against a replayed old report — survive a relaunch. Mirrors savePins. */
+function saveLost(circleId: string): void {
+  persisted.lost ??= {}
+  persisted.lost[circleId] = [...cstate(circleId).lost.values()]
   store.save(persisted)
 }
 
@@ -659,6 +686,7 @@ function removeCircle(id: string): void {
   beaconCadence.delete(id)
   coverCadence.delete(id)
   delete persisted.presence[id]
+  if (persisted.lost) delete persisted.lost[id]
   if (persisted.activeCircleId === id) persisted.activeCircleId = persisted.circles[0]?.id ?? null
   store.save(persisted)
 }
@@ -667,7 +695,7 @@ function sweepExpired(): boolean {
   const now = nowSec()
   const live = persisted.circles.filter((c) => !c.expiresAt || c.expiresAt > now)
   if (live.length === persisted.circles.length) return false
-  for (const c of persisted.circles) if (!live.includes(c)) { circleStates.delete(c.id); beaconCadence.delete(c.id); coverCadence.delete(c.id); delete persisted.presence[c.id] }
+  for (const c of persisted.circles) if (!live.includes(c)) { circleStates.delete(c.id); beaconCadence.delete(c.id); coverCadence.delete(c.id); delete persisted.presence[c.id]; if (persisted.lost) delete persisted.lost[c.id] }
   persisted.circles = live
   if (!live.some((c) => c.id === persisted.activeCircleId)) persisted.activeCircleId = live[0]?.id ?? null
   store.save(persisted)
@@ -5263,9 +5291,16 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       // Legacy 'breach'/'pickup' types decrypt with the same beacon key — accept
       // them as plain location beacons so an older app version still shows up.
       const p = await decryptBeacon(deriveBeaconKey(c.seedHex), e.content)
+      const bts = p.timestamp || e.created_at
+      const held = cstate(c.id).beacons.get(e.pubkey)
+      // Newest-wins: an older / out-of-order beacon (a replay, or normal mesh
+      // multi-path / late delivery) must not regress a member's live position or
+      // re-fire the precision-jump notice. A strictly-older one is dropped; an
+      // equal-timestamp one is the same beacon again (idempotent) so it's harmless.
+      if (held && bts < held.timestamp) return
       const jumpKey = `${c.id}:${e.pubkey}`
       if (me && e.pubkey !== me.pk) {
-        const prevPrecision = cstate(c.id).beacons.get(e.pubkey)?.precision
+        const prevPrecision = held?.precision
         if (precisionJumpedToExact(prevPrecision, p.precision) && !exactJumpNotified.has(jumpKey)) {
           exactJumpNotified.add(jumpKey)
           // Deliberately no reason given — the wire never says WHY (§6 invariant
@@ -5277,7 +5312,7 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
           exactJumpNotified.delete(jumpKey) // back to their normal detail — a later jump should notify again
         }
       }
-      saveBeacon(c.id, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: p.timestamp || e.created_at })
+      saveBeacon(c.id, { member: e.pubkey, geohash: p.geohash, precision: p.precision, timestamp: bts })
     } else if (t === 'buzz') {
       const bz = await decryptBuzz(c.seedHex, e.content)
       if (bz.from !== e.pubkey) return // the actor is bound to the authenticated seal signer — no impersonating another member (mirrors 'joined')
@@ -5295,8 +5330,12 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
         // is near it (a taxi driver, a passer-by) hears it. Output only: it
         // never discloses location or changes what we share. See app/src/ring.ts.
         const iAmFlaggedLost = !!me && !!memberLost(c.id, me.pk)?.lost
-        if (shouldRing({ targetedAtMe: mine, iAmFlaggedLost })) {
-          beingRung = { circleId: c.id, by: bz.from, at: nowSec() }
+        // A ring is a LIVE "help me find it now" — only sound it if the buzz is within
+        // the same window it stays loud for (bz.timestamp is the authentic send time,
+        // so a replayed old ring can't re-alarm; a genuinely-delayed one is re-sent).
+        const ringFresh = nowSec() - bz.timestamp <= RING_DISPLAY_WINDOW
+        if (ringFresh && shouldRing({ targetedAtMe: mine, iAmFlaggedLost })) {
+          beingRung = { circleId: c.id, by: bz.from, at: bz.timestamp }
           notifyIfHidden(`${nameFor(bz.from)} is ringing this phone to help find it`, { kind: 'ring', title: c.name, group: `ring:${c.id}` })
           try { navigator.vibrate?.(RING_VIBRATION) } catch { /* no haptics */ }
         } else if (isNew && isFresh) {
@@ -5334,16 +5373,23 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       // must not be dropped as a stale echo.
       if (prev && prev.timestamp > rep.timestamp) return
       st.lost.set(rep.member, rep)
+      saveLost(c.id) // durable newest-wins: a persisted clear supersedes a replayed old "lost" across a relaunch (the live Map is per-session)
       const mine = !!me && rep.member === me.pk
       const byMe = !!me && rep.by === me.pk
+      // The state above always updates (newest-wins), but the ALARM only sounds for a
+      // RECENT report. A genuine SOS is sent live and arrives within the mesh window;
+      // a stale copy — a capture replayed after the per-session dedup resets on
+      // relaunch, or a long-delayed duplicate — must update state silently, never
+      // re-sound. The CLEAR below is never gated: a late "found" must always land.
+      const fresh = nowSec() - rep.timestamp <= LOST_ALARM_FRESH_SEC
       if (rep.lost) {
-        if (mine) {
+        if (mine && fresh) {
           // THIS is the lost phone: be loud for whoever is holding it, and show
           // the finder card on Home (see lostCard).
           notifyIfHidden(`This phone was reported lost by ${nameFor(rep.by)} — open flock`, { kind: 'alert', title: c.name, group: `alert:${c.id}` })
           try { navigator.vibrate?.([400, 150, 400, 150, 400]) } catch { /* no haptics */ }
           toast(`${nameFor(rep.by)} reported this phone lost`)
-        } else if (!byMe) {
+        } else if (!byMe && fresh) {
           toast(`📵 ${nameFor(rep.by)} reported ${nameFor(rep.member)}'s phone lost`)
           notifyIfHidden(`${nameFor(rep.member)}'s phone was reported lost`, { kind: 'alert', title: c.name, group: `alert:${c.id}` })
         }
@@ -5360,6 +5406,12 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
       const req = await decryptFindPing(c.seedHex, e.content)
       if (req.from !== e.pubkey) return // the asker is bound to the authenticated seal signer
       if (!me) return
+      // A find-ping triggers a one-shot exact-location disclosure, so a stale or
+      // replayed ask must never reach the countdown. e.created_at is the authentic
+      // rumor time (roost-kit signs the seal over it; only the WRAP time is
+      // randomised), so this can't be forged forward. Fail-closed: if a genuine ask
+      // was delayed past the window the asker simply asks again (rate-limited).
+      if (nowSec() - e.created_at > FIND_PING_FRESH_SEC) return
       const gate = shouldAnswerFindPing({
         preAuthorised: !!c.pingConsent,
         iAmFlaggedLost: !!memberLost(c.id, me.pk)?.lost,
