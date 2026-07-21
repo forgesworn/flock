@@ -314,20 +314,29 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
     min max). **Pending on real hardware (Pixel 10 Pro):** locked-screen
     beep/haptic continuity, compass-under-wakelock behaviour, and the two-phone
     half-mile field walk from the goal doc's success criteria.
-  - [ ] **Slice 3 — radar v2: blindfold-grade guidance (designed 2026-07-21,
-    after an in-car field failure).** Driving to a pin was unusable: the
-    compass always wins over GPS course (confidently wrong in a vehicle), the
-    cue grammar carries no left/right sign, no distance voice, no closing
-    trend, one interaction model spans 50 km → 2 m, and the last-30 m bearing
-    is GPS-noise fiction (my own fix accuracy is never gated on). v2 = three
-    explicit modes (VECTOR vehicle/far, SEEK on-foot, HOMING last-30 m
-    geiger + warmer/colder), a heading engine arbitrating compass vs GPS
-    course by speed and sensor accuracy, cue grammar v2 (stereo pan,
-    signed haptic vocabulary, TTS voice milestones web + native), honesty
-    gates extended to my own fix accuracy, full locked-phone parity, and a
-    Phase-3 BLE RSSI endgame via identified mesh peers (bands only, never
-    numbers). Acceptance = real-world car test, blindfold park walk, pocket
-    walk, person-in-crowd. Deep-dive design:
+  - [x] **Slice 3 — radar v2 Phases 1 & 2: blindfold-grade guidance (designed
+    2026-07-21 after an in-car field failure; built 2026-07-21).** Driving to a
+    pin was unusable: the compass always wins over GPS course (confidently wrong
+    in a vehicle), the cue grammar carries no left/right sign, no distance voice,
+    no closing trend, one interaction model spans 50 km → 2 m, and the last-30 m
+    bearing is GPS-noise fiction (my own fix accuracy is never gated on).
+    **Landed (flock-kit `feat/radar-v2` 03d2ea3 pinned; flock `feat/radar-v2`
+    d13afbe):** three explicit modes (VECTOR vehicle/far, SEEK on-foot, HOMING
+    last-30 m geiger + warmer/colder) via a pure mode machine with hysteresis; a
+    heading engine arbitrating compass vs GPS course by speed + sensor accuracy
+    (compass never consulted in the vehicle band; `onAccuracyChanged` honoured);
+    cue grammar v2 (stereo `StereoPanner`/PCM pan, signed haptic vocabulary,
+    warmer/colder trend); honesty gates + arrival extended to my own fix
+    accuracy; voice = pre-baked OpenAI-TTS clips (offline, `app/public/voice`)
+    with speechSynthesis / Android `TextToSpeech` fallback; full locked-phone
+    parity in `RadarGuideService`. flock-kit 571 + flock 385 unit tests,
+    typecheck, lint, 14 JVM golden-vector parity, e2e `radar.spec` (mode
+    transitions + degradations) all green; release APK built from a clean tree
+    and installed on both phones. **Field acceptance PENDING (human):** car
+    drive-to-pin by voice, blindfold 300 m park walk, locked-pocket walk.
+  - [ ] **Slice 3 — radar v2 Phase 3: BLE RSSI endgame** via identified mesh
+    peers (bands only, never numbers) — the indoor/crowd last-metres assist.
+    Out of scope for the Phases 1–2 session. Deep-dive design:
     `docs/plans/2026-07-21-radar-navigation-v2.md`.
 
 ## Dropped pins — mark a spot for the circle (2026-07-09 → 2026-07-20)
