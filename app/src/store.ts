@@ -30,6 +30,11 @@ export interface Circle {
   mode: Mode
   /** Known member pubkeys (hex), including self. */
   members?: string[]
+  /** Member pubkeys evicted from this circle (hex). A durable tombstone: a reseed
+   *  carries it (payload `r`) so every device drops them and never re-wraps the
+   *  rotated seed back to them, and `withNewMember` refuses to silently re-add
+   *  them. Cleared for a pubkey only by an explicit re-invite (on this device). */
+  removed?: string[]
   /** Dead-man's-switch cadence in seconds; 0/undefined = disarmed. */
   checkinInterval?: number
   /** nsec-tree derivation epoch; reseed = epoch + 1 (creator-side). */
@@ -106,6 +111,10 @@ export const JOIN_GRACE_SEC = 10 * 60
 export function withNewMember(c: Circle, pk: string, now: number, opts?: { expected?: boolean }): Partial<Circle> | null {
   const m = c.members ?? []
   if (m.includes(pk)) return null
+  // An evicted member must never be silently re-added — otherwise a rotated seed
+  // that reaches them (via a stale-roster refresh elsewhere) would quietly
+  // reinstate them. An explicit re-invite clears the tombstone first (sendInvite).
+  if ((c.removed ?? []).includes(pk)) return null
   const inJoinGrace = c.joinedAt !== undefined && now - c.joinedAt < JOIN_GRACE_SEC
   const patch: Partial<Circle> = { members: [...m, pk] }
   if (!opts?.expected && !inJoinGrace) patch.unseenMembers = [...(c.unseenMembers ?? []), pk]

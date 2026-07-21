@@ -3193,14 +3193,31 @@ async function onInviteWrap(e: { pubkey: string; content: string; tags: string[]
   } else if (payload.t === 'reseed') {
     const existing = persisted.circles.find((c) => c.id === payload.id)
     if (!existing) return
-    if (existing.seedHex === payload.s) return // a refresh echo of the seed we already hold — nothing to do
-    patchCircleById(existing.id, { seedHex: payload.s, reseededAt: nowSec() })
-    cstate(existing.id).beacons.clear()
-    cstate(existing.id).lost.clear()
-    beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
-    coverCadence.delete(existing.id)
-    dropPresence(existing.id) // old-key pins are meaningless under the new seed
-    toast("This circle's security was reset")
+    // Fold in any removals the reseed carries (`r`) — even a same-seed refresh may
+    // be the first time this device learns of an eviction — and drop them from the
+    // roster so we never re-wrap the seed back to them (rotation.ts refresh).
+    const removed = payload.r?.length
+      ? [...new Set([...(existing.removed ?? []), ...payload.r])]
+      : (existing.removed ?? [])
+    const removedSet = new Set(removed)
+    const members = (existing.members ?? []).filter((pk) => !removedSet.has(pk))
+    const seedChanged = existing.seedHex !== payload.s
+    const rosterShrank = members.length !== (existing.members ?? []).length
+    const tombstoneGrew = removed.length !== (existing.removed ?? []).length
+    if (!seedChanged && !rosterShrank && !tombstoneGrew) return // a pure refresh echo — nothing new
+    patchCircleById(existing.id, {
+      ...(seedChanged ? { seedHex: payload.s, reseededAt: nowSec() } : {}),
+      members,
+      ...(removed.length ? { removed } : {}),
+    })
+    if (seedChanged) {
+      cstate(existing.id).beacons.clear()
+      cstate(existing.id).lost.clear()
+      beaconCadence.delete(existing.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
+      coverCadence.delete(existing.id)
+      dropPresence(existing.id) // old-key pins are meaningless under the new seed
+      toast("This circle's security was reset")
+    }
     refresh()
   }
 }
@@ -3218,6 +3235,9 @@ async function sendInvite(): Promise<void> {
   try {
     const wrap = await buildInviteWrap(signer, pk, { t: 'invite', id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
     await svc.publishSigned(activeRelays(), wrap as never)
+    // An explicit invite is a deliberate re-admission: lift any local eviction
+    // tombstone for this pubkey first, or withNewMember would refuse to add them.
+    if ((c.removed ?? []).includes(pk)) patchCircleById(c.id, { removed: (c.removed ?? []).filter((x) => x !== pk) })
     ensureMember(c, pk, true) // I sent this invite — their arrival is not news to me
     pendingInviteNpub = null
     toast('Secure invite sent')
@@ -3232,13 +3252,18 @@ async function reseedCircle(removePk?: string, circle: store.Circle | null = act
   persisted.circleRootHex ??= store.newSeed()
   const epoch = (c.epoch ?? 0) + 1
   const seed = deriveCircleSeed(persisted.circleRootHex, c.id, epoch)
-  const recipients = (c.members ?? []).filter((pk) => pk !== signer.pubkey && pk !== removePk)
+  // Removals are durable: union the just-removed pubkey into the circle's tombstone
+  // and CARRY it on the wire (`r`) so every recipient drops them too — otherwise a
+  // peer keeps them in its roster and later re-wraps the rotated seed back to them.
+  const removed = removePk ? [...new Set([...(c.removed ?? []), removePk])] : (c.removed ?? [])
+  const removedSet = new Set(removed)
+  const recipients = (c.members ?? []).filter((pk) => pk !== signer.pubkey && !removedSet.has(pk))
   try {
     if (recipients.length) {
-      const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}) })
+      const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: seed, n: c.name, m: c.mode, ...(c.expiresAt ? { x: c.expiresAt } : {}), ...(removed.length ? { r: removed } : {}) })
       for (const w of wraps) await svc.publishSigned(activeRelays(), w as never)
     }
-    patchCircleById(c.id, { seedHex: seed, epoch, reseededAt: nowSec(), seedRefreshedAt: nowSec(), members: (c.members ?? []).filter((pk) => pk !== removePk) })
+    patchCircleById(c.id, { seedHex: seed, epoch, reseededAt: nowSec(), seedRefreshedAt: nowSec(), members: (c.members ?? []).filter((pk) => !removedSet.has(pk)), ...(removed.length ? { removed } : {}) })
     cstate(c.id).beacons.clear()
     cstate(c.id).lost.clear()
     beaconCadence.delete(c.id) // new key → re-emit promptly, don't inherit the old cell's heartbeat
@@ -3265,9 +3290,13 @@ async function maybeRotateSeeds(): Promise<void> {
       await reseedCircle(undefined, c, true)
     } else if (refreshDue(c, me, c.seedRefreshedAt, now)) {
       try {
-        const recipients = (c.members ?? []).filter((pk) => pk !== me)
+        // Exclude evicted members from the refresh AND carry the removal tombstone
+        // (`r`) so a member offline during the eviction converges on catch-up —
+        // otherwise this weekly re-wrap is exactly what hands the seed back.
+        const removedSet = new Set(c.removed ?? [])
+        const recipients = (c.members ?? []).filter((pk) => pk !== me && !removedSet.has(pk))
         if (recipients.length) {
-          const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: c.seedHex, n: c.name, m: c.mode })
+          const wraps = await buildReseedWraps(signer, recipients, { t: 'reseed', id: c.id, s: c.seedHex, n: c.name, m: c.mode, ...(c.removed?.length ? { r: c.removed } : {}) })
           for (const w of wraps) await svc.publishSigned(activeRelays(), w as never)
         }
         patchCircleById(c.id, { seedRefreshedAt: now })

@@ -44,4 +44,15 @@ describe('withNewMember — the "new phone joined" notice (audit Slice 7)', () =
     const patch = withNewMember(circle({ unseenMembers: ['bb'.repeat(32)] }), pk, NOW)
     expect(patch?.unseenMembers).toEqual(['bb'.repeat(32), pk])
   })
+
+  it('an evicted member is NOT silently re-added — the removal tombstone holds', () => {
+    const evicted = 'ee'.repeat(32)
+    // Even an "expected" add (e.g. a rotated seed reaching them via a stale-roster
+    // refresh elsewhere) must be refused while the pubkey is tombstoned.
+    expect(withNewMember(circle({ removed: [evicted] }), evicted, NOW)).toBeNull()
+    expect(withNewMember(circle({ removed: [evicted] }), evicted, NOW, { expected: true })).toBeNull()
+    // A different, non-evicted pubkey still joins normally.
+    expect(withNewMember(circle({ removed: [evicted] }), 'bb'.repeat(32), NOW)?.members)
+      .toEqual(['aa'.repeat(32), 'bb'.repeat(32)])
+  })
 })
