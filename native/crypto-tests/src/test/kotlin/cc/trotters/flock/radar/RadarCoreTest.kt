@@ -31,6 +31,7 @@ private fun parseInput(o: JSONObject): RadarInput {
         me = o.latLng("me"),
         headingDeg = if (o.isNull("headingDeg")) null else o.getDouble("headingDeg"),
         target = t?.let { TargetObservation(it.position(), it.getDouble("uncertaintyMetres"), it.getDouble("ageSeconds")) },
+        myAccuracyMetres = if (o.isNull("myAccuracyMetres")) null else o.getDouble("myAccuracyMetres"),
     )
 }
 
@@ -47,6 +48,17 @@ private fun assertStringField(expected: JSONObject, key: String, actual: String?
 private fun assertVibrate(expected: JSONArray, actual: LongArray) {
     assertEquals(expected.length(), actual.size, "vibrate length")
     for (i in 0 until expected.length()) assertEquals(expected.getLong(i), actual[i], "vibrate[$i]")
+}
+
+/** Assert a whole cue (pattern/period/tone/vibrate + the v2 pan/sign/trend). */
+private fun assertCue(expected: JSONObject, cue: RadarCue, label: String) {
+    assertEquals(expected.getString("pattern"), cue.pattern, "cue pattern $label")
+    assertEquals(expected.getLong("periodMs"), cue.periodMs, "cue period $label")
+    assertEquals(expected.getInt("toneHz"), cue.toneHz, "cue tone $label")
+    assertVibrate(expected.getJSONArray("vibrateMs"), cue.vibrateMs)
+    assertEquals(expected.getDouble("pan"), cue.pan, 1e-9, "cue pan $label")
+    assertStringField(expected, "sign", cue.sign)
+    assertStringField(expected, "trend", cue.trend)
 }
 
 class RadarCoreTest {
@@ -99,13 +111,9 @@ class RadarCoreTest {
             assertStringField(eg, "alignment", g.alignment)
             assertEquals(eg.getBoolean("bearingUsable"), g.bearingUsable, "bearingUsable case $i")
             assertDoubleField(eg, "uncertaintyMetres", g.uncertaintyMetres)
+            assertDoubleField(eg, "myAccuracyMetres", g.myAccuracyMetres)
 
-            val cue = cueFor(g)
-            val ec = c.getJSONObject("cue")
-            assertEquals(ec.getString("pattern"), cue.pattern, "cue pattern case $i")
-            assertEquals(ec.getLong("periodMs"), cue.periodMs, "cue period case $i")
-            assertEquals(ec.getInt("toneHz"), cue.toneHz, "cue tone case $i")
-            assertVibrate(ec.getJSONArray("vibrateMs"), cue.vibrateMs)
+            assertCue(c.getJSONObject("cue"), cueFor(g), "case $i")
         }
     }
 
@@ -134,6 +142,119 @@ class RadarCoreTest {
             )
             if (c.isNull("expected")) assertNull(course, "course case $i")
             else assertEquals(c.getDouble("expected"), course!!, 1e-9, "course case $i")
+        }
+    }
+
+    // ── v2 parity ────────────────────────────────────────────────────────────
+
+    private fun nullableDouble(o: JSONObject, key: String): Double? =
+        if (o.isNull(key)) null else o.getDouble(key)
+
+    @Test
+    fun `heading engine matches`() {
+        val cases = vectors().getJSONArray("heading")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val inp = c.getJSONObject("input")
+            val got = resolveHeading(
+                HeadingInput(
+                    compassDeg = nullableDouble(inp, "compassDeg"),
+                    compassUsable = inp.getBoolean("compassUsable"),
+                    courseDeg = nullableDouble(inp, "courseDeg"),
+                    speedMps = nullableDouble(inp, "speedMps"),
+                ),
+            )
+            val ex = c.getJSONObject("expected")
+            assertDoubleField(ex, "headingDeg", got.headingDeg)
+            assertStringField(ex, "source", got.source)
+            assertEquals(ex.getString("status"), got.status, "heading status case $i")
+        }
+    }
+
+    @Test
+    fun `mode machine matches`() {
+        val cases = vectors().getJSONArray("mode")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val inp = c.getJSONObject("input")
+            val got = selectMode(
+                ModeInput(
+                    prevMode = inp.getString("prevMode"),
+                    distanceMetres = nullableDouble(inp, "distanceMetres"),
+                    speedMps = nullableDouble(inp, "speedMps"),
+                    fastForSec = inp.getDouble("fastForSec"),
+                    slowForSec = inp.getDouble("slowForSec"),
+                    uncertaintyMetres = nullableDouble(inp, "uncertaintyMetres"),
+                ),
+            )
+            assertEquals(c.getString("expected"), got, "mode case $i")
+        }
+    }
+
+    @Test
+    fun `pan matches`() {
+        val cases = vectors().getJSONArray("pan")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            assertEquals(c.getDouble("expected"), panFor(nullableDouble(c, "rel")), 1e-9, "pan case $i")
+        }
+    }
+
+    @Test
+    fun `sign matches`() {
+        val cases = vectors().getJSONArray("sign")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val got = turnSign(nullableDouble(c, "rel"))
+            if (c.isNull("expected")) assertNull(got, "sign case $i")
+            else assertEquals(c.getString("expected"), got, "sign case $i")
+        }
+    }
+
+    @Test
+    fun `trend matches`() {
+        val cases = vectors().getJSONArray("trend")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val got = classifyTrend(nullableDouble(c, "rate"))
+            if (c.isNull("expected")) assertNull(got, "trend case $i")
+            else assertEquals(c.getString("expected"), got, "trend case $i")
+        }
+    }
+
+    @Test
+    fun `direction phrase matches`() {
+        val cases = vectors().getJSONArray("directionPhrase")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            assertEquals(c.getString("expected"), vectorDirectionPhrase(nullableDouble(c, "rel")), "phrase case $i")
+        }
+    }
+
+    @Test
+    fun `milestone crossing matches`() {
+        val cases = vectors().getJSONArray("milestone")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val got = crossedMilestone(nullableDouble(c, "prev"), c.getDouble("next"))
+            if (c.isNull("expected")) assertNull(got, "milestone case $i")
+            else assertEquals(c.getDouble("expected"), got!!, 1e-9, "milestone case $i")
+        }
+    }
+
+    @Test
+    fun `mode-specific cues match`() {
+        val cases = vectors().getJSONArray("cueModes")
+        assertTrue(cases.length() >= 5, "expected the mode cue set")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val g = radarGuidance(parseInput(c.getJSONObject("input")))
+            val ctxJson = c.getJSONObject("ctx")
+            val ctx = CueContext(
+                mode = ctxJson.optString("mode", "seek"),
+                closingRateMps = nullableDouble(ctxJson, "closingRateMps"),
+            )
+            assertCue(c.getJSONObject("cue"), cueFor(g, ctx), "cueModes case $i")
         }
     }
 }

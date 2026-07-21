@@ -1177,9 +1177,49 @@ a.btn { text-decoration: none; }
   background: var(--alert); color: #180705; border: none;
 }
 .radar-stop:active { transform: scale(0.98); }
+
+/* ── Radar v2 ─────────────────────────────────────────────────────────────
+   Three faces from one scope (data-mode), a big glanceable arrow for the
+   vehicle/endgame bands, and two more controls. */
+.radar-controls { flex-wrap: wrap; }
+.radar-voice {
+  flex: 1; padding: 16px; font-size: 16px; border-radius: 14px;
+  background: rgba(120, 255, 170, 0.08); color: #b7ffd2;
+  border: 1px solid rgba(120, 255, 170, 0.3);
+}
+.radar-modechip {
+  flex: 1 1 100%; padding: 10px; font-size: 14px; font-weight: 600;
+  border-radius: 12px; letter-spacing: 0.02em;
+  background: rgba(120, 255, 170, 0.06); color: #9fe8bd;
+  border: 1px solid rgba(120, 255, 170, 0.22);
+}
+.radar-modechip:active, .radar-voice:active { transform: scale(0.98); }
+
+/* The big directional arrow — heading-up (course-relative in VECTOR). Fills the
+   scope and rotates about its centre; hidden unless VECTOR/HOMING have an honest
+   bearing (radarMode sets [hidden]). */
+.radar-arrow { position: absolute; inset: 0; pointer-events: none; transform-origin: 50% 50%; z-index: 2; }
+.radar-arrow[hidden] { display: none; }
+.radar-arrow::before {
+  content: ''; position: absolute; left: 50%; top: 12%; transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 30px solid transparent; border-right: 30px solid transparent;
+  border-bottom: 54px solid rgba(120, 255, 170, 0.9);
+  filter: drop-shadow(0 0 16px rgba(110, 255, 170, 0.55));
+}
+/* VECTOR: voice-led + glanceable — outsize the arrow and the distance readout. */
+.radar-scope[data-mode='vector'] .radar-arrow::before {
+  border-left-width: 40px; border-right-width: 40px; border-bottom-width: 74px;
+}
+.radar-scope[data-mode='vector'] ~ .radar-distance { font-size: 76px; }
+/* HOMING: geiger endgame — pulse the rings in sympathy with the closing cue. */
+.radar-scope[data-mode='homing'] .radar-ring { animation: radar-homing-pulse 1.1s ease-in-out infinite; }
+@keyframes radar-homing-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.9; } }
+
 @media (prefers-reduced-motion: reduce) {
   .radar-sweep { animation: none; opacity: 0.25; }
   .radar-blip, .radar-uncert { transition: none; }
+  .radar-scope[data-mode='homing'] .radar-ring { animation: none; }
 }
 
 /* The in-app QR scanner — same overlay tier as the radar (above the sheets at

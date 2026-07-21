@@ -40,7 +40,28 @@ describe('currentPosition', () => {
           success({ coords: { latitude: 51.5, longitude: -0.12, accuracy: 12 }, timestamp: 1_700_000_000_000 } as GeolocationPosition),
       },
     })
-    expect(await currentPosition()).toEqual({ lat: 51.5, lon: -0.12, accuracy: 12, at: 1_700_000_000 })
+    // No heading/speed on a stationary/coarse fix → null, never a fabricated 0.
+    expect(await currentPosition()).toEqual({ lat: 51.5, lon: -0.12, accuracy: 12, at: 1_700_000_000, heading: null, speed: null })
+  })
+
+  it('captures a valid GPS course + speed but rejects non-finite/negative sentinels', async () => {
+    vi.stubGlobal('navigator', {
+      geolocation: {
+        getCurrentPosition: (success: PositionCallback) =>
+          success({ coords: { latitude: 51.5, longitude: -0.12, accuracy: 8, heading: 200, speed: 6 }, timestamp: 1_700_000_000_000 } as GeolocationPosition),
+      },
+    })
+    expect(await currentPosition()).toEqual({ lat: 51.5, lon: -0.12, accuracy: 8, at: 1_700_000_000, heading: 200, speed: 6 })
+
+    vi.stubGlobal('navigator', {
+      geolocation: {
+        getCurrentPosition: (success: PositionCallback) =>
+          success({ coords: { latitude: 51.5, longitude: -0.12, accuracy: 8, heading: NaN, speed: -1 }, timestamp: 1_700_000_000_000 } as GeolocationPosition),
+      },
+    })
+    const f = await currentPosition()
+    expect(f?.heading).toBeNull()
+    expect(f?.speed).toBeNull()
   })
 
   it('resolves null (never rejects) when permission is denied', async () => {

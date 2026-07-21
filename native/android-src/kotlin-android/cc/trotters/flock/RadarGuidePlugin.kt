@@ -15,6 +15,7 @@ class RadarGuidePlugin : Plugin() {
     @PluginMethod
     fun start(call: PluginCall) {
         RadarGuideService.muted = call.getBoolean("muted") ?: false
+        RadarGuideService.voice = call.getBoolean("voice") ?: true
         // A dropped-pin waypoint never ages to "stale" while locked (see the JS
         // openRadarForPin). Defaults false so a member target is unchanged.
         RadarGuideService.evergreen = call.getBoolean("evergreen") ?: false
@@ -53,6 +54,13 @@ class RadarGuidePlugin : Plugin() {
         call.resolve()
     }
 
+    /** Turn the native voice (TTS/clip) channel on/off (matches the JS toggle). */
+    @PluginMethod
+    fun setVoice(call: PluginCall) {
+        RadarGuideService.voice = call.getBoolean("voice") ?: true
+        call.resolve()
+    }
+
     @PluginMethod
     fun stop(call: PluginCall) {
         RadarGuideService.stop(context)
@@ -66,6 +74,15 @@ class RadarGuidePlugin : Plugin() {
     fun isActive(call: PluginCall) {
         val out = JSObject()
         out.put("value", RadarGuideService.active)
+        call.resolve(out)
+    }
+
+    /** The guide's currently-resolved VECTOR/SEEK/HOMING mode, so the reopened
+     *  JS scope can reflect what the locked run selected. */
+    @PluginMethod
+    fun getMode(call: PluginCall) {
+        val out = JSObject()
+        out.put("value", RadarGuideService.mode)
         call.resolve(out)
     }
 }

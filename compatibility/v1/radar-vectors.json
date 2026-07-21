@@ -163,7 +163,8 @@
         "freshness": null,
         "alignment": null,
         "bearingUsable": false,
-        "uncertaintyMetres": null
+        "uncertaintyMetres": null,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "sparse",
@@ -171,7 +172,10 @@
         "toneHz": 330,
         "vibrateMs": [
           30
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -195,7 +199,8 @@
         "freshness": "fresh",
         "alignment": null,
         "bearingUsable": false,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "sparse",
@@ -203,7 +208,10 @@
         "toneHz": 330,
         "vibrateMs": [
           30
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -230,7 +238,8 @@
         "freshness": "stale",
         "alignment": null,
         "bearingUsable": false,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "sparse",
@@ -238,7 +247,10 @@
         "toneHz": 330,
         "vibrateMs": [
           30
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -265,7 +277,8 @@
         "freshness": "fresh",
         "alignment": null,
         "bearingUsable": false,
-        "uncertaintyMetres": 610
+        "uncertaintyMetres": 610,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "sparse",
@@ -273,7 +286,10 @@
         "toneHz": 440,
         "vibrateMs": [
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -300,7 +316,8 @@
         "freshness": "fresh",
         "alignment": null,
         "bearingUsable": false,
-        "uncertaintyMetres": 610
+        "uncertaintyMetres": 610,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "sparse",
@@ -308,7 +325,10 @@
         "toneHz": 440,
         "vibrateMs": [
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -335,7 +355,8 @@
         "freshness": "fresh",
         "alignment": null,
         "bearingUsable": false,
-        "uncertaintyMetres": 610
+        "uncertaintyMetres": 610,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "sparse",
@@ -343,7 +364,10 @@
         "toneHz": 440,
         "vibrateMs": [
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -370,7 +394,8 @@
         "freshness": "fresh",
         "alignment": null,
         "bearingUsable": false,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "silent",
@@ -380,7 +405,10 @@
           80,
           60,
           80
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -407,7 +435,8 @@
         "freshness": "fresh",
         "alignment": "aligned",
         "bearingUsable": true,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "triple",
@@ -419,7 +448,10 @@
           40,
           60,
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -446,7 +478,8 @@
         "freshness": "fresh",
         "alignment": null,
         "bearingUsable": false,
-        "uncertaintyMetres": 19
+        "uncertaintyMetres": 19,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "silent",
@@ -456,7 +489,10 @@
           80,
           60,
           80
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -483,7 +519,8 @@
         "freshness": "fresh",
         "alignment": null,
         "bearingUsable": false,
-        "uncertaintyMetres": 19
+        "uncertaintyMetres": 19,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "single",
@@ -491,7 +528,10 @@
         "toneHz": 660,
         "vibrateMs": [
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -518,7 +558,8 @@
         "freshness": "fresh",
         "alignment": null,
         "bearingUsable": true,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "single",
@@ -526,7 +567,10 @@
         "toneHz": 660,
         "vibrateMs": [
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -553,7 +597,8 @@
         "freshness": "fresh",
         "alignment": null,
         "bearingUsable": true,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "single",
@@ -561,7 +606,10 @@
         "toneHz": 660,
         "vibrateMs": [
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -588,7 +636,8 @@
         "freshness": "fresh",
         "alignment": "aligned",
         "bearingUsable": true,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "triple",
@@ -600,7 +649,10 @@
           40,
           60,
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -627,7 +679,8 @@
         "freshness": "fresh",
         "alignment": "aligned",
         "bearingUsable": true,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "double",
@@ -637,7 +690,10 @@
           40,
           60,
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
       }
     },
     {
@@ -664,7 +720,8 @@
         "freshness": "fresh",
         "alignment": "near",
         "bearingUsable": true,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "single",
@@ -672,7 +729,10 @@
         "toneHz": 740,
         "vibrateMs": [
           40
-        ]
+        ],
+        "pan": -0.5,
+        "sign": "left",
+        "trend": null
       }
     },
     {
@@ -699,7 +759,8 @@
         "freshness": "fresh",
         "alignment": "off",
         "bearingUsable": true,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "single",
@@ -707,7 +768,10 @@
         "toneHz": 494,
         "vibrateMs": [
           30
-        ]
+        ],
+        "pan": -1,
+        "sign": "left",
+        "trend": null
       }
     },
     {
@@ -734,7 +798,8 @@
         "freshness": "aging",
         "alignment": "aligned",
         "bearingUsable": true,
-        "uncertaintyMetres": 2.4
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
       },
       "cue": {
         "pattern": "double",
@@ -744,7 +809,774 @@
           40,
           60,
           40
-        ]
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.0001,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        },
+        "myAccuracyMetres": 15
+      },
+      "guidance": {
+        "state": "arrived",
+        "distanceMetres": 11.119492664455874,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": 15
+      },
+      "cue": {
+        "pattern": "silent",
+        "periodMs": 0,
+        "toneHz": 0,
+        "vibrateMs": [
+          80,
+          60,
+          80
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00008,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        },
+        "myAccuracyMetres": 9
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 8.8955941315647,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": 9
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 1600,
+        "toneHz": 660,
+        "vibrateMs": [
+          40
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        },
+        "myAccuracyMetres": 5
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 1111.9492664455875,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": 5
+      },
+      "cue": {
+        "pattern": "double",
+        "periodMs": 1100,
+        "toneHz": 990,
+        "vibrateMs": [
+          40,
+          60,
+          40
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
+      }
+    }
+  ],
+  "heading": [
+    {
+      "input": {
+        "compassDeg": 90,
+        "compassUsable": true,
+        "courseDeg": 200,
+        "speedMps": 8
+      },
+      "expected": {
+        "headingDeg": 200,
+        "source": "course",
+        "status": "ok"
+      }
+    },
+    {
+      "input": {
+        "compassDeg": 90,
+        "compassUsable": true,
+        "courseDeg": null,
+        "speedMps": 8
+      },
+      "expected": {
+        "headingDeg": null,
+        "source": null,
+        "status": "none"
+      }
+    },
+    {
+      "input": {
+        "compassDeg": 90,
+        "compassUsable": true,
+        "courseDeg": 200,
+        "speedMps": 0.2
+      },
+      "expected": {
+        "headingDeg": 90,
+        "source": "compass",
+        "status": "ok"
+      }
+    },
+    {
+      "input": {
+        "compassDeg": 90,
+        "compassUsable": false,
+        "courseDeg": 200,
+        "speedMps": 0.2
+      },
+      "expected": {
+        "headingDeg": 200,
+        "source": "course",
+        "status": "ok"
+      }
+    },
+    {
+      "input": {
+        "compassDeg": null,
+        "compassUsable": false,
+        "courseDeg": null,
+        "speedMps": 0.2
+      },
+      "expected": {
+        "headingDeg": null,
+        "source": null,
+        "status": "none"
+      }
+    },
+    {
+      "input": {
+        "compassDeg": 100,
+        "compassUsable": true,
+        "courseDeg": 110,
+        "speedMps": 2
+      },
+      "expected": {
+        "headingDeg": 100,
+        "source": "compass",
+        "status": "ok"
+      }
+    },
+    {
+      "input": {
+        "compassDeg": 100,
+        "compassUsable": true,
+        "courseDeg": 200,
+        "speedMps": 2
+      },
+      "expected": {
+        "headingDeg": 200,
+        "source": "course",
+        "status": "compass-unreliable"
+      }
+    },
+    {
+      "input": {
+        "compassDeg": null,
+        "compassUsable": true,
+        "courseDeg": 200,
+        "speedMps": 2
+      },
+      "expected": {
+        "headingDeg": 200,
+        "source": "course",
+        "status": "ok"
+      }
+    },
+    {
+      "input": {
+        "compassDeg": 45,
+        "compassUsable": true,
+        "courseDeg": null,
+        "speedMps": null
+      },
+      "expected": {
+        "headingDeg": 45,
+        "source": "compass",
+        "status": "ok"
+      }
+    }
+  ],
+  "mode": [
+    {
+      "input": {
+        "prevMode": "seek",
+        "distanceMetres": 500,
+        "speedMps": 1,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "seek"
+    },
+    {
+      "input": {
+        "prevMode": "seek",
+        "distanceMetres": 20,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "homing"
+    },
+    {
+      "input": {
+        "prevMode": "homing",
+        "distanceMetres": 35,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "homing"
+    },
+    {
+      "input": {
+        "prevMode": "homing",
+        "distanceMetres": 45,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "seek"
+    },
+    {
+      "input": {
+        "prevMode": "seek",
+        "distanceMetres": 20,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 80
+      },
+      "expected": "seek"
+    },
+    {
+      "input": {
+        "prevMode": "seek",
+        "distanceMetres": 5000,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "vector"
+    },
+    {
+      "input": {
+        "prevMode": "seek",
+        "distanceMetres": 800,
+        "speedMps": 6,
+        "fastForSec": 6,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "vector"
+    },
+    {
+      "input": {
+        "prevMode": "vector",
+        "distanceMetres": 800,
+        "speedMps": 3,
+        "fastForSec": 0,
+        "slowForSec": 3,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "vector"
+    },
+    {
+      "input": {
+        "prevMode": "vector",
+        "distanceMetres": 800,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 12,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "seek"
+    },
+    {
+      "input": {
+        "prevMode": "vector",
+        "distanceMetres": 3000,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 12,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "vector"
+    },
+    {
+      "input": {
+        "prevMode": "vector",
+        "distanceMetres": 15,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 12,
+        "uncertaintyMetres": 2.4
+      },
+      "expected": "homing"
+    }
+  ],
+  "pan": [
+    {
+      "rel": -180,
+      "expected": -1
+    },
+    {
+      "rel": -90,
+      "expected": -1
+    },
+    {
+      "rel": -45,
+      "expected": -0.5
+    },
+    {
+      "rel": 0,
+      "expected": 0
+    },
+    {
+      "rel": 30,
+      "expected": 0.3333333333333333
+    },
+    {
+      "rel": 90,
+      "expected": 1
+    },
+    {
+      "rel": 135,
+      "expected": 1
+    },
+    {
+      "rel": null,
+      "expected": 0
+    }
+  ],
+  "sign": [
+    {
+      "rel": null,
+      "expected": null
+    },
+    {
+      "rel": 0,
+      "expected": null
+    },
+    {
+      "rel": 5,
+      "expected": null
+    },
+    {
+      "rel": 8,
+      "expected": null
+    },
+    {
+      "rel": 9,
+      "expected": "right"
+    },
+    {
+      "rel": -9,
+      "expected": "left"
+    },
+    {
+      "rel": 45,
+      "expected": "right"
+    },
+    {
+      "rel": -90,
+      "expected": "left"
+    },
+    {
+      "rel": 180,
+      "expected": "right"
+    }
+  ],
+  "trend": [
+    {
+      "rate": null,
+      "expected": null
+    },
+    {
+      "rate": -0.8,
+      "expected": "closing"
+    },
+    {
+      "rate": -0.5,
+      "expected": "closing"
+    },
+    {
+      "rate": -0.1,
+      "expected": null
+    },
+    {
+      "rate": 0.1,
+      "expected": null
+    },
+    {
+      "rate": 0.5,
+      "expected": "receding"
+    },
+    {
+      "rate": 0.8,
+      "expected": "receding"
+    }
+  ],
+  "directionPhrase": [
+    {
+      "rel": null,
+      "expected": "ahead"
+    },
+    {
+      "rel": 0,
+      "expected": "straight ahead"
+    },
+    {
+      "rel": 10,
+      "expected": "straight ahead"
+    },
+    {
+      "rel": 45,
+      "expected": "ahead on your right"
+    },
+    {
+      "rel": -45,
+      "expected": "ahead on your left"
+    },
+    {
+      "rel": 90,
+      "expected": "to your right"
+    },
+    {
+      "rel": -90,
+      "expected": "to your left"
+    },
+    {
+      "rel": 135,
+      "expected": "behind you on your right"
+    },
+    {
+      "rel": -135,
+      "expected": "behind you on your left"
+    },
+    {
+      "rel": 175,
+      "expected": "behind you"
+    }
+  ],
+  "milestone": [
+    {
+      "prev": null,
+      "next": 900,
+      "expected": null
+    },
+    {
+      "prev": 1200,
+      "next": 900,
+      "expected": 1000
+    },
+    {
+      "prev": 1200,
+      "next": 400,
+      "expected": 500
+    },
+    {
+      "prev": 600,
+      "next": 550,
+      "expected": null
+    },
+    {
+      "prev": 300,
+      "next": 240,
+      "expected": 250
+    },
+    {
+      "prev": 120,
+      "next": 90,
+      "expected": 100
+    },
+    {
+      "prev": 90,
+      "next": 80,
+      "expected": null
+    }
+  ],
+  "cueModes": [
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.05,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ctx": {
+        "mode": "vector"
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 5559.746332227937,
+        "bearingDeg": 0,
+        "relativeBearingDeg": -30,
+        "freshness": "fresh",
+        "alignment": "near",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 3000,
+        "toneHz": 660,
+        "vibrateMs": [
+          40
+        ],
+        "pan": -0.3333333333333333,
+        "sign": "left",
+        "trend": null
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 20,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ctx": {
+        "mode": "homing",
+        "closingRateMps": -0.8
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 30.022630194030857,
+        "bearingDeg": 0,
+        "relativeBearingDeg": -20,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 1200,
+        "toneHz": 700,
+        "vibrateMs": [
+          40
+        ],
+        "pan": -0.2222222222222222,
+        "sign": "left",
+        "trend": "closing"
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.000045,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ctx": {
+        "mode": "homing",
+        "closingRateMps": 0.5
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 5.003771699005144,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 321,
+        "toneHz": 1348,
+        "vibrateMs": [
+          40
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": "receding"
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00008,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        },
+        "myAccuracyMetres": 5
+      },
+      "ctx": {
+        "mode": "homing",
+        "closingRateMps": -0.6
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 8.8955941315647,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": 5
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 457,
+        "toneHz": 1247,
+        "vibrateMs": [
+          40
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": "closing"
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": null,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ctx": {
+        "mode": "homing",
+        "closingRateMps": -0.8
+      },
+      "guidance": {
+        "state": "no-heading",
+        "distanceMetres": 30.022630194030857,
+        "bearingDeg": 0,
+        "relativeBearingDeg": null,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 1200,
+        "toneHz": 700,
+        "vibrateMs": [
+          40
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": "closing"
       }
     }
   ],

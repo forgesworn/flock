@@ -115,6 +115,7 @@ export default tseslint.config(
       'dist-app/',
       'docs/',
       'node_modules/',
+      'android/',
       'native/android/',
       'native/crypto-tests/.gradle/',
       'native/gps-probe/.gradle/',

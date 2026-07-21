@@ -16,7 +16,17 @@ import {
   cueFor,
   targetMoved,
   courseFromFixes,
+  resolveHeading,
+  selectMode,
+  panFor,
+  turnSign,
+  classifyTrend,
+  vectorDirectionPhrase,
+  crossedMilestone,
   type RadarInput,
+  type HeadingInput,
+  type ModeInput,
+  type CueContext,
 } from '@forgesworn/flock'
 
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), 'radar-vectors.json')
@@ -43,8 +53,10 @@ const FRESHNESS_CASES = [0, 60, 61, 300, 600, 601, 5000]
 const target = (lat: number, u = 2.4, age = 5): NonNullable<RadarInput['target']> =>
   ({ position: { lat, lon: 0 }, uncertaintyMetres: u, ageSeconds: age })
 
-// One case per guidance state and cue tier (see flock-kit/src/radar.test.ts for the
-// behavioural intent of each).
+// One case per guidance state and cue tier (see src/radar.test.ts for the
+// behavioural intent of each). Cases 0..16 are the v1 set; 17..19 exercise the
+// v2 my-accuracy honesty gate + arrival rework (append-only so the Kotlin
+// parity test's positional reads stay valid).
 const GUIDANCE_CASES: RadarInput[] = [
   { me: { lat: 0, lon: 0 }, headingDeg: 0, target: null },
   { me: null, headingDeg: 0, target: target(0.01) },
@@ -63,6 +75,61 @@ const GUIDANCE_CASES: RadarInput[] = [
   { me: { lat: 0, lon: 0 }, headingDeg: 45, target: target(0.01) }, // near
   { me: { lat: 0, lon: 0 }, headingDeg: 150, target: target(0.01) }, // off
   { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.01, 2.4, 300) }, // aging
+  { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.0001), myAccuracyMetres: 15 }, // arrived by MY accuracy (~11 m, radius 12)
+  { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.00008), myAccuracyMetres: 9 }, // point, MY bad fix voids the bearing (~8.8 m)
+  { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.01), myAccuracyMetres: 5 }, // point aligned — accuracy present but not limiting
+]
+
+// v2 heading engine — compass-vs-course arbitration by speed.
+const HEADING_CASES: HeadingInput[] = [
+  { compassDeg: 90, compassUsable: true, courseDeg: 200, speedMps: 8 },     // fast → course
+  { compassDeg: 90, compassUsable: true, courseDeg: null, speedMps: 8 },    // fast, no course → none
+  { compassDeg: 90, compassUsable: true, courseDeg: 200, speedMps: 0.2 },   // slow → compass
+  { compassDeg: 90, compassUsable: false, courseDeg: 200, speedMps: 0.2 },  // slow, compass unusable → course
+  { compassDeg: null, compassUsable: false, courseDeg: null, speedMps: 0.2 }, // slow, nothing → none
+  { compassDeg: 100, compassUsable: true, courseDeg: 110, speedMps: 2 },    // mid, compass agrees → compass
+  { compassDeg: 100, compassUsable: true, courseDeg: 200, speedMps: 2 },    // mid, compass disagrees → course + unreliable
+  { compassDeg: null, compassUsable: true, courseDeg: 200, speedMps: 2 },   // mid, no compass → course
+  { compassDeg: 45, compassUsable: true, courseDeg: null, speedMps: null },  // no speed (→0) → compass
+]
+
+// v2 mode machine — VECTOR / SEEK / HOMING with hysteresis.
+const MODE_CASES: ModeInput[] = [
+  { prevMode: 'seek', distanceMetres: 500, speedMps: 1, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4 },   // seek
+  { prevMode: 'seek', distanceMetres: 20, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4 },    // enter homing
+  { prevMode: 'homing', distanceMetres: 35, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4 },  // homing holds (hysteresis)
+  { prevMode: 'homing', distanceMetres: 45, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4 },  // homing exits
+  { prevMode: 'seek', distanceMetres: 20, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 80 },     // coarse never homing
+  { prevMode: 'seek', distanceMetres: 5000, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4 },  // enter vector by distance
+  { prevMode: 'seek', distanceMetres: 800, speedMps: 6, fastForSec: 6, slowForSec: 0, uncertaintyMetres: 2.4 },   // enter vector by sustained speed
+  { prevMode: 'vector', distanceMetres: 800, speedMps: 3, fastForSec: 0, slowForSec: 3, uncertaintyMetres: 2.4 }, // vector holds (not yet slow-sustained)
+  { prevMode: 'vector', distanceMetres: 800, speedMps: 0, fastForSec: 0, slowForSec: 12, uncertaintyMetres: 2.4 }, // vector exits
+  { prevMode: 'vector', distanceMetres: 3000, speedMps: 0, fastForSec: 0, slowForSec: 12, uncertaintyMetres: 2.4 }, // vector holds (still far)
+  { prevMode: 'vector', distanceMetres: 15, speedMps: 0, fastForSec: 0, slowForSec: 12, uncertaintyMetres: 2.4 }, // endgame beats vehicle → homing
+]
+
+const PAN_CASES = [-180, -90, -45, 0, 30, 90, 135, null]
+const SIGN_CASES = [null, 0, 5, 8, 9, -9, 45, -90, 180]
+const TREND_CASES = [null, -0.8, -0.5, -0.1, 0.1, 0.5, 0.8]
+const DIRECTION_PHRASE_CASES = [null, 0, 10, 45, -45, 90, -90, 135, -135, 175]
+const MILESTONE_CASES = [
+  { prev: null, next: 900 },
+  { prev: 1200, next: 900 },
+  { prev: 1200, next: 400 },
+  { prev: 600, next: 550 },
+  { prev: 300, next: 240 },
+  { prev: 120, next: 90 },
+  { prev: 90, next: 80 },
+]
+
+// v2 mode-specific cues — VECTOR sparse prompt, HOMING continuous geiger cadence
+// with the honesty-gated pan/sign and warmer/colder trend.
+const CUE_MODE_CASES: { input: RadarInput; ctx: CueContext }[] = [
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.05) }, ctx: { mode: 'vector' } }, // vector far, sign left
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 20, target: target(0.00027) }, ctx: { mode: 'homing', closingRateMps: -0.8 } }, // homing far ~30 m, honest, closing
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.000045) }, ctx: { mode: 'homing', closingRateMps: 0.5 } }, // homing near ~5 m, receding
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.00008), myAccuracyMetres: 5 }, ctx: { mode: 'homing', closingRateMps: -0.6 } }, // homing arrow DROPPED (bearing fiction)
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: null, target: target(0.00027) }, ctx: { mode: 'homing', closingRateMps: -0.8 } }, // homing, no heading → warmer/colder only
 ]
 
 const MOVED_CASES = [
@@ -87,6 +154,17 @@ function build(): Record<string, unknown> {
     guidance: GUIDANCE_CASES.map((input) => {
       const g = radarGuidance(input)
       return { input, guidance: g, cue: cueFor(g) }
+    }),
+    heading: HEADING_CASES.map((input) => ({ input, expected: resolveHeading(input) })),
+    mode: MODE_CASES.map((input) => ({ input, expected: selectMode(input) })),
+    pan: PAN_CASES.map((rel) => ({ rel, expected: panFor(rel) })),
+    sign: SIGN_CASES.map((rel) => ({ rel, expected: turnSign(rel) })),
+    trend: TREND_CASES.map((rate) => ({ rate, expected: classifyTrend(rate) })),
+    directionPhrase: DIRECTION_PHRASE_CASES.map((rel) => ({ rel, expected: vectorDirectionPhrase(rel) })),
+    milestone: MILESTONE_CASES.map((c) => ({ ...c, expected: crossedMilestone(c.prev, c.next) })),
+    cueModes: CUE_MODE_CASES.map(({ input, ctx }) => {
+      const g = radarGuidance(input)
+      return { input, ctx, guidance: g, cue: cueFor(g, ctx) }
     }),
     moved: MOVED_CASES.map((c) => ({ ...c, expected: targetMoved(c.prev, c.next) })),
     course: COURSE_CASES.map((c) => ({ ...c, expected: courseFromFixes(c.prev, c.next) })),

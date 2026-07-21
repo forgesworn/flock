@@ -11,13 +11,33 @@ export {
   resetPool,
 } from '@forgesworn/roost-kit'
 export type { EventTemplate } from '@forgesworn/roost-kit'
-export interface Fix { lat: number; lon: number; accuracy: number; at: number }
+export interface Fix {
+  lat: number
+  lon: number
+  accuracy: number
+  at: number
+  /** GPS course over ground, degrees clockwise from north — from Doppler, far
+   *  better than a two-fix derivation and valid only while moving. null when the
+   *  platform can't give one (stationary / unsupported). Radar v2's heading
+   *  engine consumes it so a vehicle compass never poisons the pointer. */
+  heading?: number | null
+  /** Ground speed in m/s (`coords.speed`), or null when unavailable. Drives the
+   *  heading arbitration and the VECTOR/SEEK/HOMING mode machine. */
+  speed?: number | null
+}
+
+/** A finite, non-negative number, else null — `coords.heading`/`coords.speed`
+ *  are `null` stationary and `NaN`/negative on some platforms. */
+const finiteOrNull = (n: number | null | undefined): number | null =>
+  typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : null
 
 const toFix = (pos: GeolocationPosition): Fix => ({
   lat: pos.coords.latitude,
   lon: pos.coords.longitude,
   accuracy: pos.coords.accuracy,
   at: Math.floor(pos.timestamp / 1000),
+  heading: finiteOrNull(pos.coords.heading),
+  speed: finiteOrNull(pos.coords.speed),
 })
 
 /** Why a location request failed — drives actionable guidance, not a raw toast.
