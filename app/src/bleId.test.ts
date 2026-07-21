@@ -10,6 +10,7 @@ import {
   meshEpoch,
   meshUuid,
   meshUuidNow,
+  meshUuidsToScan,
 } from './bleId'
 
 const SEED_A = 'a'.repeat(64)
@@ -138,5 +139,27 @@ describe('meshUuid / meshUuidNow', () => {
   it('meshUuidNow is the current epoch s UUID', () => {
     const now = 19_000 * BLE_MESH_EPOCH_SECONDS + 5
     expect(meshUuidNow(now)).toBe(meshUuid(19_000))
+  })
+
+  // Crowd mode advertises only the current daily UUID but scans ±1 epoch, so two
+  // phones either side of the midnight-UTC boundary still discover each other.
+  describe('meshUuidsToScan', () => {
+    const now = 19_000 * BLE_MESH_EPOCH_SECONDS + 5
+
+    it('scans the current epoch plus ±1 (3 UUIDs)', () => {
+      const e = meshEpoch(now)
+      const ids = meshUuidsToScan(now)
+      expect(ids).toHaveLength(3)
+      expect(ids).toContain(meshUuid(e - 1))
+      expect(ids).toContain(meshUuid(e))
+      expect(ids).toContain(meshUuid(e + 1))
+    })
+
+    // The point of ±1: a scanner one epoch behind an advertiser still discovers it.
+    it('tolerates a one-epoch skew between advertiser and scanner', () => {
+      const advertising = meshUuidNow(now)
+      const scannerOneEpochAhead = meshUuidsToScan(now + BLE_MESH_EPOCH_SECONDS)
+      expect(scannerOneEpochAhead).toContain(advertising)
+    })
   })
 })

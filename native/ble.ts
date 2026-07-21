@@ -90,12 +90,22 @@ export function decodeBleReliabilityFrame(data: string, from: string): MeshFrame
 /** Start BLE-nearby. `serviceUuid === room ===` the discovery UUID — the rotating
  *  members-only advertId (discreet mode) or the common daily meshUuid (crowd mode);
  *  either way the advert and its room-hash rotate together and nothing static hits
- *  the air. `selfId` = my pubkey (only ever sent inside an established GATT link).
+ *  the air. `scanUuids` (optional) widens only the SCAN filter to the neighbouring
+ *  windows ({t-1, t, t+1}) so a member whose clock or rotation boundary sits a window
+ *  away is still found — we still advertise just `serviceUuid`. `selfId` = my pubkey
+ *  (only ever sent inside an established GATT link).
  *  `hops` is the mesh flood budget: 0 (default) = discreet single-hop, >0 = crowd
  *  mesh flood/relay. `onFrame` gets each reassembled wrap payload. Throws if BLE is
  *  unavailable/denied — the caller treats that as "BLE off" and uses the relay. */
 export async function startBle(
-  opts: { room: string; selfId: string; serviceUuid: string; hops?: number; reconcileGiftWraps?: boolean },
+  opts: {
+    room: string
+    selfId: string
+    serviceUuid: string
+    scanUuids?: string[]
+    hops?: number
+    reconcileGiftWraps?: boolean
+  },
   onFrame: (data: string, from: string) => void,
 ): Promise<void> {
   await stopBle()
@@ -144,6 +154,10 @@ export async function startBle(
       room: opts.room,
       selfId: opts.selfId,
       serviceUuid: opts.serviceUuid,
+      // Scan a wider window set than we advertise, so a member a rotation window
+      // away (clock skew / boundary) is still discovered. The plugin always
+      // includes serviceUuid, so passing undefined is the classic single-UUID scan.
+      ...(opts.scanUuids && opts.scanUuids.length > 0 ? { scanUuids: opts.scanUuids } : {}),
       ...(opts.hops !== undefined ? { hops: opts.hops } : {}),
     })
     running = true

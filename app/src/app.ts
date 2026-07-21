@@ -30,7 +30,7 @@ import { PIN_KINDS, PIN_KIND_LIST, pinLabel as pinKindLabel, isPinKind, buildPin
 import { openRadar, closeRadar, radarBeaconLanded } from './radarMode'
 import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
-import { advertIdNow, meshUuidNow, msUntilNextWindow } from './bleId'
+import { advertIdNow, advertIdsToScan, meshUuidNow, meshUuidsToScan, msUntilNextWindow } from './bleId'
 import { classifyScan, shouldOfferAppHandoff } from './joinassist'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -893,10 +893,16 @@ async function syncBle(): Promise<void> {
       const uuid = mesh ? meshUuidNow(nowSec()) : advertIdNow((c as store.Circle).seedHex, nowSec())
       const nextMode = mesh ? 'mesh' : 'discreet'
       // Idempotent: only (re)start the radio when the advertised UUID or mode
-      // actually changes, so the periodic rotation re-arm never churns BLE.
+      // actually changes, so the periodic rotation re-arm never churns BLE. The
+      // scan set rotates on the SAME window boundary as `uuid`, so keying the
+      // guard on `uuid` alone keeps it in sync — no separate scan-set check needed.
       if (!(bleActive && uuid === bleAdvertUuid && bleMode === nextMode)) {
         const hops = mesh ? BLE_MESH_HOPS : 0
-        await ble.startBle({ room: uuid, selfId: id.pk, serviceUuid: uuid, hops, reconcileGiftWraps: mesh }, onBleFrame)
+        // We advertise only the current window's `uuid`, but scan {t-1, t, t+1} so a
+        // member a window away (clock skew, a boundary crossed a beat apart) is still
+        // discovered — the native plugin absorbs the boundary gap (capacitor-mesh-ble).
+        const scanUuids = mesh ? meshUuidsToScan(nowSec()) : advertIdsToScan([(c as store.Circle).seedHex], nowSec())
+        await ble.startBle({ room: uuid, selfId: id.pk, serviceUuid: uuid, scanUuids, hops, reconcileGiftWraps: mesh }, onBleFrame)
         bleActive = true
         bleMode = nextMode
         bleAdvertUuid = uuid
