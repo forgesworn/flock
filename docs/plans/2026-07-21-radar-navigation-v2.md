@@ -324,6 +324,8 @@ green:
 1. VECTOR voice grammar: clock-face ("at your 2 o'clock") vs left/right
    language ("ahead on your right")? Left/right is proposed — clock-face is
    precise but demands more parsing while driving.
+   **RESOLVED by the 2026-07-21 field test: clock-face, everywhere.** Shipped
+   as radar v2.1 (see addendum below).
 2. Should VECTOR offer a one-tap handoff to a real navigation app
    (`geo:` intent) for the road-network part of a long approach, keeping
    radar for the final unmapped stretch (car parks, fields, festivals)?
@@ -335,3 +337,36 @@ green:
 5. Haptic vocabulary: is long-left / double-short-right the most learnable
    signing, or should it mirror the "turn toward the buzz side" convention of
    dual-motor wearables (phones have one motor — signing is forced)?
+
+## Addendum — v2.1 (first field test, 2026-07-21)
+
+The first two-phone field test surfaced four findings; v2.1 answers them
+without touching acquisition (precision/cadence invariants unchanged):
+
+1. **"The screen doesn't update as they move."** Diagnosis: the pipeline is
+   event-driven end to end and correct — but beacons are deliberately
+   cell-gated and rate-floored (≥45 s even at Exact), so between disclosures
+   the scope only shifts with the watcher's own motion. On a short walk that
+   honestly reads as frozen. Consumer-side fixes (no wire change): each
+   landing disclosure is now unmissable — the moved pulse gained a spoken
+   twin ("They've moved — 300 metres, at your 2 o'clock"), and the minute
+   line (below) re-states range even between moves. If livelier tracking is
+   ever wanted it is a *cadence-policy* decision (COARSE_MIN_INTERVAL), not a
+   radar one.
+2. **Clock-face voice + minute cadence.** All voice directions are clock-face
+   now ("at your 3 o'clock"), and every mode speaks a minute-cadence
+   "<range>, at your <clock>" line (range-only when the bearing isn't
+   honest). Ranges are rounded to a 23-step speakable ladder so every line is
+   clip-composable offline (GrapheneOS may ship no TTS engine). Clips rebaked:
+   clock-1..12 + the full ladder; dir-* retired.
+3. **"It didn't act like a compass when I set the phone down."** Two causes,
+   both fixed. (a) The Doppler course kept its last walking value at rest —
+   courses are now trusted only on a fresh fix at ≥ courseMinSpeedMps
+   (1 m/s). (b) The Capacitor WebView's deviceorientation is not
+   earth-referenced, so JS never had a real compass — the guide service's
+   rotation-vector heading is now mirrored into the WebView over a throttled
+   'heading' plugin event and owns the scope's heading while fresh.
+4. **"Could others see me move while I was in radar mode?"** Yes — radar
+   changes nothing about publishing (it never has). The same cell-gate +
+   45 s floor as (1) applies to the watcher's *own* beacons; at coarse
+   precisions (< Street) movement inside one cell is invisible *by design*.
