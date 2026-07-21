@@ -1952,5 +1952,541 @@
       "distanceMetres": 1000,
       "expected": "They've moved — 1000 m, at your 11 o'clock"
     }
+  ],
+  "bleProximity": [
+    {
+      "samples": [],
+      "median": null,
+      "expected": null
+    },
+    {
+      "samples": [
+        -55
+      ],
+      "median": -55,
+      "expected": null
+    },
+    {
+      "samples": [
+        -55,
+        -58
+      ],
+      "median": -56.5,
+      "expected": null
+    },
+    {
+      "samples": [
+        -55,
+        -58,
+        -52
+      ],
+      "median": -55,
+      "expected": "immediate"
+    },
+    {
+      "samples": [
+        -70,
+        -75,
+        -65
+      ],
+      "median": -70,
+      "expected": "near"
+    },
+    {
+      "samples": [
+        -90,
+        -85,
+        -95
+      ],
+      "median": -90,
+      "expected": "far"
+    },
+    {
+      "samples": [
+        -55,
+        -56,
+        -110
+      ],
+      "median": -56,
+      "expected": "immediate"
+    },
+    {
+      "samples": [
+        -62,
+        -58,
+        -64,
+        -59
+      ],
+      "median": -60.5,
+      "expected": "near"
+    }
+  ],
+  "bleAssist": [
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ble": "immediate",
+      "usable": true,
+      "floorMetres": 3
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ble": "far",
+      "usable": true,
+      "floorMetres": null
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ble": null,
+      "usable": false,
+      "floorMetres": null
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 80,
+          "ageSeconds": 5
+        }
+      },
+      "ble": "immediate",
+      "usable": false,
+      "floorMetres": 3
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ble": "immediate",
+      "usable": false,
+      "floorMetres": 3
+    },
+    {
+      "input": {
+        "me": null,
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ble": "immediate",
+      "usable": false,
+      "floorMetres": 3
+    }
+  ],
+  "cueBle": [
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 20,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ctx": {
+        "mode": "homing",
+        "bleProximity": "immediate"
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 30.022630194030857,
+        "bearingDeg": 0,
+        "relativeBearingDeg": -20,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 250,
+        "toneHz": 1400,
+        "vibrateMs": [
+          40
+        ],
+        "pan": -0.2222222222222222,
+        "sign": "left",
+        "trend": null
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 20,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ctx": {
+        "mode": "homing",
+        "bleProximity": "near"
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 30.022630194030857,
+        "bearingDeg": 0,
+        "relativeBearingDeg": -20,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 496,
+        "toneHz": 1219,
+        "vibrateMs": [
+          40
+        ],
+        "pan": -0.2222222222222222,
+        "sign": "left",
+        "trend": null
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 20,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "ctx": {
+        "mode": "homing",
+        "bleProximity": "far"
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 30.022630194030857,
+        "bearingDeg": 0,
+        "relativeBearingDeg": -20,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": null
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 1200,
+        "toneHz": 700,
+        "vibrateMs": [
+          40
+        ],
+        "pan": -0.2222222222222222,
+        "sign": "left",
+        "trend": null
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        },
+        "myAccuracyMetres": 15
+      },
+      "ctx": {
+        "mode": "homing",
+        "bleProximity": "immediate"
+      },
+      "guidance": {
+        "state": "point",
+        "distanceMetres": 30.022630194030857,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": "aligned",
+        "bearingUsable": true,
+        "uncertaintyMetres": 2.4,
+        "myAccuracyMetres": 15
+      },
+      "cue": {
+        "pattern": "single",
+        "periodMs": 250,
+        "toneHz": 1400,
+        "vibrateMs": [
+          40
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
+      }
+    },
+    {
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.00027,
+            "lon": 0
+          },
+          "uncertaintyMetres": 80,
+          "ageSeconds": 5
+        }
+      },
+      "ctx": {
+        "mode": "homing",
+        "bleProximity": "immediate"
+      },
+      "guidance": {
+        "state": "coarse",
+        "distanceMetres": 30.022630194030857,
+        "bearingDeg": 0,
+        "relativeBearingDeg": 0,
+        "freshness": "fresh",
+        "alignment": null,
+        "bearingUsable": false,
+        "uncertaintyMetres": 80,
+        "myAccuracyMetres": null
+      },
+      "cue": {
+        "pattern": "sparse",
+        "periodMs": 2000,
+        "toneHz": 440,
+        "vibrateMs": [
+          40
+        ],
+        "pan": 0,
+        "sign": null,
+        "trend": null
+      }
+    }
+  ],
+  "modeBle": [
+    {
+      "input": {
+        "prevMode": "homing",
+        "distanceMetres": 45,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4,
+        "bleProximity": "near"
+      },
+      "expected": "homing"
+    },
+    {
+      "input": {
+        "prevMode": "homing",
+        "distanceMetres": 45,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4,
+        "bleProximity": "far"
+      },
+      "expected": "seek"
+    },
+    {
+      "input": {
+        "prevMode": "homing",
+        "distanceMetres": 30,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 30,
+        "bleProximity": "immediate"
+      },
+      "expected": "homing"
+    },
+    {
+      "input": {
+        "prevMode": "homing",
+        "distanceMetres": 60,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4,
+        "bleProximity": "immediate"
+      },
+      "expected": "seek"
+    },
+    {
+      "input": {
+        "prevMode": "homing",
+        "distanceMetres": 45,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 80,
+        "bleProximity": "immediate"
+      },
+      "expected": "seek"
+    },
+    {
+      "input": {
+        "prevMode": "seek",
+        "distanceMetres": 45,
+        "speedMps": 0,
+        "fastForSec": 0,
+        "slowForSec": 0,
+        "uncertaintyMetres": 2.4,
+        "bleProximity": "immediate"
+      },
+      "expected": "seek"
+    }
+  ],
+  "clockStable": [
+    {
+      "prevHour": null,
+      "rel": 0,
+      "expected": 12
+    },
+    {
+      "prevHour": null,
+      "rel": 45,
+      "expected": 2
+    },
+    {
+      "prevHour": 12,
+      "rel": 20,
+      "expected": 12
+    },
+    {
+      "prevHour": 12,
+      "rel": 22,
+      "expected": 1
+    },
+    {
+      "prevHour": 12,
+      "rel": -22,
+      "expected": 11
+    },
+    {
+      "prevHour": 1,
+      "rel": 14,
+      "expected": 1
+    },
+    {
+      "prevHour": 1,
+      "rel": 8,
+      "expected": 12
+    },
+    {
+      "prevHour": 12,
+      "rel": 90,
+      "expected": 3
+    },
+    {
+      "prevHour": 6,
+      "rel": -170,
+      "expected": 6
+    },
+    {
+      "prevHour": 6,
+      "rel": -150,
+      "expected": 7
+    },
+    {
+      "prevHour": 12,
+      "rel": null,
+      "expected": null
+    }
   ]
 }

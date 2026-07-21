@@ -292,4 +292,84 @@ class RadarCoreTest {
             assertEquals(c.getString("expected"), got, "voice line case $i")
         }
     }
+
+    // ── Phase 3: BLE RSSI proximity assist ───────────────────────────────────
+
+    private fun JSONArray.doubles(): List<Double> = (0 until length()).map { getDouble(it) }
+
+    @Test
+    fun `median RSSI and proximity banding match`() {
+        val cases = vectors().getJSONArray("bleProximity")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val samples = c.getJSONArray("samples").doubles()
+            val median = medianRssi(samples)
+            if (c.isNull("median")) assertNull(median, "median case $i") else assertEquals(c.getDouble("median"), median!!, 1e-9, "median case $i")
+            val band = bleProximityFromRssi(samples)
+            if (c.isNull("expected")) assertNull(band, "ble band case $i") else assertEquals(c.getString("expected"), band, "ble band case $i")
+        }
+    }
+
+    @Test
+    fun `ble assist usability and cadence floor match`() {
+        val cases = vectors().getJSONArray("bleAssist")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val g = radarGuidance(parseInput(c.getJSONObject("input")))
+            val ble = if (c.isNull("ble")) null else c.getString("ble")
+            assertEquals(c.getBoolean("usable"), bleAssistUsable(g, ble), "ble usable case $i")
+            val floor = bleCadenceFloorMetres(ble)
+            if (c.isNull("floorMetres")) assertNull(floor, "ble floor case $i") else assertEquals(c.getDouble("floorMetres"), floor!!, 1e-9, "ble floor case $i")
+        }
+    }
+
+    @Test
+    fun `ble-blended cues match`() {
+        val cases = vectors().getJSONArray("cueBle")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val g = radarGuidance(parseInput(c.getJSONObject("input")))
+            val ctxJson = c.getJSONObject("ctx")
+            val ctx = CueContext(
+                mode = ctxJson.optString("mode", "seek"),
+                closingRateMps = nullableDouble(ctxJson, "closingRateMps"),
+                bleProximity = if (ctxJson.isNull("bleProximity")) null else ctxJson.optString("bleProximity"),
+            )
+            assertCue(c.getJSONObject("cue"), cueFor(g, ctx), "cueBle case $i")
+        }
+    }
+
+    @Test
+    fun `ble-held mode transitions match`() {
+        val cases = vectors().getJSONArray("modeBle")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val inp = c.getJSONObject("input")
+            val got = selectMode(
+                ModeInput(
+                    prevMode = inp.getString("prevMode"),
+                    distanceMetres = nullableDouble(inp, "distanceMetres"),
+                    speedMps = nullableDouble(inp, "speedMps"),
+                    fastForSec = inp.getDouble("fastForSec"),
+                    slowForSec = inp.getDouble("slowForSec"),
+                    uncertaintyMetres = nullableDouble(inp, "uncertaintyMetres"),
+                    bleProximity = if (inp.isNull("bleProximity")) null else inp.optString("bleProximity"),
+                ),
+            )
+            assertEquals(c.getString("expected"), got, "modeBle case $i")
+        }
+    }
+
+    @Test
+    fun `boundary-sticky clock hours match`() {
+        val cases = vectors().getJSONArray("clockStable")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val prev = if (c.isNull("prevHour")) null else c.getInt("prevHour")
+            val rel = nullableDouble(c, "rel")
+            val got = stableClockHour(prev, rel)
+            if (c.isNull("expected")) assertNull(got, "clockStable case $i")
+            else assertEquals(c.getInt("expected"), got, "clockStable case $i")
+        }
+    }
 }

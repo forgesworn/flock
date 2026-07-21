@@ -13,6 +13,7 @@
 // also rotate) — nothing static ever hits the air (app/src/bleId.ts).
 
 import { MeshBle } from 'capacitor-mesh-ble'
+import type { MeshBleRssiSample, MeshBleStartRssiSamplingOptions } from 'capacitor-mesh-ble'
 import type { PluginListenerHandle } from '@capacitor/core'
 import {
   MESH_SYNC_KIND,
@@ -226,4 +227,92 @@ export async function sendBle(peer: string, data: string): Promise<void> {
 
 export function getBleReliabilityStats(): MeshReliabilityStats | null {
   return reliability?.stats() ?? null
+}
+
+// ── RSSI proximity (radar Phase 3) ───────────────────────────────────────────
+// Off by default (battery cost) — a caller (radarMode.ts) turns sampling on
+// only while it has an identified member target to attribute samples to, and
+// stops it unconditionally when done. Samples are attributed by the plugin
+// ONLY to a peer id already bound by a prior in-room frame exchange — never
+// to a raw, unauthenticated advert.
+
+/** Turn on periodic RSSI sampling. Idempotent (re-calling just updates the
+ *  interval); a no-op on iOS/web/older shells. */
+export async function startRssiSampling(opts: MeshBleStartRssiSamplingOptions = {}): Promise<void> {
+  try { await MeshBle.startRssiSampling(opts) } catch { /* android only / older shell */ }
+}
+
+/** Stop RSSI sampling. Idempotent — safe even if never started. */
+export async function stopRssiSampling(): Promise<void> {
+  try { await MeshBle.stopRssiSampling() } catch { /* not running */ }
+}
+
+/** Subscribe to attributed RSSI samples. Returns a handle; call `.remove()` to
+ *  stop. A shell without the event simply never fires it. */
+export async function addRssiListener(
+  onRssi: (sample: MeshBleRssiSample) => void,
+): Promise<PluginListenerHandle> {
+  return MeshBle.addListener('rssi', (e) => onRssi(e))
+}
+
+/** A live, peer-filtered proximity window: `values()` ages/returns the
+ *  current dBm samples; `stop()` tears everything down (idempotent). Owned
+ *  here (this whole module only loads inside the native shell) so radarMode's
+ *  tick loop stays a thin, tick-cheap consumer. */
+export interface RssiWindow {
+  values: () => number[]
+  stop: () => void
+}
+
+/** Start sampling and track ONE identified peer's rolling RSSI window.
+ *  Resolves to null (no-op) if the mesh isn't running or the shell/platform
+ *  doesn't support it (radar-v2 Phase 3) — the caller treats that exactly
+ *  like "no band yet". */
+export async function armRssiWindow(
+  peerId: string,
+  opts: { intervalMs?: number; maxAgeMs?: number; maxSamples?: number } = {},
+): Promise<RssiWindow | null> {
+  if (!bleRunning()) return null
+  const maxAgeMs = opts.maxAgeMs ?? 12_000
+  const maxSamples = opts.maxSamples ?? 10
+  let samples: { rssi: number; atMs: number }[] = []
+  let handle: PluginListenerHandle
+  try {
+    handle = await addRssiListener((s) => {
+      if (s.peer !== peerId) return
+      samples = [...samples, { rssi: s.rssi, atMs: s.at }].slice(-maxSamples)
+    })
+  } catch { return null }
+  await startRssiSampling({ intervalMs: opts.intervalMs })
+  let stopped = false
+  return {
+    values: () => {
+      const cutoff = Date.now() - maxAgeMs
+      samples = samples.filter((x) => x.atMs >= cutoff).slice(-maxSamples)
+      return samples.map((x) => x.rssi)
+    },
+    stop: () => {
+      if (stopped) return
+      stopped = true
+      void handle.remove().catch(() => { /* already removed */ })
+      void stopRssiSampling()
+    },
+  }
+}
+
+/** Reconcile a window against a desired peer id: stops+drops it when
+ *  `peerId` is null (disarm) or already correct-and-live (no-op, returns
+ *  `current` unchanged), else stops any stale window and arms a fresh one.
+ *  `isClosed` lets the caller (radarMode.ts) discard a window that resolved
+ *  after the session ended, without needing its own extra teardown call. */
+export async function syncRssiWindow(
+  current: RssiWindow | null,
+  peerId: string | null,
+  opts: { intervalMs?: number; isClosed?: () => boolean } = {},
+): Promise<RssiWindow | null> {
+  if (peerId === null) { current?.stop(); return null }
+  current?.stop()
+  const w = await armRssiWindow(peerId, opts)
+  if (w && opts.isClosed?.()) { w.stop(); return null }
+  return w
 }

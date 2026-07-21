@@ -74,6 +74,8 @@ import cc.trotters.flock.radar.RadarInput
 import cc.trotters.flock.radar.TargetObservation
 import cc.trotters.flock.radar.PositionObservation
 import cc.trotters.flock.radar.TimedPosition
+import cc.trotters.flock.radar.bleAssistUsable
+import cc.trotters.flock.radar.bleProximityFromRssi
 import cc.trotters.flock.radar.courseFromFixes
 import cc.trotters.flock.radar.crossedMilestone
 import cc.trotters.flock.radar.cueFor
@@ -84,8 +86,10 @@ import cc.trotters.flock.radar.clockHour
 import cc.trotters.flock.radar.smoothClosingRate
 import cc.trotters.flock.radar.smoothHeadingDeg
 import cc.trotters.flock.radar.speakableDistanceMetres
+import cc.trotters.flock.radar.stableClockHour
 import cc.trotters.flock.radar.targetMoved
 import cc.trotters.flock.radar.voiceLine
+import dev.forgesworn.meshble.MeshBleRssiBus
 import java.util.Locale
 
 class RadarGuideService : Service() {
@@ -94,6 +98,8 @@ class RadarGuideService : Service() {
     private var lm: LocationManager? = null
     private var sm: SensorManager? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    /** elapsedRealtime of the wakelock's last acquire() — the renewal clock. */
+    private var wakeLockAcquiredAtMs: Long = 0
     @Volatile private var running = false
 
     // My side of the bearing — direct GPS fixes (previous + current for the
@@ -120,9 +126,21 @@ class RadarGuideService : Service() {
     private var lastAnnouncedMode: String? = null
     private var lastHeadingStatus: String = "none"
     private var lastVoiceAtMs: Long = 0
-    private var lastVoiceBearing: Double? = null
+    /** The boundary-sticky clock hour every spoken direction uses (null = no
+     *  honest bearing) — one tracker for callout/milestone/periodic/moved, so
+     *  the voice never names two hours in one breath. Mirrors the JS side. */
+    private var spokenClockHour: Int? = null
+    private var lastSpokenClockHour: Int? = null
     private var lastPeriodicAtMs: Long = 0
     @Volatile private var movedAnnouncePending = false
+    private var lastBleClose = false
+
+    // Phase 3 — BLE RSSI proximity assist. MeshBleRssiBus calls on arbitrary BLE
+    // callback threads; samples are hopped onto THIS service's own handler
+    // thread (onRssiSample) so the window is only ever touched from the guide
+    // loop, like every other tick-loop field here. (rssi, atEpochMs) pairs,
+    // oldest first.
+    private val bleWindow = ArrayDeque<Pair<Double, Long>>()
 
     // Voice: pre-baked clips (from assets) + Android TTS fallback.
     private var tts: TextToSpeech? = null
@@ -202,12 +220,18 @@ class RadarGuideService : Service() {
         handler = h
 
         // Short partial wakelock (capped): keeps the beep scheduler + sensors
-        // honest with the screen off. A radar walk is minutes, not hours.
+        // honest with the screen off. Never untimed — renewed (not re-created)
+        // before it expires, from the guide loop, so a long walk doesn't lose
+        // the radios mid-route (see renewWakeLockIfNeeded). Not reference-
+        // counted: a renewal is a plain re-acquire that resets the SAME cap,
+        // not a stacked hold needing a matching extra release().
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "flock:radar").also {
+                it.setReferenceCounted(false)
                 it.acquire(WAKELOCK_MAX_MS)
             }
+            wakeLockAcquiredAtMs = SystemClock.elapsedRealtime()
         } catch (_: Exception) {}
 
         // Pre-baked voice clips ship in the web assets (Capacitor copies them to
@@ -229,6 +253,14 @@ class RadarGuideService : Service() {
             sm?.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_UI, h)
         }
 
+        // Same-process bridge for attributed RSSI (Phase 3): the JS side turns
+        // radio sampling on/off (capacitor-mesh-ble's startRssiSampling) — this
+        // only CONSUMES whatever the plugin already attributed to an
+        // identified peer. Filtered to the current target's peer id in
+        // onRssiSample; a pin (no meshPeerId) or a coarse share simply never
+        // matches / never blends (bleAssistUsable, same as the JS core).
+        MeshBleRssiBus.setListener { peer, _, rssi, _, at -> handler?.post { onRssiSample(peer, rssi, at) } }
+
         h.post { tickAndSchedule() }
         // NOT sticky: a session the OS reclaims must fall silent, not resurrect
         // itself later with a stale target and start beeping in a pocket.
@@ -238,6 +270,7 @@ class RadarGuideService : Service() {
     override fun onDestroy() {
         running = false
         instance = null
+        try { MeshBleRssiBus.clearListener() } catch (_: Exception) {}
         try { lm?.removeUpdates(locationListener) } catch (_: Exception) {}
         try { sm?.unregisterListener(sensorListener) } catch (_: Exception) {}
         try { vibrator()?.cancel() } catch (_: Exception) {}
@@ -290,10 +323,45 @@ class RadarGuideService : Service() {
 
     private fun alphaFor(mode: String): Double = when (mode) { "vector" -> 0.5; "homing" -> 0.15; else -> 0.3 }
 
+    // ── Phase 3: BLE RSSI proximity assist ───────────────────────────────────
+
+    /** MeshBleRssiBus callback, already hopped onto the guide-loop thread.
+     *  Filters to the CURRENT target's mesh peer id — never null (a pin has no
+     *  meshPeerId, so this simply never matches for one). */
+    private fun onRssiSample(peer: String, rssi: Int, at: Long) {
+        val want = targetPeerId ?: return
+        if (peer != want) return
+        bleWindow.addLast(rssi.toDouble() to at)
+        while (bleWindow.size > BLE_WINDOW_MAX_SAMPLES) bleWindow.removeFirst()
+    }
+
+    /** Age out stale samples and re-derive the band — every tick, so a window
+     *  that goes quiet (mesh drops, target walks out of range) decays to null
+     *  within one window's width, same as the JS controller. */
+    private fun currentBleProximity(nowMs: Long): String? {
+        val cutoff = nowMs - BLE_WINDOW_MAX_AGE_MS
+        while (bleWindow.isNotEmpty() && bleWindow.first().second < cutoff) bleWindow.removeFirst()
+        return bleProximityFromRssi(bleWindow.map { it.first })
+    }
+
+    /** Re-acquire the capped partial wakelock before its timeout expires, so a
+     *  long walk doesn't lose the radios mid-route. Always timeout-bound
+     *  (never an untimed lock) — this only pushes the SAME cap forward,
+     *  repeatedly, from the guide loop that already runs every tick. */
+    private fun renewWakeLockIfNeeded(elapsedNow: Long) {
+        val wl = wakeLock ?: return
+        if (elapsedNow - wakeLockAcquiredAtMs < WAKELOCK_MAX_MS - WAKELOCK_RENEW_MARGIN_MS) return
+        try {
+            wl.acquire(WAKELOCK_MAX_MS)
+            wakeLockAcquiredAtMs = elapsedNow
+        } catch (_: Exception) {}
+    }
+
     private fun tickAndSchedule() {
         if (!running) return
         val nowMs = System.currentTimeMillis()
         val elapsed = SystemClock.elapsedRealtime()
+        renewWakeLockIfNeeded(elapsed)
 
         // Heading engine (v2): arbitrate compass vs course by speed.
         val course = effectiveCourse()
@@ -304,6 +372,9 @@ class RadarGuideService : Service() {
         val target = targetObservation()
         val me = curFix?.position
         val prelimDist = if (me != null && target != null) haversineMetres(me, target.position) else null
+        // Phase 3: age the RSSI window and re-derive the band every tick, same
+        // cadence as everything else here.
+        val bleProximity = currentBleProximity(nowMs)
 
         // Sustained-speed durations for the mode machine's hysteresis.
         val sp = speed ?: 0.0
@@ -312,7 +383,7 @@ class RadarGuideService : Service() {
         val fastFor = if (fastSinceMs == 0L) 0.0 else (elapsed - fastSinceMs) / 1000.0
         val slowFor = if (slowSinceMs == 0L) 0.0 else (elapsed - slowSinceMs) / 1000.0
 
-        currentMode = selectMode(ModeInput(currentMode, prelimDist, speed, fastFor, slowFor, target?.uncertaintyMetres))
+        currentMode = selectMode(ModeInput(currentMode, prelimDist, speed, fastFor, slowFor, target?.uncertaintyMetres, bleProximity))
         modeShared = currentMode
 
         smoothedHeading = solution.headingDeg?.let { smoothHeadingDeg(smoothedHeading, it, alphaFor(currentMode)) }
@@ -326,12 +397,24 @@ class RadarGuideService : Service() {
             closingRate = smoothClosingRate(closingRate, lastDistance!!, dist, dt, RATE_ALPHA)
         }
 
-        val cue = cueFor(g, CueContext(currentMode, closingRate))
+        val cue = cueFor(g, CueContext(currentMode, closingRate, bleProximity))
 
         // Arrival: silence with ONE confirming haptic on the transition.
         if (g.state == "arrived" && lastState != "arrived") vibrate(cue.vibrateMs)
 
-        announceVoice(g, currentMode, solution.status, nowMs)
+        // The combined "very close, by radio" claim — HOMING + an honestly-
+        // usable (non-coarse, GPS-near) immediate band. bleAssistUsable is the
+        // SAME gate cueFor/selectMode already applied; this only decides the
+        // status/voice claim, never blends anything itself.
+        val bleClose = currentMode == "homing" && bleProximity == "immediate" && bleAssistUsable(g, bleProximity)
+
+        // The ONE clock every spoken direction uses: boundary-sticky, reset the
+        // moment the bearing stops being honest, re-adopted fresh on return.
+        spokenClockHour = if (g.bearingUsable) stableClockHour(spokenClockHour, g.relativeBearingDeg) else null
+
+        announceVoice(g, currentMode, solution.status, bleClose, nowMs)
+        lastBleClose = bleClose
+        lastSpokenClockHour = spokenClockHour
 
         if (cue.pattern != "silent") {
             if (!muted) {
@@ -373,7 +456,7 @@ class RadarGuideService : Service() {
 
     /** The voice policy, mirroring the JS controller: mode/degradation/compass/
      *  arrival everywhere; distance milestones + bearing swings only in VECTOR. */
-    private fun announceVoice(g: RadarGuidance, mode: String, status: String, nowMs: Long) {
+    private fun announceVoice(g: RadarGuidance, mode: String, status: String, bleClose: Boolean, nowMs: Long) {
         if (!voice) return
         if (g.state == "arrived" && lastState != "arrived") {
             playVoice(listOf("state-arrived"), voiceLine("arrived", g), nowMs, urgent = true); return
@@ -389,33 +472,49 @@ class RadarGuideService : Service() {
         if (degraded && !wasDegraded) {
             playVoice(listOf("state-${g.state}"), voiceLine("degraded", g, degradedState = g.state), nowMs); return
         }
+        // Phase 3: the band just became honestly "very close" while homing —
+        // radio confirming a story GPS alone can't finish indoors. Rate-
+        // limited like every other line; never a distance, never a direction.
+        if (bleClose && !lastBleClose) {
+            playVoice(listOf("state-ble-close"), voiceLine("ble-close", g), nowMs); return
+        }
+        // Every spoken clock reference below rides the ONE boundary-sticky hour
+        // the tick tracked — never the raw bearing — matching the JS controller.
+        val stableRel = spokenClockHour?.let { (it % 12) * 30.0 }
+        val gSpoken = if (stableRel == null) g else g.copy(relativeBearingDeg = stableRel)
+
         // A genuine target move (v2.1): the spoken twin of the moved pulse.
         if (movedAnnouncePending) {
             movedAnnouncePending = false
             val md = g.distanceMetres
             if (md != null) {
                 val rounded = speakableDistanceMetres(md)
-                if (playVoice(listOf("state-moved") + rangeClips(rounded, g), voiceLine("moved", g, distanceMetres = rounded, fmtDistance = { m -> fmtMetric(m) }), nowMs)) {
+                if (playVoice(listOf("state-moved") + rangeClips(rounded, gSpoken), voiceLine("moved", gSpoken, distanceMetres = rounded, fmtDistance = { m -> fmtMetric(m) }), nowMs)) {
                     lastPeriodicAtMs = nowMs
                 }
                 return
             }
         }
+        // VECTOR: milestone crossings lead (the line carries the clock).
         if (mode == "vector" && g.bearingUsable && g.distanceMetres != null) {
             val ms = crossedMilestone(lastDistance, g.distanceMetres!!)
             if (ms != null) {
-                if (playVoice(rangeClips(ms, g), voiceLine("milestone", g, distanceMetres = ms, fmtDistance = { m -> fmtMetric(m) }), nowMs)) {
+                if (playVoice(rangeClips(ms, gSpoken), voiceLine("milestone", gSpoken, distanceMetres = ms, fmtDistance = { m -> fmtMetric(m) }), nowMs)) {
                     lastPeriodicAtMs = nowMs // a milestone line counts as this minute's range callout
                 }
-                lastVoiceBearing = g.relativeBearingDeg
                 return
             }
-            val rb = g.relativeBearingDeg
-            if (rb != null && (lastVoiceBearing == null || Math.abs(rb - lastVoiceBearing!!) > BEARING_CHANGE_DEGREES)) {
-                val dir = clockClip(rb, g.bearingUsable)
-                playVoice(if (dir != null) listOf(dir) else emptyList(), voiceLine("bearing-change", g), nowMs)
-                lastVoiceBearing = rb
-            }
+        }
+        // A meaningful direction change — the spoken hour flipped — is ALWAYS
+        // called out, in EVERY mode while the bearing is honest (field feedback
+        // 2026-07-21). Boundary chatter cannot happen (stableClockHour holds a
+        // sticky band past each sector edge); its own faster floor applies.
+        val sc = spokenClockHour
+        if (sc != null && lastSpokenClockHour != null && sc != lastSpokenClockHour) {
+            val dir = clockClip(stableRel, g.bearingUsable)
+            playVoice(if (dir != null) listOf(dir) else emptyList(), voiceLine("bearing-change", gSpoken), nowMs,
+                minIntervalMs = (Radar.VOICE_DIRECTION_MIN_INTERVAL_SEC * 1000).toLong())
+            return
         }
 
         // The minute-cadence status line (v2.1, every mode): rounded range +
@@ -426,7 +525,7 @@ class RadarGuideService : Service() {
             nowMs - lastPeriodicAtMs >= (Radar.PERIODIC_VOICE_SEC * 1000).toLong()
         ) {
             val rounded = speakableDistanceMetres(d)
-            if (playVoice(rangeClips(rounded, g), voiceLine("periodic", g, distanceMetres = rounded, fmtDistance = { m -> fmtMetric(m) }), nowMs)) {
+            if (playVoice(rangeClips(rounded, gSpoken), voiceLine("periodic", gSpoken, distanceMetres = rounded, fmtDistance = { m -> fmtMetric(m) }), nowMs)) {
                 lastPeriodicAtMs = nowMs
             }
         }
@@ -452,9 +551,10 @@ class RadarGuideService : Service() {
      *  the fallback line with TTS. Gated on the Voice toggle + rate limit.
      *  Returns whether a line was actually spoken (the periodic cadence stamps
      *  its clock only on a real utterance). */
-    private fun playVoice(clipIds: List<String>, fallback: String, nowMs: Long, urgent: Boolean = false): Boolean {
+    private fun playVoice(clipIds: List<String>, fallback: String, nowMs: Long, urgent: Boolean = false,
+                          minIntervalMs: Long = (Radar.VOICE_MIN_INTERVAL_SEC * 1000).toLong()): Boolean {
         if (!voice) return false
-        if (!urgent && nowMs - lastVoiceAtMs < (Radar.VOICE_MIN_INTERVAL_SEC * 1000).toLong()) return false
+        if (!urgent && nowMs - lastVoiceAtMs < minIntervalMs) return false
         if (clipIds.isEmpty() && fallback.isEmpty()) return false
         lastVoiceAtMs = nowMs
         if (clipIds.isNotEmpty() && clipIds.all { availableClips.contains(it) }) playClips(clipIds)
@@ -505,15 +605,34 @@ class RadarGuideService : Service() {
         try {
             val n = SAMPLE_RATE * durMs / 1000
             val pcm = ShortArray(n * 2) // interleaved stereo L,R,L,R…
-            val attack = (n / 8).coerceAtLeast(1)
             val theta = (pan.coerceIn(-1.0, 1.0) + 1.0) * (Math.PI / 4.0)
             val lGain = Math.cos(theta)
             val rGain = Math.sin(theta)
+            // The same two-layer sonar ping as the web controller (radarMode
+            // beep()): a sine fundamental with a 30 ms bloom-and-settle pitch
+            // envelope, an octave triangle partial decaying by 60% of the
+            // burst, and a one-pole low-pass at 4×hz rounding the edges — the
+            // locked-phone ping must sound like the in-hand one.
+            val twoPi = 2.0 * Math.PI
+            val attackF = (SAMPLE_RATE * 12 / 1000).coerceAtMost(n / 3).coerceAtLeast(1)
+            val attackP = (SAMPLE_RATE * 8 / 1000).coerceAtMost(n / 3).coerceAtLeast(1)
+            val partEnd = ((n * 6) / 10).coerceAtLeast(attackP + 1)
+            val bloomN = (SAMPLE_RATE * 30 / 1000).coerceAtLeast(1)
+            val alphaLp = 1.0 - Math.exp(-twoPi * (hz * 4.0) / SAMPLE_RATE)
+            var phaseF = 0.0
+            var phaseP = 0.0
+            var lp = 0.0
             for (i in 0 until n) {
-                val phase = (i.toDouble() * hz / SAMPLE_RATE) % 1.0
-                val tri = if (phase < 0.5) 4 * phase - 1 else 3 - 4 * phase
-                val env = if (i < attack) i.toDouble() / attack else 1.0 - (i - attack).toDouble() / (n - attack)
-                val s = tri * env * 0.32 * Short.MAX_VALUE
+                val f = if (i < bloomN) hz * (1.02 - 0.02 * i.toDouble() / bloomN) else hz.toDouble()
+                phaseF += twoPi * f / SAMPLE_RATE
+                phaseP += twoPi * (hz * 2.0) / SAMPLE_RATE
+                val envF = if (i < attackF) i.toDouble() / attackF else 1.0 - (i - attackF).toDouble() / (n - attackF).coerceAtLeast(1)
+                val envP = if (i >= partEnd) 0.0 else if (i < attackP) i.toDouble() / attackP else 1.0 - (i - attackP).toDouble() / (partEnd - attackP)
+                val p = (phaseP / twoPi) % 1.0
+                val tri = if (p < 0.5) 4 * p - 1 else 3 - 4 * p
+                val raw = Math.sin(phaseF) * envF * 0.3 + tri * envP * 0.09
+                lp += alphaLp * (raw - lp)
+                val s = lp * Short.MAX_VALUE
                 pcm[2 * i] = (s * lGain).toInt().toShort()
                 pcm[2 * i + 1] = (s * rGain).toInt().toShort()
             }
@@ -598,11 +717,17 @@ class RadarGuideService : Service() {
         private const val HEADING_MAX_AGE_MS = 3_000L
         private const val COURSE_MAX_AGE_SEC = 30.0
         private const val RATE_ALPHA = 0.3
-        private const val BEARING_CHANGE_DEGREES = 30.0
         private val DEGRADED_STATES = setOf("stale", "coarse", "no-fix", "unavailable")
         // Hard cap on the wakelock — a forgotten session must not hold it all
         // night. The service keeps running (FGS); only the wakelock lapses.
+        // Renewed (not raised) well before expiry by renewWakeLockIfNeeded, so
+        // an active session never silently loses it mid-route.
         private const val WAKELOCK_MAX_MS = 45 * 60_000L
+        private const val WAKELOCK_RENEW_MARGIN_MS = 5 * 60_000L
+        // Phase 3 — BLE RSSI proximity assist: rolling window bounds, mirroring
+        // app/src/radarMode.ts exactly.
+        private const val BLE_WINDOW_MAX_AGE_MS = 12_000L
+        private const val BLE_WINDOW_MAX_SAMPLES = 10
 
         @Volatile private var instance: RadarGuideService? = null
         /** The guide's currently-resolved mode, for the JS getMode bridge. */
@@ -619,6 +744,10 @@ class RadarGuideService : Service() {
         @Volatile private var targetLon: Double? = null
         @Volatile private var targetUncertaintyMetres: Double = 0.0
         @Volatile private var targetAtMs: Long = 0
+        /** The target member's mesh peer id (their pubkey — see app/src/app.ts),
+         *  for BLE RSSI attribution. Null for a pin: pins carry no radio, so
+         *  onRssiSample's peer filter simply never matches one. */
+        @Volatile private var targetPeerId: String? = null
         @Volatile var muted: Boolean = false
         /** The voice (TTS) channel, mirroring the in-app toggle. */
         @Volatile var voice: Boolean = true
@@ -637,8 +766,10 @@ class RadarGuideService : Service() {
         }
 
         /** A fresh permitted disclosure for the selected person. Fires the
-         *  "target moved" interrupt when it is a genuine move (pure rule). */
-        fun updateTarget(lat: Double, lon: Double, uncertaintyMetres: Double, timestampMs: Long) {
+         *  "target moved" interrupt when it is a genuine move (pure rule).
+         *  `meshPeerId` (null for a pin) is the mesh peer id BLE RSSI samples
+         *  are attributed under — re-sent on every call, same as lat/lon. */
+        fun updateTarget(lat: Double, lon: Double, uncertaintyMetres: Double, timestampMs: Long, meshPeerId: String? = null) {
             val prev = targetLat?.let { la ->
                 targetLon?.let { lo -> PositionObservation(LatLng(la, lo), targetUncertaintyMetres) }
             }
@@ -647,6 +778,7 @@ class RadarGuideService : Service() {
             targetLon = lon
             targetUncertaintyMetres = uncertaintyMetres
             targetAtMs = timestampMs
+            targetPeerId = meshPeerId
             if (changed && targetMoved(prev, PositionObservation(LatLng(lat, lon), uncertaintyMetres))) {
                 instance?.movedPulse()
             }
@@ -658,6 +790,7 @@ class RadarGuideService : Service() {
             targetLon = null
             targetUncertaintyMetres = 0.0
             targetAtMs = 0
+            targetPeerId = null
             muted = false
             voice = true
             evergreen = false

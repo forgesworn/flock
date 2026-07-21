@@ -27,10 +27,16 @@ import {
   speakableDistanceMetres,
   voiceLine,
   crossedMilestone,
+  medianRssi,
+  bleProximityFromRssi,
+  bleAssistUsable,
+  bleCadenceFloorMetres,
+  stableClockHour,
   type RadarInput,
   type HeadingInput,
   type ModeInput,
   type CueContext,
+  type BleProximity,
 } from '@forgesworn/flock'
 
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), 'radar-vectors.json')
@@ -162,6 +168,66 @@ const VOICE_LINE_CASES: { kind: 'periodic' | 'milestone' | 'bearing-change' | 'm
   { kind: 'moved', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 1000 },
 ]
 
+// Phase 3 — BLE RSSI proximity assist (append-only; positional Kotlin reads of
+// the earlier groups must stay valid). Mirrors the cases flock-kit ships in
+// its own published compatibility/v1/radar-vectors.json for the same four
+// exports, so both repos exercise the same boundary conditions.
+const BLE_PROXIMITY_CASES: number[][] = [
+  [],
+  [-55],
+  [-55, -58],
+  [-55, -58, -52],
+  [-70, -75, -65],
+  [-90, -85, -95],
+  [-55, -56, -110],
+  [-62, -58, -64, -59],
+]
+
+const bleTarget = (lat: number, u = 2.4, age = 5): NonNullable<RadarInput['target']> =>
+  ({ position: { lat, lon: 0 }, uncertaintyMetres: u, ageSeconds: age })
+
+const BLE_ASSIST_CASES: { input: RadarInput; ble: BleProximity }[] = [
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: bleTarget(0.00027) }, ble: 'immediate' }, // near GPS + immediate → usable
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: bleTarget(0.00027) }, ble: 'far' }, // far band never blends
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: bleTarget(0.00027) }, ble: null }, // no band
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: bleTarget(0.00027, 80) }, ble: 'immediate' }, // coarse share never blends
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: bleTarget(0.01) }, ble: 'immediate' }, // GPS too far (>50 m) never blends
+  { input: { me: null, headingDeg: 0, target: bleTarget(0.00027) }, ble: 'immediate' }, // no fix of my own never blends
+]
+
+const CUE_BLE_CASES: { input: RadarInput; ctx: CueContext }[] = [
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 20, target: bleTarget(0.00027) }, ctx: { mode: 'homing', bleProximity: 'immediate' } }, // immediate floors the cadence to ~3 m pacing
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 20, target: bleTarget(0.00027) }, ctx: { mode: 'homing', bleProximity: 'near' } }, // near floors to ~10 m pacing
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 20, target: bleTarget(0.00027) }, ctx: { mode: 'homing', bleProximity: 'far' } }, // far buys no floor
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: bleTarget(0.00027), myAccuracyMetres: 15 }, ctx: { mode: 'homing', bleProximity: 'immediate' } }, // my bad fix still drops the arrow; ble still paces
+  { input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: bleTarget(0.00027, 80) }, ctx: { mode: 'homing', bleProximity: 'immediate' } }, // coarse share: no blend at all
+]
+
+const MODE_BLE_CASES: ModeInput[] = [
+  { prevMode: 'homing', distanceMetres: 45, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4, bleProximity: 'near' }, // near HOLDS homing past its exit line
+  { prevMode: 'homing', distanceMetres: 45, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4, bleProximity: 'far' }, // far never holds
+  { prevMode: 'homing', distanceMetres: 30, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 30, bleProximity: 'immediate' }, // still within homing's own exit line anyway
+  { prevMode: 'homing', distanceMetres: 60, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4, bleProximity: 'immediate' }, // beyond bleAssistMaxMetres → no hold
+  { prevMode: 'homing', distanceMetres: 45, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 80, bleProximity: 'immediate' }, // coarse share never held by ble
+  { prevMode: 'seek', distanceMetres: 45, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4, bleProximity: 'immediate' }, // ble only HOLDS, never a way IN
+]
+
+// Direction callouts: boundary-sticky clock hour — either side of the
+// 15°+hysteresis edges, the two-sided band, the rear wrap, the null path.
+const CLOCK_STABLE_CASES: { prevHour: number | null; rel: number | null }[] = [
+  { prevHour: null, rel: 0 },
+  { prevHour: null, rel: 45 },
+  { prevHour: 12, rel: 20 },   // inside the sticky band → holds 12
+  { prevHour: 12, rel: 22 },   // past it → 1
+  { prevHour: 12, rel: -22 },  // → 11
+  { prevHour: 1, rel: 14 },    // the new hour is protected by the same band
+  { prevHour: 1, rel: 8 },     // → back to 12
+  { prevHour: 12, rel: 90 },   // a big swing flips immediately
+  { prevHour: 6, rel: -170 },  // rear-boundary wrap holds
+  { prevHour: 6, rel: -150 },  // → 7
+  { prevHour: 12, rel: null }, // no bearing → no hour
+]
+
 function build(): Record<string, unknown> {
   return {
     bearing: BEARING_CASES.map((c) => ({ ...c, expected: initialBearingDeg(c.a, c.b) })),
@@ -191,6 +257,18 @@ function build(): Record<string, unknown> {
       expected: voiceLine({ kind: c.kind, distanceMetres: c.distanceMetres } as Parameters<typeof voiceLine>[0],
         radarGuidance(c.input), (m) => `${Math.round(m)} m`),
     })),
+    // Phase 3 — BLE RSSI proximity assist (append-only from here).
+    bleProximity: BLE_PROXIMITY_CASES.map((samples) => ({ samples, median: medianRssi(samples), expected: bleProximityFromRssi(samples) })),
+    bleAssist: BLE_ASSIST_CASES.map(({ input, ble }) => {
+      const g = radarGuidance(input)
+      return { input, ble, usable: bleAssistUsable(g, ble), floorMetres: bleCadenceFloorMetres(ble) }
+    }),
+    cueBle: CUE_BLE_CASES.map(({ input, ctx }) => {
+      const g = radarGuidance(input)
+      return { input, ctx, guidance: g, cue: cueFor(g, ctx) }
+    }),
+    modeBle: MODE_BLE_CASES.map((input) => ({ input, expected: selectMode(input) })),
+    clockStable: CLOCK_STABLE_CASES.map((c) => ({ ...c, expected: stableClockHour(c.prevHour, c.rel) })),
   }
 }
 

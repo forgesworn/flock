@@ -1114,12 +1114,24 @@ a.btn { text-decoration: none; }
 }
 .radar-sweep {
   position: absolute; inset: 0; border-radius: 50%;
+  /* A long phosphor decay: bright leading edge, ~140° of fading afterglow —
+     the CRT trail, not a hard wedge. */
   background: conic-gradient(from 0deg,
-    rgba(120, 255, 180, 0.32) 0deg, rgba(120, 255, 180, 0.05) 55deg, transparent 80deg, transparent 360deg);
+    rgba(150, 255, 200, 0.4) 0deg, rgba(120, 255, 180, 0.22) 30deg,
+    rgba(120, 255, 180, 0.1) 70deg, rgba(120, 255, 180, 0.035) 110deg,
+    transparent 140deg, transparent 360deg);
   animation: radar-spin 3.6s linear infinite;
   mix-blend-mode: screen;
 }
 @keyframes radar-spin { to { transform: rotate(360deg); } }
+/* CRT dressing: faint scanlines + a corner vignette. Pure overlay — no layout,
+   no JS, and pointer events pass straight through. */
+.radar-scope::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.14) 0 1px, transparent 1px 3px),
+    radial-gradient(circle, transparent 58%, rgba(2, 12, 7, 0.5) 100%);
+}
 /* Degraded scope: the sweep itself slows and dims — felt before it's read. */
 .radar-scope[data-state='stale'] .radar-sweep,
 .radar-scope[data-state='coarse'] .radar-sweep { animation-duration: 6.5s; opacity: 0.55; }
@@ -1139,9 +1151,27 @@ a.btn { text-decoration: none; }
   position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; border-radius: 50%;
   background: #aefec9; box-shadow: 0 0 14px 4px rgba(120, 255, 170, 0.75);
   transition: transform 0.45s ease;
+  animation: radar-blip-breathe 3.6s ease-in-out infinite;
+}
+/* A slow phosphor breathe on the sweep's own period, plus a sonar echo ring
+   expanding off the contact — the blip reads as a live return, not a sticker. */
+@keyframes radar-blip-breathe {
+  0%, 100% { box-shadow: 0 0 14px 4px rgba(120, 255, 170, 0.75); }
+  12% { box-shadow: 0 0 20px 7px rgba(150, 255, 195, 0.95); }
+  55% { box-shadow: 0 0 11px 3px rgba(120, 255, 170, 0.55); }
+}
+.radar-blip::after {
+  content: ''; position: absolute; inset: -2px; border-radius: 50%;
+  border: 1px solid rgba(150, 255, 195, 0.7);
+  animation: radar-blip-echo 3.6s ease-out infinite;
+}
+@keyframes radar-blip-echo {
+  0%, 8% { transform: scale(1); opacity: 0.8; }
+  60%, 100% { transform: scale(3.2); opacity: 0; }
 }
 .radar-blip[data-tone='aging'] { opacity: 0.7; }
-.radar-blip[data-tone='stale'] { opacity: 0.35; box-shadow: none; }
+.radar-blip[data-tone='stale'] { opacity: 0.35; box-shadow: none; animation: none; }
+.radar-blip[data-tone='stale']::after { animation: none; opacity: 0; }
 .radar-blip.moved { animation: radar-blip-flash 0.9s ease-out; }
 @keyframes radar-blip-flash {
   0% { box-shadow: 0 0 28px 14px rgba(170, 255, 200, 0.95); }
@@ -1194,6 +1224,16 @@ a.btn { text-decoration: none; }
   border: 1px solid rgba(120, 255, 170, 0.22);
 }
 .radar-modechip:active, .radar-voice:active { transform: scale(0.98); }
+
+/* VECTOR's "Open in Maps" hand-off — a chip, not a permanent control (radarMode
+   shows it only in VECTOR, native shell, with a known target position). */
+.radar-maps {
+  flex: 1 1 100%; padding: 10px; font-size: 14px; font-weight: 600;
+  border-radius: 12px; letter-spacing: 0.02em;
+  background: rgba(120, 255, 170, 0.06); color: #9fe8bd;
+  border: 1px solid rgba(120, 255, 170, 0.22);
+}
+.radar-maps:active { transform: scale(0.98); }
 
 /* The big directional arrow — heading-up (course-relative in VECTOR). Fills the
    scope and rotates about its centre; hidden unless VECTOR/HOMING have an honest

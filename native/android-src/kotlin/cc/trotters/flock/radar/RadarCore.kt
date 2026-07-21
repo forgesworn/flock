@@ -71,6 +71,26 @@ object Radar {
         300.0, 400.0, 500.0, 750.0, 1000.0, 1500.0, 2000.0, 3000.0, 4000.0, 5000.0, 10_000.0,
     )
     const val VOICE_MIN_INTERVAL_SEC = 10.0
+
+    // Direction callouts (field feedback 2026-07-21): a changed clock hour is
+    // ALWAYS spoken, every mode, on its own faster floor.
+    /** A spoken/displayed hour only flips once the bearing clears its sector
+     *  edge by this — a boundary-sat target must never chatter. */
+    const val CLOCK_HOUR_HYSTERESIS_DEG = 6.0
+    const val VOICE_DIRECTION_MIN_INTERVAL_SEC = 5.0
+
+    // Phase 3 — BLE RSSI proximity assist.
+    /** Median RSSI (dBm) at/above this reads as immediate — same-room close. */
+    const val BLE_IMMEDIATE_RSSI = -60.0
+    /** …at/above this as near; anything weaker is far (in radio range, no more). */
+    const val BLE_NEAR_RSSI = -80.0
+    /** Fewer window samples than this claims no band at all (null). */
+    const val BLE_MIN_SAMPLES = 3
+    /** BLE may only blend while GPS itself already places the target within this. */
+    const val BLE_ASSIST_MAX_METRES = 50.0
+    /** Cadence floors: an immediate/near band paces the geiger AS IF this close. */
+    const val BLE_IMMEDIATE_FLOOR_METRES = 3.0
+    const val BLE_NEAR_FLOOR_METRES = 10.0
 }
 
 data class TargetObservation(
@@ -115,6 +135,10 @@ data class RadarCue(
 data class CueContext(
     val mode: String = "seek",       // vector | seek | homing
     val closingRateMps: Double? = null,
+    /** Radio proximity to the target member (Phase 3): "immediate" | "near" |
+     *  "far" | null — a pin, a mesh-less target and pre-Phase-3 callers all
+     *  read as null (no blend). */
+    val bleProximity: String? = null,
 )
 
 private fun norm360(deg: Double): Double {
@@ -221,10 +245,61 @@ private fun bearingHonestForHoming(g: RadarGuidance): Boolean {
     return (g.distanceMetres ?: 0.0) > acc * Radar.HOMING_BEARING_FACTOR
 }
 
+// ── Phase 3: BLE RSSI proximity assist (@forgesworn/flock/radar) ─────────────
+
+/** Median of an RSSI sample window (dBm), or null on an empty window. The
+ *  median — not the mean — because BLE fading throws wild outliers. */
+fun medianRssi(samples: List<Double>): Double? {
+    if (samples.isEmpty()) return null
+    val sorted = samples.sorted()
+    val mid = sorted.size / 2
+    return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
+}
+
+/** RSSI sample window → proximity band ("immediate" | "near" | "far" | null).
+ *  Bands only — RSSI-to-metres is pseudo-science and no number is ever derived
+ *  from radio. Fewer than Radar.BLE_MIN_SAMPLES claims nothing: one lucky
+ *  packet is not proximity. */
+fun bleProximityFromRssi(samples: List<Double>): String? {
+    if (samples.size < Radar.BLE_MIN_SAMPLES) return null
+    val median = medianRssi(samples) ?: return null
+    return when {
+        median >= Radar.BLE_IMMEDIATE_RSSI -> "immediate"
+        median >= Radar.BLE_NEAR_RSSI -> "near"
+        else -> "far"
+    }
+}
+
+/** May BLE proximity blend into guidance AT ALL? A band must exist; the target
+ *  must not be a deliberately coarse share (radio never sharpens a disclosure
+ *  below its chosen precision); GPS itself must already place the target
+ *  within Radar.BLE_ASSIST_MAX_METRES (radio corroborates a near story, it
+ *  never replaces an absent one). */
+fun bleAssistUsable(g: RadarGuidance, bleProximity: String?): Boolean {
+    if (bleProximity == null) return false
+    val u = g.uncertaintyMetres ?: return false
+    if (u > Radar.COARSE_UNCERTAINTY_METRES) return false
+    val d = g.distanceMetres ?: return false
+    return d <= Radar.BLE_ASSIST_MAX_METRES
+}
+
+/** The cadence floor a band buys (metres the geiger paces AS IF), or null for
+ *  far/none — a far band proves radio range, not closeness, and paces nothing. */
+fun bleCadenceFloorMetres(bleProximity: String?): Double? = when (bleProximity) {
+    "immediate" -> Radar.BLE_IMMEDIATE_FLOOR_METRES
+    "near" -> Radar.BLE_NEAR_FLOOR_METRES
+    else -> null
+}
+
 /** HOMING geiger cadence: period + pitch interpolate continuously with range;
- *  direction cues survive only while the arrow is honest. */
+ *  direction cues survive only while the arrow is honest. A usable BLE band
+ *  FLOORS the pacing distance (immediate paced as <= 3 m) so the endgame
+ *  quickens indoors where GPS range is fiction — cadence only; arrow, pan and
+ *  sign never come from radio. */
 private fun homingCue(g: RadarGuidance, ctx: CueContext): RadarCue {
-    val d = clamp(g.distanceMetres ?: Radar.HOMING_FAR_METRES, Radar.HOMING_NEAR_METRES, Radar.HOMING_FAR_METRES)
+    val bleFloor = if (bleAssistUsable(g, ctx.bleProximity)) bleCadenceFloorMetres(ctx.bleProximity) else null
+    val dRaw = g.distanceMetres ?: Radar.HOMING_FAR_METRES
+    val d = clamp(if (bleFloor == null) dRaw else minOf(dRaw, bleFloor), Radar.HOMING_NEAR_METRES, Radar.HOMING_FAR_METRES)
     val span = Radar.HOMING_FAR_METRES - Radar.HOMING_NEAR_METRES
     val f = if (span > 0) (d - Radar.HOMING_NEAR_METRES) / span else 0.0
     val periodMs = Math.round(Radar.HOMING_PERIOD_NEAR_MS + f * (Radar.HOMING_PERIOD_FAR_MS - Radar.HOMING_PERIOD_NEAR_MS))
@@ -388,6 +463,9 @@ data class ModeInput(
     val fastForSec: Double,
     val slowForSec: Double,
     val uncertaintyMetres: Double?,
+    /** Radio proximity to the target member (Phase 3), or null. May HOLD an
+     *  active HOMING against indoor GPS wobble; never enters one. */
+    val bleProximity: String? = null,
 )
 
 /** VECTOR / SEEK / HOMING with hysteresis — the precise endgame wins, then the
@@ -396,8 +474,17 @@ fun selectMode(m: ModeInput): String {
     val dist = m.distanceMetres ?: Double.POSITIVE_INFINITY
     val coarseForHoming = (m.uncertaintyMetres ?: 0.0) > Radar.HOMING_MAX_UNCERTAINTY_METRES
 
+    // A near/immediate BLE band HOLDS an active HOMING against indoor GPS
+    // wobble (accuracy collapse walks the GPS range past the exit line while
+    // the member's radio is demonstrably in the room) — hold only, within the
+    // blend ceiling, never for a deliberately coarse share, never a way IN.
+    val ble = m.bleProximity
+    val bleHold = (ble == "immediate" || ble == "near") &&
+        dist <= Radar.BLE_ASSIST_MAX_METRES &&
+        (m.uncertaintyMetres ?: 0.0) <= Radar.COARSE_UNCERTAINTY_METRES
+
     if (m.prevMode == "homing") {
-        if (dist <= Radar.HOMING_EXIT_METRES && !coarseForHoming) return "homing"
+        if ((dist <= Radar.HOMING_EXIT_METRES && !coarseForHoming) || bleHold) return "homing"
     } else if (dist < Radar.HOMING_ENTER_METRES && !coarseForHoming) {
         return "homing"
     }
@@ -452,6 +539,20 @@ fun clockFacePhrase(relativeBearingDeg: Double?): String {
     return "at your $h o'clock"
 }
 
+/** The clock hour with sector-boundary hysteresis — holds the previous hour
+ *  until the bearing clears its sector edge by CLOCK_HOUR_HYSTERESIS_DEG, so
+ *  a boundary-sat target never chatters; a genuinely big swing still flips
+ *  immediately. Byte-matches the JS stableClockHour (clockStable vectors). */
+fun stableClockHour(prevHour: Int?, relativeBearingDeg: Double?): Int? {
+    val raw = clockHour(relativeBearingDeg) ?: return null
+    if (prevHour == null) return raw
+    if (raw == prevHour) return prevHour
+    val prevCentreDeg = (prevHour % 12) * 30.0
+    val offCentre = abs(angularErrorDeg(norm360(relativeBearingDeg!!), prevCentreDeg))
+    if (offCentre <= 15.0 + Radar.CLOCK_HOUR_HYSTERESIS_DEG) return prevHour
+    return raw
+}
+
 /** Round a range to the nearest speakable-ladder step (v2.1). */
 fun speakableDistanceMetres(metres: Double): Double {
     var best = Radar.SPEAKABLE_DISTANCES_METRES[0]
@@ -488,6 +589,7 @@ fun voiceLine(
         }
         "compass-unreliable" -> "Compass unreliable — using your direction of travel"
         "arrived" -> "Within GPS reach — look around"
+        "ble-close" -> "Very close — by Bluetooth"
         "degraded" -> when (degradedState) {
             "stale" -> "Their location is stale — follow with care"
             "coarse" -> "Rough area only"

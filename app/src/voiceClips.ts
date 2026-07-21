@@ -32,7 +32,7 @@ export const VOICE_CLIP_IDS = [
   ...Array.from({ length: 12 }, (_, i) => `clock-${i + 1}`),
   ...SPEAKABLE_DISTANCES_METRES.map((m) => DIST_CLIP[m]),
   'state-arrived', 'state-moved', 'mode-vector', 'mode-seek', 'mode-homing', 'state-compass-unreliable',
-  'state-stale', 'state-coarse', 'state-no-fix', 'state-unavailable',
+  'state-stale', 'state-coarse', 'state-no-fix', 'state-unavailable', 'state-ble-close',
 ] as const
 
 /** A relative bearing → its clock-face clip id, or null (no honest bearing). */
@@ -56,6 +56,9 @@ export type VoiceClipEvent =
   | { kind: 'periodic'; roundedMetres: number; relativeBearingDeg: number | null }
   /** A genuine target move (v2.1): "They've moved." then the range line. */
   | { kind: 'moved'; roundedMetres: number; relativeBearingDeg: number | null }
+  /** The BLE band just became honestly "very close" while homing (Phase 3).
+   *  Radio words only — never a distance, never a direction. */
+  | { kind: 'ble-close' }
 
 /** "<range clip>, <clock clip>" — the clock rides only an honest bearing. */
 function rangeSeq(metres: number, relativeBearingDeg: number | null): string[] {
@@ -83,6 +86,8 @@ export function voiceClipSeq(ev: VoiceClipEvent): string[] {
       return rangeSeq(ev.roundedMetres, ev.relativeBearingDeg)
     case 'moved':
       return ['state-moved', ...rangeSeq(ev.roundedMetres, ev.relativeBearingDeg)]
+    case 'ble-close':
+      return ['state-ble-close']
     case 'bearing-change': {
       const dir = clockClip(ev.relativeBearingDeg)
       return dir ? [dir] : []

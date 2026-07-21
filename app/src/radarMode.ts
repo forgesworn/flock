@@ -28,12 +28,16 @@ import {
   voiceLine,
   speakableDistanceMetres,
   haversineMetres,
+  bleProximityFromRssi,
+  bleAssistUsable,
+  stableClockHour,
   RADAR,
   type RadarCue,
   type RadarGuidance,
   type RadarMode,
   type HeadingStatus,
   type TimedPosition,
+  type BleProximity,
 } from '@forgesworn/flock'
 import { headingFromOrientation, blipXY, niceRange, freshnessLabel, statusCopy, arrowAngleDeg, modeChipLabel } from './radarView'
 import { VOICE_CLIP_IDS, voiceClipSeq } from './voiceClips'
@@ -54,6 +58,11 @@ export interface RadarHost {
   layer: HTMLElement
   /** Which disclosure this radar consumes — lets the beacon path notify us. */
   targetKey: { circleId: string; pk: string }
+  /** The target member's mesh peer id (their pubkey — the mesh's `selfId` IS
+   *  the member's pk, learned via the in-room frame exchange), for BLE RSSI
+   *  attribution (radar-v2 Phase 3). Null/omitted for a pin — pins carry no
+   *  radio, so radar never samples for one. */
+  meshPeerId?: string | null
   targetName: () => string
   /** The selected member's latest already-permitted disclosure, or null. */
   getTarget: () => RadarTargetFeed | null
@@ -78,8 +87,13 @@ const HEADING_ALPHA: Record<RadarMode, number> = { vector: 0.5, seek: 0.3, homin
 const RATE_ALPHA = 0.3
 /** No two spoken lines closer than this, arrival excepted. */
 const VOICE_MIN_INTERVAL_MS = RADAR.voiceMinIntervalSec * 1000
-/** A sustained relative-bearing swing beyond this (VECTOR) re-announces the side. */
-const BEARING_CHANGE_DEGREES = 30
+/** Direction callouts run on their own, faster floor — a turned corner must
+ *  not wait 10 s to be corrected (field feedback 2026-07-21). */
+const VOICE_DIRECTION_MIN_INTERVAL_MS = RADAR.voiceDirectionMinIntervalSec * 1000
+/** BLE RSSI sampling interval — battery-conscious, plenty for a median window.
+ *  The window's age/depth caps (12 s / 10 samples) live in native/ble.ts's
+ *  armRssiWindow, alongside the sampling it starts. */
+const BLE_SAMPLE_INTERVAL_MS = 2000
 
 const SILENT_CUE: RadarCue = { pattern: 'silent', periodMs: 0, toneHz: 0, vibrateMs: [], pan: 0, sign: null, trend: null }
 
@@ -124,7 +138,11 @@ interface RadarSession {
   lastDistance: number | null
   lastDistanceAtMs: number | null
   voiceLastAtMs: number
-  lastVoiceBearing: number | null
+  /** The boundary-sticky clock hour every spoken direction uses (null = no
+   *  honest bearing). One tracker feeds the callout, the milestone, the
+   *  periodic and the moved lines, so the voice never contradicts itself. */
+  spokenClockHour: number | null
+  lastSpokenClockHour: number | null
   /** When the minute-cadence range/clock line last spoke (v2.1). */
   lastPeriodicAtMs: number
   /** A genuine target move landed and its spoken interrupt is still owed. */
@@ -140,14 +158,37 @@ interface RadarSession {
    *  keeps the visuals. */
   nativeGuide: boolean
   nativeCheck: number
+  // ── Phase 3: BLE RSSI proximity assist ──
+  /** The live peer-filtered window (native/ble.ts), or null when not armed —
+   *  re-evaluated every tick against the live disclosure (armed only for a
+   *  MEMBER target whose current share is not coarse; see syncBleArm). */
+  bleWindow: { values: () => number[]; stop: () => void } | null
+  /** Guards overlapping arm/disarm calls (both are async). */
+  bleArming: boolean
+  bleProximity: BleProximity
+  /** mode === 'homing' AND the band is honestly usable AND immediate — the
+   *  combined "very close, by radio" claim the status line and voice share. */
+  bleClose: boolean
+  lastBleClose: boolean
   closed: boolean
 }
 
-/** The native guide bridge, when the shell provides it (lazy, cached). */
-const nativeGuideApi = async (): Promise<typeof import('../../native/radarGuide') | null> => {
-  if (!isNativeShell()) return null
-  try { return await import('../../native/radarGuide') } catch { return null }
+/** A lazy, native-shell-only module loader: null outside the shell or on any
+ *  import failure (older shell). Both bridges below share this shape. */
+function nativeModule<T>(loader: () => Promise<T>): () => Promise<T | null> {
+  return async () => {
+    if (!isNativeShell()) return null
+    try { return await loader() } catch { return null }
+  }
 }
+
+/** The native guide bridge, when the shell provides it. */
+const nativeGuideApi = nativeModule(() => import('../../native/radarGuide'))
+/** The mesh-BLE bridge, when the shell provides it — radar's own RSSI window
+ *  is a THIN consumer of the mesh the app already owns (app.ts syncBle); it
+ *  never starts/stops the mesh itself, only the opt-in RSSI sampler layered
+ *  on top of it. */
+const bleApi = nativeModule(() => import('../../native/ble'))
 
 let session: RadarSession | null = null
 
@@ -172,6 +213,10 @@ export function closeRadar(): void {
   void s.wakeLock?.release().catch(() => { /* already released */ })
   void s.audio?.close().catch(() => { /* already closed */ })
   if (s.nativeGuide) void nativeGuideApi().then((m) => m?.stopRadarGuide())
+  // BLE RSSI sampling: always stop on close (the only consumer today — no
+  // arm-tracking needed to avoid fighting another feature).
+  s.bleWindow?.stop()
+  s.bleWindow = null
   s.el.remove()
   s.host.onClosed()
 }
@@ -223,7 +268,8 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
     lastDistance: null,
     lastDistanceAtMs: null,
     voiceLastAtMs: 0,
-    lastVoiceBearing: null,
+    spokenClockHour: null,
+    lastSpokenClockHour: null,
     lastPeriodicAtMs: 0,
     movedAnnouncePending: false,
     nativeHeadingAtMs: 0,
@@ -231,6 +277,11 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
     wakeLock: null,
     nativeGuide: false,
     nativeCheck: 0,
+    bleWindow: null,
+    bleArming: false,
+    bleProximity: null,
+    bleClose: false,
+    lastBleClose: false,
     closed: false,
   }
   const s = session
@@ -251,7 +302,7 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
   void nativeGuideApi().then((m) => {
     if (!m || s.closed) return
     const t = host.getTarget()
-    void m.startRadarGuide(t ? { lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, evergreen: s.evergreen } : null, s.muted, s.voice)
+    void m.startRadarGuide(t ? { lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, evergreen: s.evergreen, meshPeerId: host.meshPeerId ?? null } : null, s.muted, s.voice)
       .then(() => { if (s.closed) void m.stopRadarGuide(); else s.nativeGuide = true })
   })
   void startOrientation(s)
@@ -276,6 +327,37 @@ async function acquireWakeLock(s: RadarSession): Promise<void> {
     ;(sentinel as unknown as { addEventListener?: (t: string, cb: () => void) => void })
       .addEventListener?.('release', () => { if (s.wakeLock === sentinel) s.wakeLock = null })
   } catch { /* wake lock unavailable — the visuals just may sleep */ }
+}
+
+// ── BLE proximity (radar-v2 Phase 3) ───────────────────────────────────────
+// A THIN consumer: native/ble.ts owns starting/stopping sampling and the
+// peer-filtered rolling window (armRssiWindow) — this only decides WHEN to
+// arm/disarm against the live disclosure and turns the window into a band
+// every tick. Attribution comes from the plugin (an RSSI sample is only ever
+// tagged with a mesh peer id already bound to that member by an authenticated
+// frame exchange — never a raw, unattributed advert), so armRssiWindow's peer
+// filter is exactly the "identified GATT link" rule, not an extra trust call.
+
+/** Re-evaluate arm/disarm against the LIVE disclosure every tick — never start
+ *  sampling for a pin (no `meshPeerId`) or a deliberately coarse share, and
+ *  disarm immediately if a share that was precise becomes coarse mid-session. */
+function syncBleArm(s: RadarSession, target: { uncertaintyMetres: number } | null): void {
+  const wantArmed = !!s.host.meshPeerId && target !== null && target.uncertaintyMetres <= RADAR.coarseUncertaintyMetres
+  if (wantArmed === !!s.bleWindow || s.bleArming) return
+  s.bleArming = true
+  if (!wantArmed) s.bleProximity = null
+  const peer = wantArmed ? (s.host.meshPeerId as string) : null
+  void bleApi()
+    .then((ble) => ble?.syncRssiWindow(s.bleWindow, peer, { intervalMs: BLE_SAMPLE_INTERVAL_MS, isClosed: () => s.closed }) ?? null)
+    .then((w) => { s.bleWindow = w })
+    .finally(() => { s.bleArming = false })
+}
+
+/** Re-derive the band from the live window every tick — an armed window ages
+ *  its own samples, so a quiet mesh (dropped, out of range) decays to null
+ *  within one window's width without any extra bookkeeping here. */
+function updateBleWindow(s: RadarSession): void {
+  s.bleProximity = s.bleWindow ? bleProximityFromRssi(s.bleWindow.values()) : null
 }
 
 // ── Sensors ──────────────────────────────────────────────────────────────────
@@ -389,7 +471,7 @@ function syncTarget(s: RadarSession): void {
     }
     if (s.nativeGuide) {
       void nativeGuideApi().then((m) =>
-        m?.updateRadarTarget({ lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000 }))
+        m?.updateRadarTarget({ lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, meshPeerId: s.host.meshPeerId ?? null }))
     }
   }
   s.lastObservation = { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres, timestamp: t.timestamp }
@@ -412,6 +494,12 @@ function tick(s: RadarSession): void {
   const target = t
     ? { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres, ageSeconds: Math.max(0, nowSec - t.timestamp) }
     : null
+
+  // BLE RSSI proximity (Phase 3): re-check arm/disarm against the LIVE
+  // disclosure, then age/derive the window — every tick, mirroring how the
+  // heading/mode machinery below re-reads live sensor state each cycle.
+  syncBleArm(s, target)
+  updateBleWindow(s)
 
   // The native guide's notification has its own Stop — if the user ended the
   // session from the lock screen, the reopened tracker must not linger.
@@ -442,6 +530,7 @@ function tick(s: RadarSession): void {
     fastForSec,
     slowForSec,
     uncertaintyMetres: target?.uncertaintyMetres ?? null,
+    bleProximity: s.bleProximity,
   })
   s.mode = mode
 
@@ -473,13 +562,25 @@ function tick(s: RadarSession): void {
     try { navigator.vibrate?.(cueFor(g).vibrateMs) } catch { /* no haptics */ }
   }
 
+  // The combined "very close, by radio" claim: HOMING + an honestly-usable
+  // (non-coarse, GPS-near) immediate band. Shared by the status line and the
+  // voice transition below — one source of truth for the honesty gate.
+  s.bleClose = mode === 'homing' && s.bleProximity === 'immediate' && bleAssistUsable(g, s.bleProximity)
+
+  // The ONE clock every spoken direction uses: boundary-sticky so a target on
+  // a sector line never chatters, reset the moment the bearing stops being
+  // honest, re-adopted fresh when it returns.
+  s.spokenClockHour = g.bearingUsable ? stableClockHour(s.spokenClockHour, g.relativeBearingDeg) : null
+
   announceVoice(s, g, mode, nowMs)
 
   s.lastState = g.state
   s.lastHeadingStatus = s.headingStatus
   s.lastAnnouncedMode = mode
+  s.lastBleClose = s.bleClose
+  s.lastSpokenClockHour = s.spokenClockHour
   if (g.distanceMetres !== null) { s.lastDistance = g.distanceMetres; s.lastDistanceAtMs = nowMs }
-  s.cue = cueFor(g, { mode, closingRateMps: s.closingRate })
+  s.cue = cueFor(g, { mode, closingRateMps: s.closingRate, bleProximity: s.bleProximity })
   patchScope(s, g, target?.ageSeconds ?? null, heading, mode)
 }
 
@@ -518,10 +619,11 @@ async function preloadVoiceClips(s: RadarSession): Promise<void> {
  *  and (unless urgent) the rate limit; silent while the native guide owns audio.
  *  Returns whether a line was actually spoken (the periodic cadence stamps its
  *  clock only on a real utterance). */
-function playVoice(s: RadarSession, clipIds: string[], fallbackText: string, nowMs: number, urgent = false): boolean {
+function playVoice(s: RadarSession, clipIds: string[], fallbackText: string, nowMs: number, urgent = false,
+  minIntervalMs = VOICE_MIN_INTERVAL_MS): boolean {
   if (s.nativeGuide || !s.voice) return false
   if (clipIds.length === 0 && !fallbackText) return false
-  if (!urgent && nowMs - s.voiceLastAtMs < VOICE_MIN_INTERVAL_MS) return false
+  if (!urgent && nowMs - s.voiceLastAtMs < minIntervalMs) return false
   s.voiceLastAtMs = nowMs
   const ctx = s.audio
   const haveAll = clipIds.length > 0 && ctx !== null && clipIds.every((id) => s.voiceBuffers.has(id))
@@ -583,6 +685,20 @@ function announceVoice(s: RadarSession, g: RadarGuidance, mode: RadarMode, nowMs
     return
   }
 
+  // BLE proximity (Phase 3): the band just became honestly "very close" while
+  // homing — radio confirming a story GPS alone can't finish indoors. Rate-
+  // limited like every other line; never a distance, never a direction.
+  if (s.bleClose && !s.lastBleClose) {
+    playVoice(s, voiceClipSeq({ kind: 'ble-close' }), voiceLine({ kind: 'ble-close' }, g, s.host.fmtDistance), nowMs)
+    return
+  }
+
+  // Every spoken clock reference below rides the ONE boundary-sticky hour the
+  // tick tracked — never the raw bearing — so the callout, the milestone, the
+  // periodic and the moved lines can never name different hours in one breath.
+  const stableRel = s.spokenClockHour === null ? null : (s.spokenClockHour % 12) * 30
+  const gSpoken = stableRel === null ? g : { ...g, relativeBearingDeg: stableRel }
+
   // A genuine target move (v2.1): the spoken twin of the moved pulse — beacons
   // are sparse (cell-gated, >=45 s), so each one landing must be unmissable.
   if (s.movedAnnouncePending) {
@@ -590,32 +706,37 @@ function announceVoice(s: RadarSession, g: RadarGuidance, mode: RadarMode, nowMs
     if (g.distanceMetres !== null) {
       const rounded = speakableDistanceMetres(g.distanceMetres)
       if (playVoice(s,
-        voiceClipSeq({ kind: 'moved', roundedMetres: rounded, relativeBearingDeg: g.bearingUsable ? g.relativeBearingDeg : null }),
-        voiceLine({ kind: 'moved', distanceMetres: rounded }, g, s.host.fmtDistance), nowMs)) {
+        voiceClipSeq({ kind: 'moved', roundedMetres: rounded, relativeBearingDeg: stableRel }),
+        voiceLine({ kind: 'moved', distanceMetres: rounded }, gSpoken, s.host.fmtDistance), nowMs)) {
         s.lastPeriodicAtMs = nowMs // a moved line is this minute's range callout too
       }
       return
     }
   }
 
-  // VECTOR: milestone crossings + sustained bearing swings lead the channel.
+  // VECTOR: milestone crossings lead the channel (the line carries the clock).
   if (mode === 'vector' && g.bearingUsable && g.distanceMetres !== null) {
     const milestone = crossedMilestone(s.lastDistance, g.distanceMetres)
     if (milestone !== null) {
       if (playVoice(s,
-        voiceClipSeq({ kind: 'milestone', milestoneMetres: milestone, relativeBearingDeg: g.relativeBearingDeg }),
-        voiceLine({ kind: 'milestone', distanceMetres: milestone }, g, s.host.fmtDistance), nowMs)) {
+        voiceClipSeq({ kind: 'milestone', milestoneMetres: milestone, relativeBearingDeg: stableRel }),
+        voiceLine({ kind: 'milestone', distanceMetres: milestone }, gSpoken, s.host.fmtDistance), nowMs)) {
         s.lastPeriodicAtMs = nowMs // a milestone line counts as this minute's range callout
       }
-      s.lastVoiceBearing = g.relativeBearingDeg
       return
     }
-    if (g.relativeBearingDeg !== null && (s.lastVoiceBearing === null || Math.abs(g.relativeBearingDeg - s.lastVoiceBearing) > BEARING_CHANGE_DEGREES)) {
-      playVoice(s, voiceClipSeq({ kind: 'bearing-change', relativeBearingDeg: g.relativeBearingDeg }),
-        voiceLine({ kind: 'bearing-change' }, g, s.host.fmtDistance), nowMs)
-      s.lastVoiceBearing = g.relativeBearingDeg
-      return
-    }
+  }
+
+  // A meaningful direction change — the spoken hour flipped — is ALWAYS called
+  // out, in EVERY mode while the bearing is honest (field feedback 2026-07-21):
+  // a 3 o'clock that has become a 2 o'clock never goes unsaid. Boundary
+  // chatter cannot happen (stableClockHour holds a 6° sticky band past each
+  // sector edge) and the callout runs on its own faster floor.
+  if (s.spokenClockHour !== null && s.lastSpokenClockHour !== null &&
+      s.spokenClockHour !== s.lastSpokenClockHour) {
+    playVoice(s, voiceClipSeq({ kind: 'bearing-change', relativeBearingDeg: stableRel }),
+      voiceLine({ kind: 'bearing-change' }, gSpoken, s.host.fmtDistance), nowMs, false, VOICE_DIRECTION_MIN_INTERVAL_MS)
+    return
   }
 
   // The minute-cadence status line (v2.1): rounded range + clock-face
@@ -624,8 +745,8 @@ function announceVoice(s: RadarSession, g: RadarGuidance, mode: RadarMode, nowMs
       nowMs - s.lastPeriodicAtMs >= RADAR.periodicVoiceSec * 1000) {
     const rounded = speakableDistanceMetres(g.distanceMetres)
     if (playVoice(s,
-      voiceClipSeq({ kind: 'periodic', roundedMetres: rounded, relativeBearingDeg: g.bearingUsable ? g.relativeBearingDeg : null }),
-      voiceLine({ kind: 'periodic', distanceMetres: rounded }, g, s.host.fmtDistance), nowMs)) {
+      voiceClipSeq({ kind: 'periodic', roundedMetres: rounded, relativeBearingDeg: stableRel }),
+      voiceLine({ kind: 'periodic', distanceMetres: rounded }, gSpoken, s.host.fmtDistance), nowMs)) {
       s.lastPeriodicAtMs = nowMs
     }
   }
@@ -643,6 +764,7 @@ function patchScope(s: RadarSession, g: RadarGuidance, ageSeconds: number | null
   const status = q('radar-status')
   const range = q('radar-range')
   const modeChip = q('radar-mode')
+  const maps = q('radar-maps') as HTMLButtonElement | null
   if (!scope || !blip) return
 
   const rangeMetres = niceRange(g.distanceMetres, g.uncertaintyMetres ?? 0, s.rangeMetres)
@@ -704,8 +826,11 @@ function patchScope(s: RadarSession, g: RadarGuidance, ageSeconds: number | null
       ? 'HERE'
       : g.distanceMetres === null ? '—' : s.host.fmtDistance(g.distanceMetres).replace('~', '')
   }
-  if (status) status.textContent = statusCopy(g, s.host.fmtDistance, { headingStatus: s.headingStatus, mode, trend: s.cue.trend })
+  if (status) status.textContent = statusCopy(g, s.host.fmtDistance, { headingStatus: s.headingStatus, mode, trend: s.cue.trend, bleClose: s.bleClose })
   if (modeChip) modeChip.textContent = modeChipLabel(mode, s.modeOverride)
+  // Only in VECTOR, only in the native shell (a web tab has no maps chooser
+  // intent), and only once there is a real position to hand off to.
+  if (maps) maps.hidden = !(mode === 'vector' && isNativeShell() && !!s.lastObservation)
 }
 
 /** The distinct "target moved" interrupt: a rising two-note sweep, a short
@@ -773,27 +898,48 @@ function beepLoop(s: RadarSession): void {
 function beep(ctx: AudioContext, hz: number, delaySec: number, durSec: number, pan: number): void {
   try {
     const t = ctx.currentTime + delaySec
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'triangle'
-    osc.frequency.value = hz
-    gain.gain.setValueAtTime(0.0001, t)
-    gain.gain.exponentialRampToValueAtTime(0.28, t + 0.012)
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + durSec)
-    // osc → gain → [panner] → destination. StereoPanner is widely supported;
-    // where it isn't, fall back to a centred (mono) connection.
-    let tail: AudioNode = gain
+    // A two-layer sonar ping, not a bare oscillator: a sine fundamental with a
+    // fast bloom-and-settle pitch envelope, an octave partial that decays twice
+    // as fast, and a gentle low-pass rounding the edges. Same grammar, richer
+    // voice — the cadence/pitch/pan channels are untouched.
+    const fund = ctx.createOscillator()
+    const fundGain = ctx.createGain()
+    fund.type = 'sine'
+    fund.frequency.setValueAtTime(hz * 1.02, t)
+    fund.frequency.exponentialRampToValueAtTime(hz, t + 0.03)
+    fundGain.gain.setValueAtTime(0.0001, t)
+    fundGain.gain.exponentialRampToValueAtTime(0.28, t + 0.012)
+    fundGain.gain.exponentialRampToValueAtTime(0.0001, t + durSec + 0.04)
+    const part = ctx.createOscillator()
+    const partGain = ctx.createGain()
+    part.type = 'triangle'
+    part.frequency.value = hz * 2
+    partGain.gain.setValueAtTime(0.0001, t)
+    partGain.gain.exponentialRampToValueAtTime(0.09, t + 0.008)
+    partGain.gain.exponentialRampToValueAtTime(0.0001, t + durSec * 0.6)
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'lowpass'
+    filter.frequency.value = hz * 4
+    filter.Q.value = 0.7
+    // layers → filter → [panner] → destination. StereoPanner is widely
+    // supported; where it isn't, fall back to a centred (mono) connection.
+    let tail: AudioNode = filter
     const makePanner = (ctx as unknown as { createStereoPanner?: () => StereoPannerNode }).createStereoPanner
     if (typeof makePanner === 'function' && pan !== 0) {
       const panner = ctx.createStereoPanner()
       panner.pan.value = Math.max(-1, Math.min(1, pan))
-      gain.connect(panner)
+      filter.connect(panner)
       tail = panner
     }
-    osc.connect(gain)
+    fund.connect(fundGain)
+    part.connect(partGain)
+    fundGain.connect(filter)
+    partGain.connect(filter)
     tail.connect(ctx.destination)
-    osc.start(t)
-    osc.stop(t + durSec + 0.02)
+    fund.start(t)
+    part.start(t)
+    fund.stop(t + durSec + 0.08)
+    part.stop(t + durSec + 0.08)
   } catch { /* audio unavailable — haptics still run */ }
 }
 
@@ -830,6 +976,7 @@ function mountRadar(host: RadarHost): HTMLElement {
     <div class="radar-status" id="radar-status"></div>
     <div class="radar-controls">
       <button class="radar-modechip" id="radar-mode" aria-label="Guidance mode">Auto</button>
+      <button class="radar-maps" id="radar-maps" hidden>🗺️ Open in Maps</button>
       <button class="radar-voice" id="radar-voice" aria-pressed="true">🗣️ Voice on</button>
       <button class="radar-sound" id="radar-sound" aria-pressed="false">🔊 Sound on</button>
       <button class="radar-stop" id="radar-stop">Stop</button>
@@ -862,6 +1009,19 @@ function mountRadar(host: RadarHost): HTMLElement {
     if (!s) return
     const i = OVERRIDE_CYCLE.indexOf(s.modeOverride)
     s.modeOverride = OVERRIDE_CYCLE[(i + 1) % OVERRIDE_CYCLE.length]
+  })
+  // VECTOR's long-approach hand-off (radar-worlds-best §C): the road-network
+  // part is a real nav app's job — radar stays open underneath for the final
+  // unmapped stretch when the driver returns to it. Coordinates only: the
+  // target's NAME is never URL-encoded into an intent another app receives.
+  el.querySelector('#radar-maps')?.addEventListener('click', () => {
+    const s = session
+    if (!s) return
+    const p = s.lastObservation?.position
+    if (!p) return
+    const lat = p.lat.toFixed(6)
+    const lon = p.lon.toFixed(6)
+    window.location.href = `geo:${lat},${lon}?q=${lat},${lon}`
   })
   return el
 }
