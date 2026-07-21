@@ -1,13 +1,20 @@
-// flock — locked-phone radar guide (Android/GrapheneOS).
+// flock — locked-phone radar guide (Android/GrapheneOS), v2.
 //
 // A user-started, location-typed foreground service that keeps radar's BY-EAR
 // guidance alive while the screen is locked and the WebView is suspended: it
 // samples GPS directly (the mechanism the Phase-0 probe measured green on a
 // locked GrapheneOS Pixel), reads the rotation-vector compass, and drives the
-// beep grammar + vibration natively. Every DECISION comes from the pure
+// beep grammar + vibration + voice natively. Every DECISION comes from the pure
 // RadarCore port (cc.trotters.flock.radar), which golden vectors pin to the
 // tested JS module — the locked beeper can never be more confident than the
 // foreground tracker.
+//
+// v2 (radar-navigation-v2) brings the FULL locked-phone parity: the heading
+// engine (compass distrusted in a vehicle — getBearing/getSpeed/getAccuracy +
+// onAccuracyChanged), the VECTOR/SEEK/HOMING mode machine, stereo turn-direction
+// panning, the signed haptic vocabulary, and the pre-baked voice channel (the
+// same OpenAI-TTS clips the web plays, from assets, with Android TextToSpeech as
+// the fallback) — all offline, all with the screen locked.
 //
 // The selected target's updates arrive from JS (RadarGuidePlugin.updateTarget
 // on each incoming beacon — the relay socket keeps running while flock is
@@ -43,6 +50,7 @@ import android.location.LocationManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -52,17 +60,32 @@ import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.speech.tts.TextToSpeech
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import cc.trotters.flock.publish.LatLng
+import cc.trotters.flock.publish.haversineMetres
+import cc.trotters.flock.radar.CueContext
+import cc.trotters.flock.radar.HeadingInput
+import cc.trotters.flock.radar.ModeInput
+import cc.trotters.flock.radar.Radar
+import cc.trotters.flock.radar.RadarGuidance
 import cc.trotters.flock.radar.RadarInput
 import cc.trotters.flock.radar.TargetObservation
 import cc.trotters.flock.radar.PositionObservation
 import cc.trotters.flock.radar.TimedPosition
 import cc.trotters.flock.radar.courseFromFixes
+import cc.trotters.flock.radar.crossedMilestone
 import cc.trotters.flock.radar.cueFor
 import cc.trotters.flock.radar.radarGuidance
+import cc.trotters.flock.radar.resolveHeading
+import cc.trotters.flock.radar.selectMode
+import cc.trotters.flock.radar.smoothClosingRate
+import cc.trotters.flock.radar.smoothHeadingDeg
 import cc.trotters.flock.radar.targetMoved
+import cc.trotters.flock.radar.vectorDirectionPhrase
+import cc.trotters.flock.radar.voiceLine
+import java.util.Locale
 
 class RadarGuideService : Service() {
     private var thread: HandlerThread? = null
@@ -73,12 +96,37 @@ class RadarGuideService : Service() {
     @Volatile private var running = false
 
     // My side of the bearing — direct GPS fixes (previous + current for the
-    // course-over-ground fallback) and the rotation-vector compass.
+    // course-over-ground fallback), the Doppler course/speed/accuracy the chip
+    // gives for free (v2 Fault 1/4), and the rotation-vector compass.
     @Volatile private var prevFix: TimedPosition? = null
     @Volatile private var curFix: TimedPosition? = null
+    @Volatile private var myCourseDeg: Double? = null
+    @Volatile private var mySpeedMps: Double? = null
+    @Volatile private var myAccuracyMetres: Double? = null
     @Volatile private var headingDeg: Double? = null
     @Volatile private var headingAtMs: Long = 0
+    @Volatile private var compassUsable: Boolean = true
+
+    // v2 engine state (guide-loop thread only).
+    private var smoothedHeading: Double? = null
+    private var currentMode: String = "seek"
+    private var closingRate: Double? = null
+    private var lastDistance: Double? = null
+    private var lastDistanceAtMs: Long = 0
+    private var fastSinceMs: Long = 0
+    private var slowSinceMs: Long = 0
     private var lastState: String? = null
+    private var lastAnnouncedMode: String? = null
+    private var lastHeadingStatus: String = "none"
+    private var lastVoiceAtMs: Long = 0
+    private var lastVoiceBearing: Double? = null
+
+    // Voice: pre-baked clips (from assets) + Android TTS fallback.
+    private var tts: TextToSpeech? = null
+    @Volatile private var ttsReady = false
+    private var availableClips: Set<String> = emptySet()
+    private val clipQueue = ArrayDeque<String>()
+    private var clipPlayer: MediaPlayer? = null
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(loc: Location) {
@@ -86,6 +134,10 @@ class RadarGuideService : Service() {
             val fix = TimedPosition(LatLng(loc.latitude, loc.longitude), at)
             val cur = curFix
             if (cur == null || fix.atSec > cur.atSec) { prevFix = cur; curFix = fix }
+            // The chip's Doppler course/speed and its accuracy — surfaced (v2).
+            myCourseDeg = if (loc.hasBearing()) loc.bearing.toDouble() else null
+            mySpeedMps = if (loc.hasSpeed()) loc.speed.toDouble() else null
+            myAccuracyMetres = if (loc.hasAccuracy()) loc.accuracy.toDouble() else null
         }
         override fun onProviderEnabled(provider: String) {}
         override fun onProviderDisabled(provider: String) {}
@@ -101,7 +153,12 @@ class RadarGuideService : Service() {
             headingDeg = ((az % 360.0) + 360.0) % 360.0
             headingAtMs = SystemClock.elapsedRealtime()
         }
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+            // Android's own "this magnetometer is unreliable" signal (v2 Fault 1):
+            // an unreliable/low compass is removed from the heading arbitration.
+            compassUsable = accuracy != SensorManager.SENSOR_STATUS_UNRELIABLE &&
+                accuracy != SensorManager.SENSOR_STATUS_ACCURACY_LOW
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -139,6 +196,12 @@ class RadarGuideService : Service() {
             }
         } catch (_: Exception) {}
 
+        // Pre-baked voice clips ship in the web assets (Capacitor copies them to
+        // assets/public/voice); list what's present so playback can fall back to
+        // TTS for anything missing. TTS is the offline fallback voice.
+        try { availableClips = assets.list("public/voice")?.filter { it.endsWith(".mp3") }?.map { it.removeSuffix(".mp3") }?.toSet() ?: emptySet() } catch (_: Exception) {}
+        try { tts = TextToSpeech(this) { status -> ttsReady = status == TextToSpeech.SUCCESS; if (ttsReady) try { tts?.language = Locale.UK } catch (_: Exception) {} } } catch (_: Exception) {}
+
         lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
         try {
             lm?.requestLocationUpdates(LocationManager.GPS_PROVIDER, GPS_INTERVAL_MS, 0f, locationListener, t.looper)
@@ -164,6 +227,10 @@ class RadarGuideService : Service() {
         try { lm?.removeUpdates(locationListener) } catch (_: Exception) {}
         try { sm?.unregisterListener(sensorListener) } catch (_: Exception) {}
         try { vibrator()?.cancel() } catch (_: Exception) {}
+        try { clipPlayer?.release() } catch (_: Exception) {}
+        clipPlayer = null
+        try { tts?.stop(); tts?.shutdown() } catch (_: Exception) {}
+        tts = null
         try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
         thread?.quitSafely()
         thread = null
@@ -173,17 +240,24 @@ class RadarGuideService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // ── The guide loop: pure core → sound + haptics ─────────────────────────
+    // ── The guide loop: pure core → sound + haptics + voice ─────────────────
 
-    /** Compass heading if fresh, else GPS course over ground (walk-a-few-steps). */
-    private fun effectiveHeading(): Double? {
-        val h = headingDeg
-        if (h != null && SystemClock.elapsedRealtime() - headingAtMs < HEADING_MAX_AGE_MS) return h
-        val p = prevFix
-        val c = curFix ?: return null
+    /** GPS course over ground: the Doppler bearing when moving, else a two-fix
+     *  fallback ("walk a few steps"). */
+    private fun effectiveCourse(): Double? {
+        myCourseDeg?.let { return it }
+        val p = prevFix; val c = curFix ?: return null
         if (p == null) return null
         if (SystemClock.elapsedRealtime() / 1000.0 - c.atSec > COURSE_MAX_AGE_SEC) return null
         return courseFromFixes(p, c)
+    }
+
+    /** Ground speed: the chip's value, else derived from my two recent fixes. */
+    private fun effectiveSpeed(): Double? {
+        mySpeedMps?.let { return it }
+        val p = prevFix; val c = curFix ?: return null
+        if (p == null || c.atSec <= p.atSec) return null
+        return haversineMetres(p.position, c.position) / (c.atSec - p.atSec)
     }
 
     private fun targetObservation(): TargetObservation? {
@@ -196,17 +270,72 @@ class RadarGuideService : Service() {
         return TargetObservation(LatLng(lat, lon), targetUncertaintyMetres, ageSec)
     }
 
+    private fun alphaFor(mode: String): Double = when (mode) { "vector" -> 0.5; "homing" -> 0.15; else -> 0.3 }
+
     private fun tickAndSchedule() {
         if (!running) return
-        val g = radarGuidance(RadarInput(curFix?.position, effectiveHeading(), targetObservation()))
-        val cue = cueFor(g)
+        val nowMs = System.currentTimeMillis()
+        val elapsed = SystemClock.elapsedRealtime()
+
+        // Heading engine (v2): arbitrate compass vs course by speed.
+        val course = effectiveCourse()
+        val speed = effectiveSpeed()
+        val compass = headingDeg?.takeIf { elapsed - headingAtMs < HEADING_MAX_AGE_MS }
+        val solution = resolveHeading(HeadingInput(compass, compassUsable, course, speed))
+
+        val target = targetObservation()
+        val me = curFix?.position
+        val prelimDist = if (me != null && target != null) haversineMetres(me, target.position) else null
+
+        // Sustained-speed durations for the mode machine's hysteresis.
+        val sp = speed ?: 0.0
+        if (sp >= Radar.VECTOR_ENTER_SPEED_MPS) { if (fastSinceMs == 0L) fastSinceMs = elapsed } else fastSinceMs = 0L
+        if (sp < Radar.VECTOR_EXIT_SPEED_MPS) { if (slowSinceMs == 0L) slowSinceMs = elapsed } else slowSinceMs = 0L
+        val fastFor = if (fastSinceMs == 0L) 0.0 else (elapsed - fastSinceMs) / 1000.0
+        val slowFor = if (slowSinceMs == 0L) 0.0 else (elapsed - slowSinceMs) / 1000.0
+
+        currentMode = selectMode(ModeInput(currentMode, prelimDist, speed, fastFor, slowFor, target?.uncertaintyMetres))
+        modeShared = currentMode
+
+        smoothedHeading = solution.headingDeg?.let { smoothHeadingDeg(smoothedHeading, it, alphaFor(currentMode)) }
+
+        val g = radarGuidance(RadarInput(me, smoothedHeading, target, myAccuracyMetres))
+
+        // Warmer/colder: smooth d(distance)/dt for the HOMING trend note.
+        val dist = g.distanceMetres
+        if (dist != null && lastDistance != null && lastDistanceAtMs != 0L) {
+            val dt = (nowMs - lastDistanceAtMs) / 1000.0
+            closingRate = smoothClosingRate(closingRate, lastDistance!!, dist, dt, RATE_ALPHA)
+        }
+
+        val cue = cueFor(g, CueContext(currentMode, closingRate))
+
         // Arrival: silence with ONE confirming haptic on the transition.
         if (g.state == "arrived" && lastState != "arrived") vibrate(cue.vibrateMs)
-        lastState = g.state
+
+        announceVoice(g, currentMode, solution.status, nowMs)
+
         if (cue.pattern != "silent") {
-            if (!muted) playBurst(cue.toneHz, when (cue.pattern) { "triple" -> 3; "double" -> 2; else -> 1 })
+            if (!muted) {
+                playBurst(cue.toneHz, when (cue.pattern) { "triple" -> 3; "double" -> 2; else -> 1 }, cue.pan)
+                // Warmer/colder second note (HOMING): rising when closing, falling when receding.
+                cue.trend?.let { tr ->
+                    val second = if (tr == "closing") (cue.toneHz * 1.5).toInt() else (cue.toneHz * 0.7).toInt()
+                    handler?.postDelayed({ playTone(second, BEEP_MS, cue.pan) }, 90)
+                }
+            }
             vibrate(cue.vibrateMs)
+            // Signed turn haptic, between bursts, when off-beam (eyes/ears-free).
+            cue.sign?.let { sign ->
+                val pattern = if (sign == "right") longArrayOf(30, 60, 30) else longArrayOf(180)
+                handler?.postDelayed({ if (running) vibrate(pattern) }, maxOf(120L, cue.periodMs / 2))
+            }
         }
+
+        lastState = g.state
+        lastAnnouncedMode = currentMode
+        lastHeadingStatus = solution.status
+        if (dist != null) { lastDistance = dist; lastDistanceAtMs = nowMs }
         handler?.postDelayed({ tickAndSchedule() }, if (cue.pattern == "silent") 300 else cue.periodMs)
     }
 
@@ -214,28 +343,123 @@ class RadarGuideService : Service() {
     private fun movedPulse() {
         handler?.post {
             if (!running) return@post
-            if (!muted) { playTone(660, 90); handler?.postDelayed({ playTone(1320, 90) }, 110) }
+            if (!muted) { playTone(660, 90, 0.0); handler?.postDelayed({ playTone(1320, 90, 0.0) }, 110) }
             vibrate(longArrayOf(40, 40, 40))
         }
     }
 
-    // ── Audio: short synthesised triangle beeps (no assets, media stream) ───
+    // ── Voice: pre-baked clips (assets) + Android TextToSpeech fallback ──────
 
-    private fun playBurst(hz: Int, count: Int) {
-        for (i in 0 until count) handler?.postDelayed({ playTone(hz, BEEP_MS) }, (i * 150).toLong())
+    /** The voice policy, mirroring the JS controller: mode/degradation/compass/
+     *  arrival everywhere; distance milestones + bearing swings only in VECTOR. */
+    private fun announceVoice(g: RadarGuidance, mode: String, status: String, nowMs: Long) {
+        if (!voice) return
+        if (g.state == "arrived" && lastState != "arrived") {
+            playVoice(listOf("state-arrived"), voiceLine("arrived", g), nowMs, urgent = true); return
+        }
+        if (mode != lastAnnouncedMode && lastAnnouncedMode != null) {
+            playVoice(listOf("mode-$mode"), voiceLine("mode", g, mode = mode), nowMs); return
+        }
+        if (status == "compass-unreliable" && lastHeadingStatus != "compass-unreliable") {
+            playVoice(listOf("state-compass-unreliable"), voiceLine("compass-unreliable", g), nowMs); return
+        }
+        val degraded = g.state in DEGRADED_STATES
+        val wasDegraded = lastState in DEGRADED_STATES
+        if (degraded && !wasDegraded) {
+            playVoice(listOf("state-${g.state}"), voiceLine("degraded", g, degradedState = g.state), nowMs); return
+        }
+        if (mode == "vector" && g.bearingUsable && g.distanceMetres != null) {
+            val ms = crossedMilestone(lastDistance, g.distanceMetres!!)
+            if (ms != null) {
+                playVoice(milestoneClips(ms, g.relativeBearingDeg), voiceLine("milestone", g, distanceMetres = ms, fmtDistance = { m -> fmtMetric(m) }), nowMs)
+                lastVoiceBearing = g.relativeBearingDeg
+                return
+            }
+            val rb = g.relativeBearingDeg
+            if (rb != null && (lastVoiceBearing == null || Math.abs(rb - lastVoiceBearing!!) > BEARING_CHANGE_DEGREES)) {
+                val dir = directionClip(rb)
+                playVoice(if (dir != null) listOf(dir) else emptyList(), voiceLine("bearing-change", g), nowMs)
+                lastVoiceBearing = rb
+            }
+        }
     }
 
-    private fun playTone(hz: Int, durMs: Int) {
+    private fun milestoneClips(milestoneMetres: Double, rel: Double?): List<String> {
+        val dist = MILESTONE_CLIP[milestoneMetres] ?: return emptyList()
+        val dir = directionClip(rel)
+        return if (dir != null) listOf(dist, dir) else listOf(dist)
+    }
+
+    private fun directionClip(rel: Double?): String? = DIRECTION_CLIP[vectorDirectionPhrase(rel)]
+
+    private fun fmtMetric(m: Double): String =
+        if (m < 1000) "${Math.round(m)} metres" else String.format(Locale.UK, "%.1f km", m / 1000.0)
+
+    /** Play the pre-baked clip sequence when every clip is present, else speak
+     *  the fallback line with TTS. Gated on the Voice toggle + rate limit. */
+    private fun playVoice(clipIds: List<String>, fallback: String, nowMs: Long, urgent: Boolean = false) {
+        if (!voice) return
+        if (!urgent && nowMs - lastVoiceAtMs < (Radar.VOICE_MIN_INTERVAL_SEC * 1000).toLong()) return
+        if (clipIds.isEmpty() && fallback.isEmpty()) return
+        lastVoiceAtMs = nowMs
+        if (clipIds.isNotEmpty() && clipIds.all { availableClips.contains(it) }) playClips(clipIds)
+        else ttsSpeak(fallback)
+    }
+
+    private fun ttsSpeak(text: String) {
+        if (!ttsReady || text.isEmpty()) return
+        try { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "radar") } catch (_: Exception) {}
+    }
+
+    private fun playClips(ids: List<String>) {
+        handler?.post {
+            clipQueue.clear()
+            clipQueue.addAll(ids)
+            try { clipPlayer?.release() } catch (_: Exception) {}
+            clipPlayer = null
+            playNextClip()
+        }
+    }
+
+    private fun playNextClip() {
+        val id = clipQueue.removeFirstOrNull() ?: return
+        try {
+            val afd = assets.openFd("public/voice/$id.mp3")
+            val mp = MediaPlayer()
+            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            mp.setOnCompletionListener { p -> try { p.release() } catch (_: Exception) {}; if (clipPlayer === p) clipPlayer = null; playNextClip() }
+            mp.setOnErrorListener { p, _, _ -> try { p.release() } catch (_: Exception) {}; if (clipPlayer === p) clipPlayer = null; true }
+            mp.prepare()
+            mp.start()
+            clipPlayer = mp
+        } catch (_: Exception) { clipQueue.clear() }
+    }
+
+    // ── Audio: short synthesised triangle beeps, panned in stereo ───────────
+
+    private fun playBurst(hz: Int, count: Int, pan: Double) {
+        for (i in 0 until count) handler?.postDelayed({ playTone(hz, BEEP_MS, pan) }, (i * 150).toLong())
+    }
+
+    /** One triangle blip, panned by turn direction (pan −1 left … +1 right) via
+     *  an equal-power stereo gain law — the native twin of Web Audio's StereoPanner. */
+    private fun playTone(hz: Int, durMs: Int, pan: Double) {
         if (hz <= 0) return
         try {
             val n = SAMPLE_RATE * durMs / 1000
-            val pcm = ShortArray(n)
+            val pcm = ShortArray(n * 2) // interleaved stereo L,R,L,R…
             val attack = (n / 8).coerceAtLeast(1)
+            val theta = (pan.coerceIn(-1.0, 1.0) + 1.0) * (Math.PI / 4.0)
+            val lGain = Math.cos(theta)
+            val rGain = Math.sin(theta)
             for (i in 0 until n) {
                 val phase = (i.toDouble() * hz / SAMPLE_RATE) % 1.0
                 val tri = if (phase < 0.5) 4 * phase - 1 else 3 - 4 * phase
                 val env = if (i < attack) i.toDouble() / attack else 1.0 - (i - attack).toDouble() / (n - attack)
-                pcm[i] = (tri * env * 0.32 * Short.MAX_VALUE).toInt().toShort()
+                val s = tri * env * 0.32 * Short.MAX_VALUE
+                pcm[2 * i] = (s * lGain).toInt().toShort()
+                pcm[2 * i + 1] = (s * rGain).toInt().toShort()
             }
             val track = AudioTrack(
                 AudioAttributes.Builder()
@@ -245,7 +469,7 @@ class RadarGuideService : Service() {
                 AudioFormat.Builder()
                     .setSampleRate(SAMPLE_RATE)
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
                     .build(),
                 pcm.size * 2, AudioTrack.MODE_STATIC, 0,
             )
@@ -317,11 +541,16 @@ class RadarGuideService : Service() {
         private const val BEEP_MS = 70
         private const val HEADING_MAX_AGE_MS = 3_000L
         private const val COURSE_MAX_AGE_SEC = 30.0
+        private const val RATE_ALPHA = 0.3
+        private const val BEARING_CHANGE_DEGREES = 30.0
+        private val DEGRADED_STATES = setOf("stale", "coarse", "no-fix", "unavailable")
         // Hard cap on the wakelock — a forgotten session must not hold it all
         // night. The service keeps running (FGS); only the wakelock lapses.
         private const val WAKELOCK_MAX_MS = 45 * 60_000L
 
         @Volatile private var instance: RadarGuideService? = null
+        /** The guide's currently-resolved mode, for the JS getMode bridge. */
+        @Volatile private var modeShared: String = "seek"
 
         // The selected target's latest permitted disclosure — set from JS via
         // RadarGuidePlugin before/while the service runs. @Volatile: written on
@@ -331,10 +560,13 @@ class RadarGuideService : Service() {
         @Volatile private var targetUncertaintyMetres: Double = 0.0
         @Volatile private var targetAtMs: Long = 0
         @Volatile var muted: Boolean = false
+        /** The voice (TTS) channel, mirroring the in-app toggle. */
+        @Volatile var voice: Boolean = true
         /** A stationary waypoint (a dropped pin): never age it to "stale". */
         @Volatile var evergreen: Boolean = false
 
         val active: Boolean get() = instance != null
+        val mode: String get() = modeShared
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, RadarGuideService::class.java))
@@ -367,7 +599,25 @@ class RadarGuideService : Service() {
             targetUncertaintyMetres = 0.0
             targetAtMs = 0
             muted = false
+            voice = true
             evergreen = false
+            modeShared = "seek"
         }
+
+        // Direction phrase → clip id (mirrors app/src/voiceClips.ts).
+        private val DIRECTION_CLIP = mapOf(
+            "straight ahead" to "dir-straight-ahead",
+            "ahead on your left" to "dir-ahead-left",
+            "ahead on your right" to "dir-ahead-right",
+            "to your left" to "dir-left",
+            "to your right" to "dir-right",
+            "behind you on your left" to "dir-behind-left",
+            "behind you on your right" to "dir-behind-right",
+            "behind you" to "dir-behind",
+        )
+        private val MILESTONE_CLIP = mapOf(
+            2000.0 to "dist-2km", 1000.0 to "dist-1km", 500.0 to "dist-500m",
+            250.0 to "dist-250m", 100.0 to "dist-100m",
+        )
     }
 }

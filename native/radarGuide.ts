@@ -20,18 +20,20 @@ export interface RadarGuideTarget {
 }
 
 interface RadarGuidePluginApi {
-  start(opts: Partial<RadarGuideTarget> & { muted?: boolean }): Promise<void>
+  start(opts: Partial<RadarGuideTarget> & { muted?: boolean; voice?: boolean }): Promise<void>
   updateTarget(target: RadarGuideTarget): Promise<void>
   setMuted(opts: { muted: boolean }): Promise<void>
+  setVoice(opts: { voice: boolean }): Promise<void>
   stop(): Promise<void>
   isActive(): Promise<{ value: boolean }>
+  getMode(): Promise<{ value: string }>
 }
 
 const RadarGuide = registerPlugin<RadarGuidePluginApi>('RadarGuide')
 
 /** Start native guidance (from an unlocked, foregrounded radar open). */
-export function startRadarGuide(target: RadarGuideTarget | null, muted: boolean): Promise<void> {
-  return RadarGuide.start({ ...(target ?? {}), muted }).catch(() => { /* old shell — foreground-only radar */ })
+export function startRadarGuide(target: RadarGuideTarget | null, muted: boolean, voice: boolean): Promise<void> {
+  return RadarGuide.start({ ...(target ?? {}), muted, voice }).catch(() => { /* old shell — foreground-only radar */ })
 }
 
 /** Push the selected person's fresh permitted disclosure to the native guide. */
@@ -44,6 +46,11 @@ export function setRadarGuideMuted(muted: boolean): Promise<void> {
   return RadarGuide.setMuted({ muted }).catch(() => { /* not running */ })
 }
 
+/** Turn the native voice (TTS) channel on/off, mirroring the in-app toggle. */
+export function setRadarGuideVoice(voice: boolean): Promise<void> {
+  return RadarGuide.setVoice({ voice }).catch(() => { /* not running / old shell */ })
+}
+
 /** Stop and silence the native guide immediately. */
 export function stopRadarGuide(): Promise<void> {
   return RadarGuide.stop().catch(() => { /* already gone */ })
@@ -52,4 +59,10 @@ export function stopRadarGuide(): Promise<void> {
 /** Is the native guide still running? (Its notification has its own Stop.) */
 export async function isRadarGuideActive(): Promise<boolean> {
   try { return (await RadarGuide.isActive()).value } catch { return false }
+}
+
+/** The native guide's currently-resolved mode (vector | seek | homing), or ''
+ *  when unavailable — lets the reopened JS scope reflect the locked-run mode. */
+export async function radarGuideMode(): Promise<string> {
+  try { return (await RadarGuide.getMode()).value } catch { return '' }
 }

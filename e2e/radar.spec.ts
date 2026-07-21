@@ -48,6 +48,12 @@ test.describe('radar navigation to a person', () => {
     // to distance guidance, not invent a bearing (the honesty rule).
     await expect(shell.locator('#radar-status')).toContainText(/no compass/i)
 
+    // v2: at ~700 m on foot the mode machine sits in SEEK — the on-foot band —
+    // and the new controls (Voice, mode chip) are present.
+    await expect(shell.locator('#radar-scope')).toHaveAttribute('data-mode', 'seek')
+    await expect(shell.locator('#radar-voice')).toBeVisible()
+    await expect(shell.locator('#radar-mode')).toContainText(/on foot/i)
+
     // From ~700 m the scope reads at the 1 km scale…
     await expect(shell.locator('#radar-range')).toHaveText('1.0 km')
 
@@ -61,6 +67,8 @@ test.describe('radar navigation to a person', () => {
     await setLocation(B, { latitude: LONDON.latitude + 0.00011, longitude: LONDON.longitude })
     await expect(shell.locator('#radar-range')).toHaveText('25 m')
     await expect(shell.locator('#radar-distance')).toHaveText(/^\d+ m$/)
+    // …and the endgame band has taken over: HOMING (the geiger face).
+    await expect(shell.locator('#radar-scope')).toHaveAttribute('data-mode', 'homing')
 
     // …and arrival is the true endgame: standing where A stands (1.4 m from
     // the disclosed geohash-9 cell centre) on the 10 m dial reads HERE.
@@ -80,6 +88,48 @@ test.describe('radar navigation to a person', () => {
     await findBtn.click()
     await expect(B.locator('#radar-shell')).toBeVisible()
     await B.locator('.radar-stop').click()
+    await expect(B.locator('#radar-shell')).toHaveCount(0)
+  })
+
+  // v2 mode machine: the far/vehicle band (VECTOR) auto-selects beyond ~2 km,
+  // and the manual mode chip PINS a mode over the auto choice ("Auto" resumes).
+  test('VECTOR is auto-selected far out, and the mode chip overrides', async ({ browser }) => {
+    const A = await newPerson(browser, LONDON)
+    // B starts ~3.3 km away — comfortably in the vehicle/far band.
+    const FAR = { latitude: LONDON.latitude + 0.03, longitude: LONDON.longitude }
+    const B = await newPerson(browser, FAR)
+    await createCircle(A, { name: 'Long haul' })
+    const code = await inviteCode(A)
+    await joinByCode(B, code)
+    await startSharing(A)
+    await setSharePrecision(A, 9) // precise, so distance is honest at range
+
+    const aPk = await myPubkey(A)
+    await gotoTab(B, 'circle')
+    const navBtn = B.locator(`.member-row [data-action="radar-member"][data-pk="${aPk}"]`)
+    await expect(navBtn).toBeVisible()
+    await navBtn.click()
+
+    const shell = B.locator('#radar-shell')
+    const scope = shell.locator('#radar-scope')
+    const chip = shell.locator('#radar-mode')
+    await expect(shell).toBeVisible()
+
+    // Beyond the far threshold the machine picks VECTOR unprompted; the big
+    // glanceable arrow is up and the chip shows Auto's choice.
+    await expect(scope).toHaveAttribute('data-mode', 'vector')
+    await expect(chip).toContainText(/auto.*vehicle/i)
+    await expect(shell.locator('#radar-arrow')).toBeVisible()
+
+    // Two taps pin On-foot (Auto → Vehicle → On foot), overriding the auto
+    // vehicle choice — proof the override wins and reads honestly.
+    await chip.click()
+    await expect(chip).toHaveText('Vehicle')
+    await chip.click()
+    await expect(chip).toHaveText('On foot')
+    await expect(scope).toHaveAttribute('data-mode', 'seek')
+
+    await shell.locator('.radar-stop').click()
     await expect(B.locator('#radar-shell')).toHaveCount(0)
   })
 })

@@ -77,7 +77,9 @@ const sel = {
   copyInvite: '[data-action="copy-invite"]',
   sendInvite: '[data-action="send-invite"]',
   toggleShare: '[data-action="toggle-share"]',
-  tab: (t: string) => `[data-action="tab"][data-tab="${t}"]`,
+  // The bottom-nav tab, NOT the Private-posture badge which reuses the same
+  // data-action/data-tab as a shortcut into the Circle tab (would be ambiguous).
+  tab: (t: string) => `[data-action="tab"][data-tab="${t}"]:not(.posture-badge)`,
 }
 
 /** Create a circle from the onboarding hero. Lands on the Circle tab. */
@@ -142,8 +144,14 @@ export async function gotoTab(page: Page, tab: 'home' | 'chat' | 'circle' | 'you
 }
 
 /** Ensure foreground location sharing is ON (beacons at the slider's precision).
- *  Sharing starts off, so this taps only when needed and remains idempotent. */
+ *  Sharing starts off, so this taps only when needed and remains idempotent.
+ *  A circle now defaults to the Private posture, under which Home shows no live
+ *  toggle (Private never continuously beacons) — so switch to Always-share
+ *  first, which is exactly what "start sharing" means. Idempotent. */
 export async function startSharing(page: Page): Promise<void> {
+  await gotoTab(page, 'circle')
+  const always = page.locator('[data-action="set-posture"][data-posture="always"]')
+  if (await always.count()) await always.click()
   await gotoTab(page, 'home')
   const toggle = page.locator(sel.toggleShare)
   try {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { headingFromOrientation, blipXY, niceRange, freshnessLabel, statusCopy, BLIP_MAX_RADIUS } from './radarView'
+import { headingFromOrientation, blipXY, niceRange, freshnessLabel, statusCopy, arrowAngleDeg, modeChipLabel, BLIP_MAX_RADIUS } from './radarView'
 import { radarGuidance } from '@forgesworn/flock'
 
 describe('headingFromOrientation', () => {
@@ -151,5 +151,54 @@ describe('statusCopy', () => {
     expect(statusCopy(stale, fmt)).toMatch(/stale/i)
     const noCompass = radarGuidance({ ...base, headingDeg: null, target: { position: { lat: 0.01, lon: 0 }, uncertaintyMetres: 2.4, ageSeconds: 5 } })
     expect(statusCopy(noCompass, fmt)).toMatch(/compass/i)
+  })
+
+  // v2: never claim a heading source the cue isn't using.
+  it('surfaces a compass overruled by course over ground', () => {
+    const g = radarGuidance({ ...base, target: { position: { lat: 0.01, lon: 0 }, uncertaintyMetres: 2.4, ageSeconds: 5 } })
+    expect(statusCopy(g, fmt, { headingStatus: 'compass-unreliable' })).toMatch(/compass unreliable/i)
+  })
+
+  // v2: HOMING with the arrow dropped reads as warmer/colder, not a false point.
+  it('reads warmer/colder in HOMING once the bearing is dropped', () => {
+    const g = radarGuidance({ ...base, target: { position: { lat: 0.00008, lon: 0 }, uncertaintyMetres: 2.4, ageSeconds: 5 }, myAccuracyMetres: 9 })
+    expect(g.bearingUsable).toBe(false)
+    expect(statusCopy(g, fmt, { mode: 'homing', trend: 'closing' })).toMatch(/warmer/i)
+    expect(statusCopy(g, fmt, { mode: 'homing', trend: 'receding' })).toMatch(/colder/i)
+  })
+})
+
+describe('arrowAngleDeg', () => {
+  const base = { me: { lat: 0, lon: 0 }, headingDeg: 45 }
+
+  it('points at the relative bearing when one is usable (heading-up)', () => {
+    const g = radarGuidance({ ...base, target: { position: { lat: 0.01, lon: 0 }, uncertaintyMetres: 2.4, ageSeconds: 5 } })
+    expect(arrowAngleDeg(g)).toBeCloseTo(g.relativeBearingDeg ?? NaN, 5)
+  })
+
+  it('is null when the bearing is not honestly usable (coarse / stale)', () => {
+    const coarse = radarGuidance({ ...base, target: { position: { lat: 0.01, lon: 0 }, uncertaintyMetres: 610, ageSeconds: 5 } })
+    expect(arrowAngleDeg(coarse)).toBeNull()
+  })
+
+  it('falls back to the true bearing north-up when there is no heading', () => {
+    const g = radarGuidance({ me: { lat: 0, lon: 0 }, headingDeg: null, target: { position: { lat: 0.01, lon: 0 }, uncertaintyMetres: 2.4, ageSeconds: 5 } })
+    // The bearing is still honest (fresh, precise, clear of uncertainty) — the
+    // arrow points to the true bearing north-up (0° = due north here).
+    expect(g.relativeBearingDeg).toBeNull()
+    expect(arrowAngleDeg(g)).toBeCloseTo(0, 5)
+  })
+})
+
+describe('modeChipLabel', () => {
+  it('shows Auto plus the resolved mode when unpinned', () => {
+    expect(modeChipLabel('vector', null)).toBe('Auto · Vehicle')
+    expect(modeChipLabel('homing', null)).toBe('Auto · Homing')
+    expect(modeChipLabel('seek', null)).toBe('Auto · On foot')
+  })
+
+  it('shows the pinned mode when overridden', () => {
+    expect(modeChipLabel('seek', 'vector')).toBe('Vehicle')
+    expect(modeChipLabel('vector', 'homing')).toBe('Homing')
   })
 })

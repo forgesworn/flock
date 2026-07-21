@@ -2924,7 +2924,7 @@ function openRadarFor(pk: string): void {
       // as a rough area on the scope, never as a precise pointer (FLOCK §6).
       return { lat: d.lat, lon: d.lon, uncertaintyMetres: precisionToRadius(b.precision), timestamp: b.timestamp }
     },
-    getMyFix: () => (fix ? { lat: fix.lat, lon: fix.lon, at: fix.at } : null),
+    getMyFix: () => (fix ? { lat: fix.lat, lon: fix.lon, at: fix.at, accuracy: fix.accuracy, heading: fix.heading ?? null, speed: fix.speed ?? null } : null),
     // A dedicated high-accuracy watch for MY side of the bearing while the
     // scope is up — purely local (only onFix-while-sharing ever publishes;
     // this callback just refreshes the local fix), torn down with the radar.
@@ -2949,7 +2949,7 @@ function openRadarForPin(pin: Pin): void {
     targetKey: { circleId: activeCircle()?.id ?? '', pk: `pin:${pin.id}` },
     targetName: () => pinKindLabel(pin.kind),
     getTarget: () => ({ lat: d.lat, lon: d.lon, uncertaintyMetres: 0, timestamp: nowSec() }),
-    getMyFix: () => (fix ? { lat: fix.lat, lon: fix.lon, at: fix.at } : null),
+    getMyFix: () => (fix ? { lat: fix.lat, lon: fix.lon, at: fix.at, accuracy: fix.accuracy, heading: fix.heading ?? null, speed: fix.speed ?? null } : null),
     startLocalFix: () => svc.watchLocation((f) => { fix = f }, () => { /* radar shows no-fix */ }, { highAccuracy: true }),
     fmtDistance,
     onClosed: () => { /* overlay self-removes */ },

@@ -2,7 +2,7 @@
 // unit-tested without a DOM. The controller (radarMode.ts) owns sensors,
 // audio and rendering; everything decidable from plain values lives here.
 
-import type { RadarGuidance } from '@forgesworn/flock'
+import type { RadarGuidance, RadarMode, HeadingStatus, Trend } from '@forgesworn/flock'
 
 /** Normalise an angle to [0, 360). */
 const norm360 = (deg: number): number => {
@@ -103,8 +103,16 @@ export function freshnessLabel(ageSeconds: number): string {
  * The one status line under the scope — plain words for every degraded state
  * ("stale", "rough area", "no compass"), empty when guidance is fully live so
  * the tracker stays quiet. `fmt` renders metres in the user's units.
+ *
+ * `extra` carries the v2 heading-source health, the active mode and the
+ * warmer/colder trend, so the line never claims a source the cue isn't using
+ * and the HOMING endgame reads honestly once the arrow is dropped.
  */
-export function statusCopy(g: RadarGuidance, fmt: (metres: number) => string): string {
+export function statusCopy(
+  g: RadarGuidance,
+  fmt: (metres: number) => string,
+  extra: { headingStatus?: HeadingStatus; mode?: RadarMode; trend?: Trend } = {},
+): string {
   switch (g.state) {
     case 'unavailable':
       return 'No location to navigate to — they may be private or out of reach'
@@ -117,8 +125,37 @@ export function statusCopy(g: RadarGuidance, fmt: (metres: number) => string): s
     case 'no-heading':
       return 'No compass — walk a few steps and follow the distance'
     case 'arrived':
-      return 'You’re here — look around'
-    case 'point':
+      return 'Within GPS reach — look around'
+    case 'point': {
+      // The compass has been overruled by course over ground — say so plainly.
+      if (extra.headingStatus === 'compass-unreliable') {
+        return 'Compass unreliable — using your direction of travel'
+      }
+      // HOMING with the arrow dropped (bearing is GPS fiction): warmer/colder.
+      if (extra.mode === 'homing' && !g.bearingUsable) {
+        return extra.trend === 'closing'
+          ? 'Closing in — getting warmer'
+          : extra.trend === 'receding'
+            ? 'Getting colder — turn around'
+            : 'Closing in — feel around'
+      }
       return ''
+    }
   }
+}
+
+/** The big directional arrow's rotation (deg clockwise): heading-up relative
+ *  bearing when we have a heading, north-up true bearing otherwise. null when
+ *  there is nothing honest to point at. VECTOR points relative to travel, so
+ *  the driver never aims the phone. */
+export function arrowAngleDeg(g: RadarGuidance): number | null {
+  if (!g.bearingUsable) return null
+  return g.relativeBearingDeg ?? g.bearingDeg
+}
+
+/** The mode chip's label: "Auto · <resolved>" when the machine is driving, else
+ *  the pinned mode's short name. */
+export function modeChipLabel(mode: RadarMode, override: RadarMode | null): string {
+  const short = (m: RadarMode): string => (m === 'vector' ? 'Vehicle' : m === 'homing' ? 'Homing' : 'On foot')
+  return override === null ? `Auto · ${short(mode)}` : short(override)
 }
