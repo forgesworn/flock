@@ -72,6 +72,21 @@ describe('Flock BLE reconciliation adapter', () => {
     expect(a.retention({ kind: 'presence', payload: '{}' }, { direction: 'inbound' })).toBeNull()
   })
 
+  it('passes a wider scan set to the plugin while advertising only the current UUID', async () => {
+    const scanUuids = ['uuid-prev', 'uuid-now', 'uuid-next']
+    await startBle({ room: 'uuid-now', selfId: 'alice', serviceUuid: 'uuid-now', scanUuids, hops: 0 }, () => {})
+    expect(sharedBle.start).toHaveBeenCalledOnce()
+    const opts = (sharedBle.start.mock.calls[0] as unknown as [Record<string, unknown>])[0]
+    expect(opts.serviceUuid).toBe('uuid-now') // we advertise only the current window
+    expect(opts.scanUuids).toEqual(scanUuids) // but scan the neighbouring windows too
+  })
+
+  it('omits scanUuids entirely when none is given (classic single-UUID scan)', async () => {
+    await startBle({ room: 'svc', selfId: 'alice', serviceUuid: 'svc' }, () => {})
+    const opts = (sharedBle.start.mock.calls[0] as unknown as [Record<string, unknown>])[0]
+    expect('scanUuids' in opts).toBe(false)
+  })
+
   it('reconciles on the learned peer route while old clients still receive raw wraps', async () => {
     const received: string[] = []
     await startBle(

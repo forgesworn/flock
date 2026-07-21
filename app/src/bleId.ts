@@ -101,3 +101,13 @@ export function meshUuid(epoch: number): string {
 export function meshUuidNow(nowSec: number, epochSeconds = BLE_MESH_EPOCH_SECONDS): string {
   return meshUuid(meshEpoch(nowSec, epochSeconds))
 }
+
+/** The crowd-mesh UUIDs to scan-filter for: {epoch-1, epoch, epoch+1}. The mesh
+ *  epoch is daily, so a boundary is rare — but two phones either side of midnight
+ *  UTC would otherwise compute different UUIDs and miss each other for a beat. We
+ *  still advertise only the current epoch (meshUuidNow); this widens discovery
+ *  across that boundary, mirroring advertIdsToScan for the discreet mode. */
+export function meshUuidsToScan(nowSec: number, epochSeconds = BLE_MESH_EPOCH_SECONDS): string[] {
+  const e = meshEpoch(nowSec, epochSeconds)
+  return [meshUuid(e - 1), meshUuid(e), meshUuid(e + 1)]
+}
