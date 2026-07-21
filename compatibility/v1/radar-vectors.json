@@ -1931,6 +1931,26 @@
       },
       "distanceMetres": 0,
       "expected": "Now at your 11 o'clock"
+    },
+    {
+      "kind": "moved",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 1000,
+      "expected": "They've moved — 1000 m, at your 11 o'clock"
     }
   ]
 }

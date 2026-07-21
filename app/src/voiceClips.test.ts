@@ -70,6 +70,13 @@ describe('voiceClipSeq', () => {
       .toEqual(['dist-300m', 'clock-3'])
   })
 
+  it("a target move leads with the moved clip, then the range line", () => {
+    expect(voiceClipSeq({ kind: 'moved', roundedMetres: 300, relativeBearingDeg: 90 }))
+      .toEqual(['state-moved', 'dist-300m', 'clock-3'])
+    expect(voiceClipSeq({ kind: 'moved', roundedMetres: 300, relativeBearingDeg: null }))
+      .toEqual(['state-moved', 'dist-300m'])
+  })
+
   it('mode + arrival + degradation map to their single clips', () => {
     expect(voiceClipSeq({ kind: 'mode', mode: 'vector' })).toEqual(['mode-vector'])
     expect(voiceClipSeq({ kind: 'arrived' })).toEqual(['state-arrived'])

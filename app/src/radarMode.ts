@@ -127,6 +127,8 @@ interface RadarSession {
   lastVoiceBearing: number | null
   /** When the minute-cadence range/clock line last spoke (v2.1). */
   lastPeriodicAtMs: number
+  /** A genuine target move landed and its spoken interrupt is still owed. */
+  movedAnnouncePending: boolean
   /** When the native compass mirror last delivered (0 = never): while it is
    *  fresh it owns s.compassHeading and the DOM orientation event stands down. */
   nativeHeadingAtMs: number
@@ -223,6 +225,7 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
     voiceLastAtMs: 0,
     lastVoiceBearing: null,
     lastPeriodicAtMs: 0,
+    movedAnnouncePending: false,
     nativeHeadingAtMs: 0,
     voiceBuffers: new Map(),
     wakeLock: null,
@@ -382,6 +385,7 @@ function syncTarget(s: RadarSession): void {
     // must feel the direction change without looking (goal §6).
     if (targetMoved(s.lastObservation, { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres })) {
       movedPulse(s)
+      s.movedAnnouncePending = true // the spoken twin rides the next tick's guidance
     }
     if (s.nativeGuide) {
       void nativeGuideApi().then((m) =>
@@ -577,6 +581,21 @@ function announceVoice(s: RadarSession, g: RadarGuidance, mode: RadarMode, nowMs
   if (degraded && !wasDegraded) {
     playVoice(s, voiceClipSeq({ kind: 'degraded', state: g.state }), voiceLine({ kind: 'degraded', state: g.state }, g, s.host.fmtDistance), nowMs)
     return
+  }
+
+  // A genuine target move (v2.1): the spoken twin of the moved pulse — beacons
+  // are sparse (cell-gated, >=45 s), so each one landing must be unmissable.
+  if (s.movedAnnouncePending) {
+    s.movedAnnouncePending = false
+    if (g.distanceMetres !== null) {
+      const rounded = speakableDistanceMetres(g.distanceMetres)
+      if (playVoice(s,
+        voiceClipSeq({ kind: 'moved', roundedMetres: rounded, relativeBearingDeg: g.bearingUsable ? g.relativeBearingDeg : null }),
+        voiceLine({ kind: 'moved', distanceMetres: rounded }, g, s.host.fmtDistance), nowMs)) {
+        s.lastPeriodicAtMs = nowMs // a moved line is this minute's range callout too
+      }
+      return
+    }
   }
 
   // VECTOR: milestone crossings + sustained bearing swings lead the channel.

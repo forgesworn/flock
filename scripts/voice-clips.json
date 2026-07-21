@@ -36,6 +36,7 @@
   "dist-5km": "Five kilometres.",
   "dist-10km": "Ten kilometres.",
   "state-arrived": "Within GPS reach. Look around.",
+  "state-moved": "They've moved.",
   "mode-vector": "Vehicle mode.",
   "mode-seek": "On foot tracking.",
   "mode-homing": "Closing in.",

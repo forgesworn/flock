@@ -31,7 +31,7 @@ const DIST_CLIP: Record<number, string> = {
 export const VOICE_CLIP_IDS = [
   ...Array.from({ length: 12 }, (_, i) => `clock-${i + 1}`),
   ...SPEAKABLE_DISTANCES_METRES.map((m) => DIST_CLIP[m]),
-  'state-arrived', 'mode-vector', 'mode-seek', 'mode-homing', 'state-compass-unreliable',
+  'state-arrived', 'state-moved', 'mode-vector', 'mode-seek', 'mode-homing', 'state-compass-unreliable',
   'state-stale', 'state-coarse', 'state-no-fix', 'state-unavailable',
 ] as const
 
@@ -54,6 +54,8 @@ export type VoiceClipEvent =
   /** The minute-cadence range + clock line (v2.1). `relativeBearingDeg` is
    *  pre-gated by the caller: null whenever the bearing isn't honestly usable. */
   | { kind: 'periodic'; roundedMetres: number; relativeBearingDeg: number | null }
+  /** A genuine target move (v2.1): "They've moved." then the range line. */
+  | { kind: 'moved'; roundedMetres: number; relativeBearingDeg: number | null }
 
 /** "<range clip>, <clock clip>" — the clock rides only an honest bearing. */
 function rangeSeq(metres: number, relativeBearingDeg: number | null): string[] {
@@ -79,6 +81,8 @@ export function voiceClipSeq(ev: VoiceClipEvent): string[] {
       return rangeSeq(ev.milestoneMetres, ev.relativeBearingDeg)
     case 'periodic':
       return rangeSeq(ev.roundedMetres, ev.relativeBearingDeg)
+    case 'moved':
+      return ['state-moved', ...rangeSeq(ev.roundedMetres, ev.relativeBearingDeg)]
     case 'bearing-change': {
       const dir = clockClip(ev.relativeBearingDeg)
       return dir ? [dir] : []

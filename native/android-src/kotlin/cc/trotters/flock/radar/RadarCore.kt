@@ -463,7 +463,7 @@ fun speakableDistanceMetres(metres: Double): Double {
 
 /** Assemble one spoken line. `fmtDistance` renders metres in the user's units. */
 fun voiceLine(
-    kind: String, // milestone | periodic | bearing-change | mode | compass-unreliable | arrived | degraded
+    kind: String, // milestone | periodic | moved | bearing-change | mode | compass-unreliable | arrived | degraded
     g: RadarGuidance,
     distanceMetres: Double = 0.0,
     mode: String = "seek",
@@ -476,6 +476,7 @@ fun voiceLine(
     return when (kind) {
         "milestone" -> withClock(fmtDistance(distanceMetres).replace("~", ""))
         "periodic" -> withClock(fmtDistance(distanceMetres).replace("~", ""))
+        "moved" -> "They've moved — ${withClock(fmtDistance(distanceMetres).replace("~", ""))}"
         "bearing-change" -> {
             val c = clockFacePhrase(g.relativeBearingDeg)
             if (c.isEmpty()) "" else "Now $c"

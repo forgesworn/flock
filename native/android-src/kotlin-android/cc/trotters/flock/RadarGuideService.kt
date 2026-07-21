@@ -122,6 +122,7 @@ class RadarGuideService : Service() {
     private var lastVoiceAtMs: Long = 0
     private var lastVoiceBearing: Double? = null
     private var lastPeriodicAtMs: Long = 0
+    @Volatile private var movedAnnouncePending = false
 
     // Voice: pre-baked clips (from assets) + Android TTS fallback.
     private var tts: TextToSpeech? = null
@@ -356,8 +357,11 @@ class RadarGuideService : Service() {
         handler?.postDelayed({ tickAndSchedule() }, if (cue.pattern == "silent") 300 else cue.periodMs)
     }
 
-    /** The distinct "target moved" interrupt (rising two-note + short triple). */
+    /** The distinct "target moved" interrupt (rising two-note + short triple).
+     *  Also owes the spoken twin — beacons are sparse (cell-gated, ≥45 s), so a
+     *  landing disclosure must be unmissable by ear (v2.1). */
     private fun movedPulse() {
+        movedAnnouncePending = true
         handler?.post {
             if (!running) return@post
             if (!muted) { playTone(660, 90, 0.0); handler?.postDelayed({ playTone(1320, 90, 0.0) }, 110) }
@@ -384,6 +388,18 @@ class RadarGuideService : Service() {
         val wasDegraded = lastState in DEGRADED_STATES
         if (degraded && !wasDegraded) {
             playVoice(listOf("state-${g.state}"), voiceLine("degraded", g, degradedState = g.state), nowMs); return
+        }
+        // A genuine target move (v2.1): the spoken twin of the moved pulse.
+        if (movedAnnouncePending) {
+            movedAnnouncePending = false
+            val md = g.distanceMetres
+            if (md != null) {
+                val rounded = speakableDistanceMetres(md)
+                if (playVoice(listOf("state-moved") + rangeClips(rounded, g), voiceLine("moved", g, distanceMetres = rounded, fmtDistance = { m -> fmtMetric(m) }), nowMs)) {
+                    lastPeriodicAtMs = nowMs
+                }
+                return
+            }
         }
         if (mode == "vector" && g.bearingUsable && g.distanceMetres != null) {
             val ms = crossedMilestone(lastDistance, g.distanceMetres!!)
