@@ -8,7 +8,11 @@ const budgets = [
   {
     label: 'main',
     match: /^index-[\w-]+\.js$/,
-    raw: 360_000,
+    // Raised 360k → 364k for radar Phase 3 + universal direction callouts
+    // (2026-07-21) AFTER real splitting (the RSSI window machinery lives in
+    // the lazy native/ble.ts chunk) — what remains is eager radar-path code.
+    // The gzip budget, the delivery metric, is deliberately unchanged.
+    raw: 364_000,
     gzip: 125_000,
   },
   {
