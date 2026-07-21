@@ -115,6 +115,7 @@ describe('clear/sync sentinel behaviour', () => {
     await m.syncNativePublishConfig({
       v: 1, skHex: 'aa'.repeat(32), circleId: 'c1', seedHex: 'cc'.repeat(32),
       precision: 7, festivalUntil: 0, relayUrls: ['wss://r1'], noReportZones: [], offGridUntil: 0,
+      sessionMinIntervalSec: 0, sessionHeartbeatSec: 0, sessionUntilSec: 0,
     })
     expect(setConfig).not.toHaveBeenCalled()
     await m.clearNativePublish()

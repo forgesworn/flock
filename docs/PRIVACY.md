@@ -156,6 +156,26 @@ coercer's hand. A forensic image of the browser profile still finds an opaque bl
 phrase. Hiding never emits anything — under real duress, the silent long-press on
 "Stop sharing" alarms the circle first, then hide.
 
+## Live navigation under pressure — the radar session
+
+A radar session (FLOCK.md §3 "Radar sessions") briefly lifts beacon **cadence**
+for an active meet-up — which makes "accept my session" exactly the kind of
+demand a coercive requester would make. The design answers with the same
+withholding-indistinguishability rule as everything else:
+
+- **Ignoring is the only "no".** There is no decline control and no decline
+  payload; an ignored ask expires on the requester's side identically to a
+  phone in a pocket, a dead battery, or an old app version.
+- **Stopping is not a confession.** A session ends by expiry or either side's
+  Stop, and the other end sees the same neutral ending either way — no reason
+  is ever carried or shown.
+- **Nothing to find afterwards.** Session signals never enter the DM thread and
+  no session state is persisted; a searched phone shows nothing.
+- **No power beyond cadence.** A session never raises precision past the
+  member's chosen posture, and no-report zones cap or withhold exactly as
+  without one — "share exactly, faster" cannot be extracted from someone whose
+  posture says otherwise.
+
 ## The device at rest — the App lock
 
 The complement to the decoy (keystore-kit, Phase E): an opt-in **PIN** puts the
