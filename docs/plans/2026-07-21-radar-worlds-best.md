@@ -8,9 +8,13 @@
   RSSI + MeshBleRssiBus), flock-kit b8429b0 (banding/blend/hold/voice),
   flock e32dc7c (JS + locked-phone parity, JVM vectors green). Awaiting the
   indoor person-in-crowd field test (radar-v2 acceptance test 4).
-- **B — radar session: designed** (`2026-07-21-radar-session-design.md`);
-  kit pure rules shipped (`radarSession` module, kit 41ebde9). App/native
-  implementation is the next slice.
+- **B — radar session: SHIPPED** (flock main 75f03a6, same night). Full
+  consent loop over the pair inbox (rs-discriminated DM payloads; ignore-only,
+  no stop reasons, no history), 5 s/30 s cadence lift in BOTH publishers
+  (native expires on its own clock via sessionUntilSec), session vectors in
+  the kit (7e22b0b), e2e proving the loop + the lift between two people.
+  Deployed to both phones (build stamp 75f03a6). Awaiting the two-phone
+  walking field test.
 - **C — quick wins: SHIPPED** in e32dc7c (geo: hand-off chip, wake-lock
   renewal both sides). The 500 ms tick-lag item remains open.
 - **NEW (field feedback, same day): universal direction callouts SHIPPED** —
