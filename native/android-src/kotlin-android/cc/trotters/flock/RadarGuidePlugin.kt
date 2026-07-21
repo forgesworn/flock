@@ -39,6 +39,7 @@ class RadarGuidePlugin : Plugin() {
                 lat, lon,
                 call.getDouble("uncertaintyMetres") ?: 0.0,
                 call.getLong("timestampMs") ?: 0L,
+                call.getString("meshPeerId"),
             )
         }
         RadarGuideService.start(context)
@@ -56,6 +57,7 @@ class RadarGuidePlugin : Plugin() {
             lat, lon,
             call.getDouble("uncertaintyMetres") ?: 0.0,
             call.getLong("timestampMs") ?: 0L,
+            call.getString("meshPeerId"),
         )
         call.resolve()
     }

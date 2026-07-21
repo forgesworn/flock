@@ -17,6 +17,10 @@ export interface RadarGuideTarget {
   /** A stationary waypoint (dropped pin): the native guide re-stamps its own age
    *  from the live GPS clock so it never decays to the "stale" cue while locked. */
   evergreen?: boolean
+  /** The target member's mesh peer id (their pubkey), for BLE RSSI attribution
+   *  while locked (radar-v2 Phase 3). Omitted/null for a pin — pins carry no
+   *  radio, so the native guide never arms sampling for one. */
+  meshPeerId?: string | null
 }
 
 interface RadarGuidePluginApi {
