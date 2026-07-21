@@ -13,6 +13,7 @@
 // also rotate) — nothing static ever hits the air (app/src/bleId.ts).
 
 import { MeshBle } from 'capacitor-mesh-ble'
+import type { MeshBleRssiSample, MeshBleStartRssiSamplingOptions } from 'capacitor-mesh-ble'
 import type { PluginListenerHandle } from '@capacitor/core'
 import {
   MESH_SYNC_KIND,
@@ -226,4 +227,30 @@ export async function sendBle(peer: string, data: string): Promise<void> {
 
 export function getBleReliabilityStats(): MeshReliabilityStats | null {
   return reliability?.stats() ?? null
+}
+
+// ── RSSI proximity (radar Phase 3) ───────────────────────────────────────────
+// Off by default (battery cost) — a caller (radarMode.ts) turns sampling on
+// only while it has an identified member target to attribute samples to, and
+// stops it unconditionally when done. Samples are attributed by the plugin
+// ONLY to a peer id already bound by a prior in-room frame exchange — never
+// to a raw, unauthenticated advert.
+
+/** Turn on periodic RSSI sampling. Idempotent (re-calling just updates the
+ *  interval); a no-op on iOS/web/older shells. */
+export async function startRssiSampling(opts: MeshBleStartRssiSamplingOptions = {}): Promise<void> {
+  try { await MeshBle.startRssiSampling(opts) } catch { /* android only / older shell */ }
+}
+
+/** Stop RSSI sampling. Idempotent — safe even if never started. */
+export async function stopRssiSampling(): Promise<void> {
+  try { await MeshBle.stopRssiSampling() } catch { /* not running */ }
+}
+
+/** Subscribe to attributed RSSI samples. Returns a handle; call `.remove()` to
+ *  stop. A shell without the event simply never fires it. */
+export async function addRssiListener(
+  onRssi: (sample: MeshBleRssiSample) => void,
+): Promise<PluginListenerHandle> {
+  return MeshBle.addListener('rssi', (e) => onRssi(e))
 }

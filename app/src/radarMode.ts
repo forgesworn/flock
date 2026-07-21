@@ -28,12 +28,15 @@ import {
   voiceLine,
   speakableDistanceMetres,
   haversineMetres,
+  bleProximityFromRssi,
+  bleAssistUsable,
   RADAR,
   type RadarCue,
   type RadarGuidance,
   type RadarMode,
   type HeadingStatus,
   type TimedPosition,
+  type BleProximity,
 } from '@forgesworn/flock'
 import { headingFromOrientation, blipXY, niceRange, freshnessLabel, statusCopy, arrowAngleDeg, modeChipLabel } from './radarView'
 import { VOICE_CLIP_IDS, voiceClipSeq } from './voiceClips'
@@ -54,6 +57,11 @@ export interface RadarHost {
   layer: HTMLElement
   /** Which disclosure this radar consumes — lets the beacon path notify us. */
   targetKey: { circleId: string; pk: string }
+  /** The target member's mesh peer id (their pubkey — the mesh's `selfId` IS
+   *  the member's pk, learned via the in-room frame exchange), for BLE RSSI
+   *  attribution (radar-v2 Phase 3). Null/omitted for a pin — pins carry no
+   *  radio, so radar never samples for one. */
+  meshPeerId?: string | null
   targetName: () => string
   /** The selected member's latest already-permitted disclosure, or null. */
   getTarget: () => RadarTargetFeed | null
@@ -80,6 +88,12 @@ const RATE_ALPHA = 0.3
 const VOICE_MIN_INTERVAL_MS = RADAR.voiceMinIntervalSec * 1000
 /** A sustained relative-bearing swing beyond this (VECTOR) re-announces the side. */
 const BEARING_CHANGE_DEGREES = 30
+/** BLE RSSI sampling interval — battery-conscious, plenty for a median window. */
+const BLE_SAMPLE_INTERVAL_MS = 2000
+/** Samples older than this age out of the proximity window. */
+const BLE_WINDOW_MAX_AGE_MS = 12_000
+/** Window depth cap — a rolling median, not a full history. */
+const BLE_WINDOW_MAX_SAMPLES = 10
 
 const SILENT_CUE: RadarCue = { pattern: 'silent', periodMs: 0, toneHz: 0, vibrateMs: [], pan: 0, sign: null, trend: null }
 
@@ -140,6 +154,22 @@ interface RadarSession {
    *  keeps the visuals. */
   nativeGuide: boolean
   nativeCheck: number
+  // ── Phase 3: BLE RSSI proximity assist ──
+  /** Is sampling currently ON (startRssiSampling called and not yet stopped)?
+   *  Re-evaluated every tick against the live disclosure — armed only for a
+   *  MEMBER target (never a pin) whose current share is not coarse. */
+  bleArmed: boolean
+  /** Guards overlapping arm/disarm calls (both are async). */
+  bleArming: boolean
+  bleListenerAttached: boolean
+  removeBleListener: (() => void) | null
+  bleSamples: { rssi: number; atMs: number }[]
+  bleProximity: BleProximity
+  lastBleProximity: BleProximity
+  /** mode === 'homing' AND the band is honestly usable AND immediate — the
+   *  combined "very close, by radio" claim the status line and voice share. */
+  bleClose: boolean
+  lastBleClose: boolean
   closed: boolean
 }
 
@@ -147,6 +177,15 @@ interface RadarSession {
 const nativeGuideApi = async (): Promise<typeof import('../../native/radarGuide') | null> => {
   if (!isNativeShell()) return null
   try { return await import('../../native/radarGuide') } catch { return null }
+}
+
+/** The mesh-BLE bridge, when the shell provides it (lazy, cached like
+ *  nativeGuideApi) — radar's own RSSI window is a THIN consumer of the mesh
+ *  the app already owns (app.ts syncBle); it never starts/stops the mesh
+ *  itself, only the opt-in RSSI sampler layered on top of it. */
+const bleApi = async (): Promise<typeof import('../../native/ble') | null> => {
+  if (!isNativeShell()) return null
+  try { return await import('../../native/ble') } catch { return null }
 }
 
 let session: RadarSession | null = null
@@ -172,6 +211,12 @@ export function closeRadar(): void {
   void s.wakeLock?.release().catch(() => { /* already released */ })
   void s.audio?.close().catch(() => { /* already closed */ })
   if (s.nativeGuide) void nativeGuideApi().then((m) => m?.stopRadarGuide())
+  // BLE RSSI sampling: always stop on close (the only consumer today — no
+  // arm-tracking needed to avoid fighting another feature). Idempotent even
+  // if never started (never armed for a pin / mesh off / coarse share).
+  s.removeBleListener?.()
+  s.removeBleListener = null
+  if (s.host.meshPeerId) void bleApi().then((m) => m?.stopRssiSampling())
   s.el.remove()
   s.host.onClosed()
 }
@@ -231,6 +276,15 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
     wakeLock: null,
     nativeGuide: false,
     nativeCheck: 0,
+    bleArmed: false,
+    bleArming: false,
+    bleListenerAttached: false,
+    removeBleListener: null,
+    bleSamples: [],
+    bleProximity: null,
+    lastBleProximity: null,
+    bleClose: false,
+    lastBleClose: false,
     closed: false,
   }
   const s = session
@@ -276,6 +330,69 @@ async function acquireWakeLock(s: RadarSession): Promise<void> {
     ;(sentinel as unknown as { addEventListener?: (t: string, cb: () => void) => void })
       .addEventListener?.('release', () => { if (s.wakeLock === sentinel) s.wakeLock = null })
   } catch { /* wake lock unavailable — the visuals just may sleep */ }
+}
+
+// ── BLE proximity (radar-v2 Phase 3) ───────────────────────────────────────
+// A THIN consumer of the mesh app.ts already owns: this never starts or stops
+// the mesh transport itself, only the opt-in RSSI sampler layered on top of
+// it, and only while radar has an armed MEMBER target. Attribution comes from
+// the plugin (an RSSI sample is only ever tagged with a mesh peer id already
+// bound to that member by an authenticated frame exchange — never a raw,
+// unattributed advert), so filtering on `sample.peer === meshPeerId` here is
+// exactly the "identified GATT link" rule from the design doc, not an
+// additional trust decision.
+
+/** Start sampling + attach the peer-filtered listener, if not already armed.
+ *  Best-effort throughout: BLE unavailable/denied/older-shell just leaves the
+ *  proximity window empty (the honesty gates already treat that as "no band"). */
+async function armBle(s: RadarSession): Promise<void> {
+  const peer = s.host.meshPeerId
+  if (!peer) return
+  const ble = await bleApi()
+  if (!ble || s.closed || !ble.bleRunning()) return
+  if (!s.bleListenerAttached) {
+    const handle = await ble.addRssiListener((sample) => {
+      if (s.closed || sample.peer !== peer) return
+      s.bleSamples = [...s.bleSamples, { rssi: sample.rssi, atMs: sample.at }].slice(-BLE_WINDOW_MAX_SAMPLES)
+    })
+    if (s.closed) { void handle.remove().catch(() => { /* gone */ }); return }
+    s.bleListenerAttached = true
+    s.removeBleListener = () => { void handle.remove().catch(() => { /* already removed */ }) }
+  }
+  await ble.startRssiSampling({ intervalMs: BLE_SAMPLE_INTERVAL_MS })
+  if (s.closed) { void ble.stopRssiSampling(); return }
+  s.bleArmed = true
+}
+
+/** Stop sampling and drop the window immediately — a disclosure going coarse
+ *  (or the mesh dropping) must decay the band to null on THIS tick, not linger
+ *  on stale samples until they age out on their own. */
+async function disarmBle(s: RadarSession): Promise<void> {
+  s.bleSamples = []
+  s.bleProximity = null
+  const ble = await bleApi()
+  if (ble) await ble.stopRssiSampling()
+  s.bleArmed = false
+}
+
+/** Re-evaluate arm/disarm against the LIVE disclosure every tick — never start
+ *  sampling for a pin (no `meshPeerId`) or a deliberately coarse share, and
+ *  disarm immediately if a share that was precise becomes coarse mid-session. */
+function syncBleArm(s: RadarSession, target: { uncertaintyMetres: number } | null): void {
+  const wantArmed = !!s.host.meshPeerId && target !== null && target.uncertaintyMetres <= RADAR.coarseUncertaintyMetres
+  if (wantArmed === s.bleArmed || s.bleArming) return
+  s.bleArming = true
+  void (wantArmed ? armBle(s) : disarmBle(s)).finally(() => { s.bleArming = false })
+}
+
+/** Age out + cap the rolling window, then re-derive the band. Runs every tick
+ *  regardless of arm state so a window that goes quiet (mesh drops, member
+ *  walks out of range) decays to null within one window's width — an empty
+ *  window is exactly what a disarm leaves behind too. */
+function updateBleWindow(s: RadarSession): void {
+  const cutoff = Date.now() - BLE_WINDOW_MAX_AGE_MS
+  s.bleSamples = s.bleSamples.filter((x) => x.atMs >= cutoff).slice(-BLE_WINDOW_MAX_SAMPLES)
+  s.bleProximity = bleProximityFromRssi(s.bleSamples.map((x) => x.rssi))
 }
 
 // ── Sensors ──────────────────────────────────────────────────────────────────
@@ -413,6 +530,12 @@ function tick(s: RadarSession): void {
     ? { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres, ageSeconds: Math.max(0, nowSec - t.timestamp) }
     : null
 
+  // BLE RSSI proximity (Phase 3): re-check arm/disarm against the LIVE
+  // disclosure, then age/derive the window — every tick, mirroring how the
+  // heading/mode machinery below re-reads live sensor state each cycle.
+  syncBleArm(s, target)
+  updateBleWindow(s)
+
   // The native guide's notification has its own Stop — if the user ended the
   // session from the lock screen, the reopened tracker must not linger.
   if (s.nativeGuide && !document.hidden && ++s.nativeCheck % 4 === 0) {
@@ -442,6 +565,7 @@ function tick(s: RadarSession): void {
     fastForSec,
     slowForSec,
     uncertaintyMetres: target?.uncertaintyMetres ?? null,
+    bleProximity: s.bleProximity,
   })
   s.mode = mode
 
@@ -473,13 +597,20 @@ function tick(s: RadarSession): void {
     try { navigator.vibrate?.(cueFor(g).vibrateMs) } catch { /* no haptics */ }
   }
 
+  // The combined "very close, by radio" claim: HOMING + an honestly-usable
+  // (non-coarse, GPS-near) immediate band. Shared by the status line and the
+  // voice transition below — one source of truth for the honesty gate.
+  s.bleClose = mode === 'homing' && s.bleProximity === 'immediate' && bleAssistUsable(g, s.bleProximity)
+
   announceVoice(s, g, mode, nowMs)
 
   s.lastState = g.state
   s.lastHeadingStatus = s.headingStatus
   s.lastAnnouncedMode = mode
+  s.lastBleProximity = s.bleProximity
+  s.lastBleClose = s.bleClose
   if (g.distanceMetres !== null) { s.lastDistance = g.distanceMetres; s.lastDistanceAtMs = nowMs }
-  s.cue = cueFor(g, { mode, closingRateMps: s.closingRate })
+  s.cue = cueFor(g, { mode, closingRateMps: s.closingRate, bleProximity: s.bleProximity })
   patchScope(s, g, target?.ageSeconds ?? null, heading, mode)
 }
 
@@ -580,6 +711,14 @@ function announceVoice(s: RadarSession, g: RadarGuidance, mode: RadarMode, nowMs
   const wasDegraded = s.lastState === 'stale' || s.lastState === 'coarse' || s.lastState === 'no-fix' || s.lastState === 'unavailable'
   if (degraded && !wasDegraded) {
     playVoice(s, voiceClipSeq({ kind: 'degraded', state: g.state }), voiceLine({ kind: 'degraded', state: g.state }, g, s.host.fmtDistance), nowMs)
+    return
+  }
+
+  // BLE proximity (Phase 3): the band just became honestly "very close" while
+  // homing — radio confirming a story GPS alone can't finish indoors. Rate-
+  // limited like every other line; never a distance, never a direction.
+  if (s.bleClose && !s.lastBleClose) {
+    playVoice(s, voiceClipSeq({ kind: 'ble-close' }), voiceLine({ kind: 'ble-close' }, g, s.host.fmtDistance), nowMs)
     return
   }
 
@@ -704,7 +843,7 @@ function patchScope(s: RadarSession, g: RadarGuidance, ageSeconds: number | null
       ? 'HERE'
       : g.distanceMetres === null ? '—' : s.host.fmtDistance(g.distanceMetres).replace('~', '')
   }
-  if (status) status.textContent = statusCopy(g, s.host.fmtDistance, { headingStatus: s.headingStatus, mode, trend: s.cue.trend })
+  if (status) status.textContent = statusCopy(g, s.host.fmtDistance, { headingStatus: s.headingStatus, mode, trend: s.cue.trend, bleClose: s.bleClose })
   if (modeChip) modeChip.textContent = modeChipLabel(mode, s.modeOverride)
 }
 

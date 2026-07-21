@@ -111,7 +111,7 @@ export function freshnessLabel(ageSeconds: number): string {
 export function statusCopy(
   g: RadarGuidance,
   fmt: (metres: number) => string,
-  extra: { headingStatus?: HeadingStatus; mode?: RadarMode; trend?: Trend } = {},
+  extra: { headingStatus?: HeadingStatus; mode?: RadarMode; trend?: Trend; bleClose?: boolean } = {},
 ): string {
   switch (g.state) {
     case 'unavailable':
@@ -130,6 +130,11 @@ export function statusCopy(
       // The compass has been overruled by course over ground — say so plainly.
       if (extra.headingStatus === 'compass-unreliable') {
         return 'Compass unreliable — using your direction of travel'
+      }
+      // BLE confirms "very close" (Phase 3) — radio words, never a distance,
+      // and it takes priority over the GPS-only warmer/colder fallback below.
+      if (extra.mode === 'homing' && extra.bleClose) {
+        return 'Very close — by Bluetooth'
       }
       // HOMING with the arrow dropped (bearing is GPS fiction): warmer/colder.
       if (extra.mode === 'homing' && !g.bearingUsable) {

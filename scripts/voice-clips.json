@@ -1,5 +1,5 @@
 {
-  "_comment": "Canonical radar voice vocabulary. id -> spoken text. Generated ONCE into app/public/voice/<id>.mp3 by scripts/gen-voice-clips.mjs (OpenAI TTS). Kept in sync with app/src/voiceClips.ts by voiceClips.test.ts. British English, calm navigation tone. v2.1: clock-face directions + the full speakable range ladder.",
+  "_comment": "Canonical radar voice vocabulary. id -> spoken text. Generated ONCE into app/public/voice/<id>.mp3 by scripts/gen-voice-clips.mjs (OpenAI TTS). Kept in sync with app/src/voiceClips.ts by voiceClips.test.ts. British English, calm navigation tone. v2.1: clock-face directions + the full speakable range ladder. Phase 3: BLE proximity — radio words only, never a distance.",
   "clock-1": "At your 1 o'clock.",
   "clock-2": "At your 2 o'clock.",
   "clock-3": "At your 3 o'clock.",
@@ -44,5 +44,6 @@
   "state-stale": "Their location is stale. Follow with care.",
   "state-coarse": "Rough area only.",
   "state-no-fix": "Waiting for your position.",
-  "state-unavailable": "No location to navigate to."
+  "state-unavailable": "No location to navigate to.",
+  "state-ble-close": "Very close. By Bluetooth."
 }

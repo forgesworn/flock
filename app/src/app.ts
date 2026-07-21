@@ -2915,6 +2915,12 @@ function openRadarFor(pk: string): void {
   openRadar({
     layer: overlayLayer,
     targetKey: { circleId, pk },
+    // The mesh's `selfId` IS a member's pubkey (syncBle sends id.pk), learned
+    // as the mesh peer id via the in-room frame exchange — so a member's mesh
+    // peer id is simply their pk. BLE RSSI samples are only ever attributed by
+    // the plugin to an already-identified peer, so this is the exact
+    // "identified GATT link" the honesty rule requires, not a new trust call.
+    meshPeerId: pk,
     targetName: () => nameFor(pk),
     getTarget: () => {
       const b = cstate(circleId).beacons.get(pk)
@@ -2947,6 +2953,8 @@ function openRadarForPin(pin: Pin): void {
     layer: overlayLayer,
     // Sentinel key: a pin never receives beacon interrupts (it doesn't move).
     targetKey: { circleId: activeCircle()?.id ?? '', pk: `pin:${pin.id}` },
+    // No `meshPeerId`: a pin carries no radio, so radar never arms BLE
+    // sampling for one (the Phase 3 honesty rule — pins never sample).
     targetName: () => pinKindLabel(pin.kind),
     getTarget: () => ({ lat: d.lat, lon: d.lon, uncertaintyMetres: 0, timestamp: nowSec() }),
     getMyFix: () => (fix ? { lat: fix.lat, lon: fix.lon, at: fix.at, accuracy: fix.accuracy, heading: fix.heading ?? null, speed: fix.speed ?? null } : null),
