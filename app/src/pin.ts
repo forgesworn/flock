@@ -136,6 +136,17 @@ export async function decryptPin(seedHex: string, content: string): Promise<Pin>
   }
 }
 
+/** The pins in a list whose LATEST held state a given member authored — used to
+ *  re-broadcast for anti-entropy when a newcomer (or a member back from offline)
+ *  announces. `from` is bound to the seal signer on receipt, so a member can only
+ *  legitimately re-send what they authored; that partitions the live set across
+ *  members with NO duplication (each id's newest state has exactly one author).
+ *  Tombstones ARE included — the remover re-sends them so a deletion propagates and
+ *  a stale drop can't resurrect on the newcomer. Pure. */
+export function authoredPins(list: readonly Pin[] | undefined, pk: string): Pin[] {
+  return (list ?? []).filter((p) => p.from === pk)
+}
+
 /** Merge an incoming pin into a list — latest-timestamp-wins per id. Tombstones
  *  are RETAINED as entries, not dropped: relays replay historical wraps in
  *  arbitrary order (gift-wrap timestamps are deliberately smeared), so a removal

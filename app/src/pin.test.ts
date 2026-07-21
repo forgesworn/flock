@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { deriveGroupKey, encryptEnvelope } from 'canary-kit/sync'
-import { buildPinSignal, decryptPin, withPin, PIN_SIGNAL_TYPE, pinLabel, isPinKind, PIN_KINDS, PIN_KIND_LIST, type Pin } from './pin'
+import { buildPinSignal, decryptPin, withPin, authoredPins, PIN_SIGNAL_TYPE, pinLabel, isPinKind, PIN_KINDS, PIN_KIND_LIST, type Pin } from './pin'
 
 const SEED = '0000000000000000000000000000000000000000000000000000000000000001'
 const A = 'a'.repeat(64)
@@ -112,5 +112,39 @@ describe('pin wire', () => {
     expect(entry?.from).toBe(B)
     // And A's original drop replaying later still loses.
     expect(withPin(list, car)).toBe(list)
+  })
+})
+
+// Pin durability: when a member announces presence, holders re-send the pins they
+// authored so a late joiner / returning-offline member converges. authoredPins is
+// the selection — it must partition the live set across members (each id's newest
+// state has exactly one author) and include tombstones so a deletion propagates.
+describe('authoredPins (anti-entropy re-send set)', () => {
+  const car: Pin = { id: '1'.repeat(8), from: A, kind: 'car', geohash: 'g', precision: 9, timestamp: 10 }
+  const meet: Pin = { id: '2'.repeat(8), from: B, kind: 'meet', geohash: 'h', precision: 9, timestamp: 12 }
+
+  it('returns only the pins I authored', () => {
+    expect(authoredPins([car, meet], A)).toEqual([car])
+    expect(authoredPins([car, meet], B)).toEqual([meet])
+  })
+
+  it('includes a tombstone I authored — so my removal re-propagates', () => {
+    // B removed A's pin → the newest state is B's tombstone. B re-sends it; A does not.
+    const list = withPin(withPin(undefined, car), { ...car, from: B, timestamp: 30, removed: true })
+    expect(authoredPins(list, B).map((p) => p.id)).toEqual([car.id])
+    expect(authoredPins(list, B)[0]?.removed).toBe(true)
+    expect(authoredPins(list, A)).toEqual([]) // A no longer holds the newest state, so A stays silent
+  })
+
+  it('partitions with no duplication — every pin has exactly one re-sender', () => {
+    const list = [car, meet]
+    const total = authoredPins(list, A).length + authoredPins(list, B).length
+    expect(total).toBe(list.length)
+  })
+
+  it('is empty for a member who authored nothing, and tolerant of an empty list', () => {
+    expect(authoredPins([car, meet], 'c'.repeat(64))).toEqual([])
+    expect(authoredPins(undefined, A)).toEqual([])
+    expect(authoredPins([], A)).toEqual([])
   })
 })

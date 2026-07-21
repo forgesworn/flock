@@ -26,7 +26,7 @@ import { getProfile, fetchProfiles } from './profiles'
 import { encode, decode, bounds, precisionToRadius } from 'geohash-kit'
 import { shouldEmitBeacon, hasMoved, nextPollDelaySeconds, jitteredSeconds, shouldEmitCover, type BeaconCadence } from './cadence'
 import { shouldRing, RING_VIBRATION } from './ring'
-import { PIN_KINDS, PIN_KIND_LIST, pinLabel as pinKindLabel, isPinKind, buildPinSignal, decryptPin, withPin, type Pin, type PinKind } from './pin'
+import { PIN_KINDS, PIN_KIND_LIST, pinLabel as pinKindLabel, isPinKind, buildPinSignal, decryptPin, withPin, authoredPins, type Pin, type PinKind } from './pin'
 import { openRadar, closeRadar, radarBeaconLanded } from './radarMode'
 import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
@@ -285,6 +285,21 @@ const LOST_ALARM_FRESH_SEC = 20 * 60
 // merely that the asker re-asks (the request is repeatable and rate-limited), while
 // the cost of answering a stale one is an unwanted location reveal. Fail-closed.
 const FIND_PING_FRESH_SEC = 5 * 60
+// Pin durability (anti-entropy). Pins ride ephemeral kind-20078 signals: relays
+// don't reliably retain the wrap, and a BLE-mesh drop never touches a relay at all,
+// so a member who joins (or comes back online) after a drop would otherwise never
+// see it. When a member announces presence, holders re-broadcast the pins they
+// authored — debounced per circle so a burst of joins collapses to one re-send, and
+// per-circle so a returning member's foreground re-announce isn't chattier than needed.
+const PIN_RESYNC_MIN_GAP_SEC = 30
+// Re-announce "I'm here" on foreground at most this often per circle, so a member
+// returning from offline re-triggers the roster + pin re-sync without spamming a
+// JOINED on every quick resume. Explicit joins (completeJoin) always announce; this
+// only governs the foreground re-announce (both share presenceAnnouncedAt's clock).
+const PRESENCE_ANNOUNCE_MIN_GAP_SEC = 10 * 60
+// Per-circle in-memory clocks for the two debounces above.
+const pinResyncAt = new Map<string, number>()
+const presenceAnnouncedAt = new Map<string, number>()
 // Long-press-a-chip action sheet, when open: the id of the circle it acts on. Like
 // compose, mounted as an overlay so it survives the re-renders around it.
 let circleMenu: string | null = null
@@ -424,6 +439,32 @@ function landPin(circleId: string, pin: Pin): void {
   savePins(circleId)
   if (tab === 'home' && circleId === activeCircle()?.id) updateMapData()
   refresh()
+}
+
+/** Anti-entropy: re-broadcast the pins I authored so a member who just announced
+ *  presence — a fresh joiner, or one back online after missing the drop — converges.
+ *  Pin signals are ephemeral (no reliable relay retention; a BLE-mesh drop never
+ *  reaches a relay), so without this a late arrival never sees a dropped pin. Only
+ *  pins whose latest held state is MINE (authoredPins): `from` is bound to the seal
+ *  signer on receipt, so I can only legitimately re-send my own, and that partitions
+ *  the set across members with no duplication. Each re-send keeps the pin's OWN
+ *  timestamp — withPin is latest-wins, so it's idempotent for anyone who already
+ *  holds it (or a newer edit) and fills a gap only for whoever is missing it; never
+ *  bumped, which would let a resync outrank a genuine newer change from elsewhere.
+ *  Debounced per circle so a burst of simultaneous joins collapses to one re-send. */
+function resyncPinsFor(circle: store.Circle): void {
+  const me = persisted.identity
+  if (!me) return
+  const now = nowSec()
+  if (now - (pinResyncAt.get(circle.id) ?? 0) < PIN_RESYNC_MIN_GAP_SEC) return
+  const mine = authoredPins(cstate(circle.id).pins, me.pk)
+  if (!mine.length) return
+  pinResyncAt.set(circle.id, now)
+  for (const pin of mine) {
+    void buildPinSignal({ groupId: circle.id, seedHex: circle.seedHex, ...pin })
+      .then((ev) => publishSignal(ev, circle))
+      .catch(() => { /* offline — a later join / foreground re-announce retries */ })
+  }
 }
 
 /** A strictly-monotonic timestamp for RE-SENDING an existing pin id (an edit, a
@@ -1157,6 +1198,12 @@ function bootUnlocked(): void {
   // runs: it carries the seed.
   const frag = consumeFragment()
   render()
+  // A cold launch is the most common "I'm back" on mobile — onForeground's resume
+  // hook never fires for it. Re-announce presence now (after render wired up the
+  // subscriptions) so holders re-send any pins I missed while the app was killed;
+  // silent on peers for an existing member. A join-from-link below announces its own
+  // circle via completeJoin, so this won't double up.
+  reannouncePresence()
   if (frag?.kind === 'join') joinFromLink(frag.value)
   if (frag?.kind === 'invite') inviteFromLink(frag.value)
   // Tapping a link while flock is already open is a fragment-only navigation —
@@ -1381,9 +1428,22 @@ function saveHandle(): void {
 function announceJoin(circle: store.Circle): void {
   const me = persisted.identity
   if (!me) return
+  presenceAnnouncedAt.set(circle.id, nowSec()) // shared clock — a fresh announce resets the foreground re-announce debounce
   void buildJoinedSignal({ groupId: circle.id, seedHex: circle.seedHex, member: me.pk, handle: persisted.myHandle })
     .then((ev) => publishSignal(ev, circle))
     .catch(() => { /* offline — the relay-replayed wrap or first signal covers it */ })
+}
+
+/** Re-announce "I'm here" to every circle on foreground so a member returning from
+ *  offline re-triggers the roster + pin anti-entropy (holders re-send their pins).
+ *  Debounced per circle (PRESENCE_ANNOUNCE_MIN_GAP_SEC) so a quick lock/unlock isn't
+ *  a fresh JOINED each time — a real "back after a while" resume is what this serves. */
+function reannouncePresence(): void {
+  const now = nowSec()
+  for (const c of persisted.circles) {
+    if (now - (presenceAnnouncedAt.get(c.id) ?? 0) < PRESENCE_ANNOUNCE_MIN_GAP_SEC) continue
+    announceJoin(c) // stamps presenceAnnouncedAt itself
+  }
 }
 
 // Render-on-state rebuilds the whole DOM, which used to silently discard whatever
@@ -4563,6 +4623,9 @@ function onForeground(): void {
   // looks at the app again, when staleness would otherwise show up as
   // "messages just don't arrive" until the next full app restart.
   resubscribe()
+  // Tell my circles I'm back (debounced) — a returning member re-triggers the pin
+  // anti-entropy so any drop I missed while away is re-sent to me by its holder.
+  reannouncePresence()
   // A WebGL context is a prime target for the OS to reclaim GPU memory from a
   // backgrounded WebView — reported live as "the map is black" after locking
   // the phone for a few minutes then waking it, fixed only by switching tabs
@@ -5440,6 +5503,10 @@ async function onIncoming(circleId: string, e: { pubkey: string; content: string
         persisted.handles = { ...persisted.handles, [j.member]: j.handle }
         store.save(persisted)
       }
+      // Someone announced presence — a newcomer, or a member back online. Push them
+      // the pins I authored so a drop they missed converges (anti-entropy). Not for
+      // my own echo, and debounced inside resyncPinsFor.
+      if (me && j.member !== me.pk) resyncPinsFor(c)
     } else {
       return
     }
