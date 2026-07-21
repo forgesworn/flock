@@ -1195,6 +1195,16 @@ a.btn { text-decoration: none; }
 }
 .radar-modechip:active, .radar-voice:active { transform: scale(0.98); }
 
+/* VECTOR's "Open in Maps" hand-off — a chip, not a permanent control (radarMode
+   shows it only in VECTOR, native shell, with a known target position). */
+.radar-maps {
+  flex: 1 1 100%; padding: 10px; font-size: 14px; font-weight: 600;
+  border-radius: 12px; letter-spacing: 0.02em;
+  background: rgba(120, 255, 170, 0.06); color: #9fe8bd;
+  border: 1px solid rgba(120, 255, 170, 0.22);
+}
+.radar-maps:active { transform: scale(0.98); }
+
 /* The big directional arrow — heading-up (course-relative in VECTOR). Fills the
    scope and rotates about its centre; hidden unless VECTOR/HOMING have an honest
    bearing (radarMode sets [hidden]). */

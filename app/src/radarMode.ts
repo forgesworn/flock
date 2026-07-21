@@ -782,6 +782,7 @@ function patchScope(s: RadarSession, g: RadarGuidance, ageSeconds: number | null
   const status = q('radar-status')
   const range = q('radar-range')
   const modeChip = q('radar-mode')
+  const maps = q('radar-maps') as HTMLButtonElement | null
   if (!scope || !blip) return
 
   const rangeMetres = niceRange(g.distanceMetres, g.uncertaintyMetres ?? 0, s.rangeMetres)
@@ -845,6 +846,9 @@ function patchScope(s: RadarSession, g: RadarGuidance, ageSeconds: number | null
   }
   if (status) status.textContent = statusCopy(g, s.host.fmtDistance, { headingStatus: s.headingStatus, mode, trend: s.cue.trend, bleClose: s.bleClose })
   if (modeChip) modeChip.textContent = modeChipLabel(mode, s.modeOverride)
+  // Only in VECTOR, only in the native shell (a web tab has no maps chooser
+  // intent), and only once there is a real position to hand off to.
+  if (maps) maps.hidden = !(mode === 'vector' && isNativeShell() && !!s.lastObservation)
 }
 
 /** The distinct "target moved" interrupt: a rising two-note sweep, a short
@@ -969,6 +973,7 @@ function mountRadar(host: RadarHost): HTMLElement {
     <div class="radar-status" id="radar-status"></div>
     <div class="radar-controls">
       <button class="radar-modechip" id="radar-mode" aria-label="Guidance mode">Auto</button>
+      <button class="radar-maps" id="radar-maps" hidden>🗺️ Open in Maps</button>
       <button class="radar-voice" id="radar-voice" aria-pressed="true">🗣️ Voice on</button>
       <button class="radar-sound" id="radar-sound" aria-pressed="false">🔊 Sound on</button>
       <button class="radar-stop" id="radar-stop">Stop</button>
@@ -1001,6 +1006,19 @@ function mountRadar(host: RadarHost): HTMLElement {
     if (!s) return
     const i = OVERRIDE_CYCLE.indexOf(s.modeOverride)
     s.modeOverride = OVERRIDE_CYCLE[(i + 1) % OVERRIDE_CYCLE.length]
+  })
+  // VECTOR's long-approach hand-off (radar-worlds-best §C): the road-network
+  // part is a real nav app's job — radar stays open underneath for the final
+  // unmapped stretch when the driver returns to it. Coordinates only: the
+  // target's NAME is never URL-encoded into an intent another app receives.
+  el.querySelector('#radar-maps')?.addEventListener('click', () => {
+    const s = session
+    if (!s) return
+    const p = s.lastObservation?.position
+    if (!p) return
+    const lat = p.lat.toFixed(6)
+    const lon = p.lon.toFixed(6)
+    window.location.href = `geo:${lat},${lon}?q=${lat},${lon}`
   })
   return el
 }
