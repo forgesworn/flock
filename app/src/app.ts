@@ -43,7 +43,7 @@ import { buildInviteWrap, buildReseedWraps, readInvite, readInviteViaRef, buildD
 import { exportBackup, importBackup, applyBackup } from './backup'
 import { newSalt, deriveDecoyKey, sealState, openState, dummyWork } from './decoy'
 import { generateStorageSecret, setupPin, unlockWithPin, unlockWithGrace, burnLock } from './lock'
-import { hasLegalAcceptance, recordLegalAcceptance } from './legalAcceptance'
+import { hasLegalAcceptance, recordLegalAcceptance, clearLegalAcceptance } from './legalAcceptance'
 import {
   decideEmission,
   haversineMetres,
@@ -1231,8 +1231,7 @@ function applyJoinPosture(circle: store.Circle): void {
 }
 
 function completeJoin(circle: store.Circle): void {
-  persisted.identity ??= store.createIdentity()
-  circle.members = [persisted.identity.pk]
+  circle.members = [ensureIdentity().pk]
   circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
   circle.pingConsent = false // remote exact location is a deliberate device-local opt-in
   applyJoinPosture(circle)
@@ -1354,8 +1353,16 @@ function render(opts?: { animate?: boolean }): void {
     rememberCamera(mounted) // reopen this view when we land back on Home
     mounted?.destroy()
     // Pins live only over the map — leaving Home cancels an in-flight placement
-    // and closes the list sheet so neither lingers over another tab.
-    if (placing) placing = false
+    // and closes the list sheet so neither lingers over another tab. Clear the WHOLE
+    // placement state, not just `placing`: an abandoned MOVE leaves editingPinId set,
+    // and pinPoints() filters that id out of the map — so the pin would vanish from
+    // the user's own map until they re-entered placement or restarted.
+    if (placing || editingPinId !== null || removingPinId !== null) {
+      placing = false
+      placingPos = null
+      editingPinId = null
+      removingPinId = null
+    }
     if (pinsOpen) { pinsOpen = false; mountPinsSheet() }
   }
   const keep = captureFocusedInput()
@@ -4050,7 +4057,7 @@ function handleAction(action: string, node: HTMLElement): void {
 // ── Actions ──────────────────────────────────────────────────────────────────
 function doCreate(): void {
   const name = (document.getElementById('cname') as HTMLInputElement | null)?.value ?? ''
-  persisted.identity ??= store.createIdentity()
+  ensureIdentity()
   persisted.circleRootHex ??= store.newSeed()
   let expiresAt: number | undefined
   if (ttlMode === 'today') {
@@ -4061,7 +4068,7 @@ function doCreate(): void {
     const sec = unit === 'hours' ? n * 3600 : n * 86_400
     expiresAt = sec > 0 ? nowSec() + sec : undefined
   }
-  upsertCircle(store.createCircle(name, 'nightout', persisted.identity.pk, persisted.circleRootHex, expiresAt, { trackingDefault: onboardTracking, sharePrecision: onboardPrecision }), true)
+  upsertCircle(store.createCircle(name, 'nightout', ensureIdentity().pk, persisted.circleRootHex, expiresAt, { trackingDefault: onboardTracking, sharePrecision: onboardPrecision }), true)
   onboardStep = 'intro'
   adding = false
   ttlMode = 'ongoing'
@@ -4071,7 +4078,7 @@ function doCreate(): void {
 
 /** Remote join: create an identity, show my npub, and wait for a gift-wrapped invite. */
 function doJoinRemote(): void {
-  persisted.identity ??= store.createIdentity()
+  ensureIdentity()
   store.save(persisted)
   awaitSince = Date.now()
   onboardStep = 'await'
@@ -4085,9 +4092,9 @@ function doJoin(): void {
   if (!code.trim()) { toast('Paste the invite code first — the one they shared or under their QR.'); return }
   try {
     const circle = store.decodeInvite(store.inviteCodeFrom(code))
-    persisted.identity ??= store.createIdentity()
+    ensureIdentity()
     if (persisted.circles.some((c) => c.id === circle.id)) { switchCircle(circle.id); adding = false; return }
-    circle.members = [persisted.identity.pk]
+    circle.members = [ensureIdentity().pk]
     circle.joinedAt = nowSec() // the roster about to replay is not news — see JOIN_GRACE_SEC
     circle.pingConsent = false // remote exact location is opt-in
     applyJoinPosture(circle)
@@ -4164,7 +4171,7 @@ async function joinWithWords(): Promise<void> {
     const p = await readInviteViaRef(refSk, inviteWrap)
     if (!p) throw new Error('invalid invite')
     const circle: store.Circle = { id: p.id, seedHex: p.s, name: p.n || 'Circle', mode: p.m === 'nightout' ? 'nightout' : 'family', ...(typeof p.x === 'number' ? { expiresAt: p.x } : {}) }
-    persisted.identity ??= store.createIdentity()
+    ensureIdentity()
     // Delete-on-fetch: remove the low-entropy-protected reference now it has
     // served its one purpose, closing the window an eventual brute-force of
     // the code could otherwise exploit. Best-effort — a relay that ignores
@@ -4399,6 +4406,19 @@ async function stopBgWatch(): Promise<void> {
  *  install) counts as on; a decoy / no-identity install is always off. */
 function stayReachableOn(): boolean {
   return (persisted.stayReachable ?? true) && !!persisted.identity
+}
+
+/** Create this device's identity on first need, arming receive-while-closed the
+ *  moment it exists. syncStayReachable otherwise only runs at boot — before a
+ *  brand-new user has an identity — so `stayReachableOn()` was false and the native
+ *  foreground service never started until an app restart, silently dropping DMs,
+ *  buzzes and lost-phone alerts through the whole first session. */
+function ensureIdentity(): store.Identity {
+  if (!persisted.identity) {
+    persisted.identity = store.createIdentity()
+    void syncStayReachable()
+  }
+  return persisted.identity
 }
 async function syncStayReachable(): Promise<void> {
   if (!isNativeShell()) return
@@ -4826,6 +4846,11 @@ async function hideNow(): Promise<void> {
   const sealed = await sealState(JSON.stringify(persisted), cfg.salt, cfg.key)
   store.lockSaves()
   localStorage.setItem(DECOY_CACHE_KEY, sealed)
+  // A genuine fresh install has NO legal acceptance and NO app-lock keystore, so
+  // leaving either behind is a tell that this is a hidden app. Wipe both (the app
+  // lock is re-established on unhide; the real state is safe inside the sealed blob).
+  clearLegalAcceptance()
+  await burnLock()
   store.reset()
   location.reload()
 }

@@ -40,6 +40,17 @@ export function hasLegalAcceptance(storage: LegalStorage | null = browserStorage
   }
 }
 
+function browserRemovable(): { removeItem(key: string): void } | null {
+  try { return globalThis.localStorage ?? null } catch { return null }
+}
+
+/** Remove the local legal acknowledgement entirely. Used by the decoy hide so a
+ *  sealed app reboots looking like a genuine fresh install — which has no such key
+ *  at all (a blanked-but-present key would itself be a tell). */
+export function clearLegalAcceptance(storage: { removeItem(key: string): void } | null = browserRemovable()): void {
+  try { storage?.removeItem(LEGAL_ACCEPTANCE_KEY) } catch { /* storage unavailable */ }
+}
+
 export function recordLegalAcceptance(
   storage: LegalStorage | null = browserStorage(),
   acceptedAt = Date.now(),

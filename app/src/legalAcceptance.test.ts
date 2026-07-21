@@ -3,6 +3,7 @@ import {
   LEGAL_ACCEPTANCE_VERSION,
   hasLegalAcceptance,
   recordLegalAcceptance,
+  clearLegalAcceptance,
   type LegalStorage,
 } from './legalAcceptance'
 
@@ -37,6 +38,19 @@ describe('legal acceptance', () => {
       consentingAdultsOnly: true,
       acceptedAt: 1_720_000_000_000,
     })
+  })
+
+  it('clearLegalAcceptance removes the key entirely (a fresh install has none)', () => {
+    const removed: string[] = []
+    const storage = { removeItem: (key: string) => { removed.push(key) } }
+    clearLegalAcceptance(storage)
+    expect(removed).toEqual(['flock:legal:v1'])
+    // And after a real record→clear round-trip, acceptance reads false again.
+    const mem = memoryStorage()
+    recordLegalAcceptance(mem, 1_720_000_000_000)
+    expect(hasLegalAcceptance(mem)).toBe(true)
+    clearLegalAcceptance({ removeItem: () => { mem.value = null } })
+    expect(hasLegalAcceptance(mem)).toBe(false)
   })
 
   it('fails closed when storage is unavailable', () => {
