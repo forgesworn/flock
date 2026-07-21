@@ -314,6 +314,21 @@ hidden), read its **last seen** when the beacons stop, then **remove member**
     min max). **Pending on real hardware (Pixel 10 Pro):** locked-screen
     beep/haptic continuity, compass-under-wakelock behaviour, and the two-phone
     half-mile field walk from the goal doc's success criteria.
+  - [ ] **Slice 3 — radar v2: blindfold-grade guidance (designed 2026-07-21,
+    after an in-car field failure).** Driving to a pin was unusable: the
+    compass always wins over GPS course (confidently wrong in a vehicle), the
+    cue grammar carries no left/right sign, no distance voice, no closing
+    trend, one interaction model spans 50 km → 2 m, and the last-30 m bearing
+    is GPS-noise fiction (my own fix accuracy is never gated on). v2 = three
+    explicit modes (VECTOR vehicle/far, SEEK on-foot, HOMING last-30 m
+    geiger + warmer/colder), a heading engine arbitrating compass vs GPS
+    course by speed and sensor accuracy, cue grammar v2 (stereo pan,
+    signed haptic vocabulary, TTS voice milestones web + native), honesty
+    gates extended to my own fix accuracy, full locked-phone parity, and a
+    Phase-3 BLE RSSI endgame via identified mesh peers (bands only, never
+    numbers). Acceptance = real-world car test, blindfold park walk, pocket
+    walk, person-in-crowd. Deep-dive design:
+    `docs/plans/2026-07-21-radar-navigation-v2.md`.
 
 ## Dropped pins — mark a spot for the circle (2026-07-09 → 2026-07-20)
 
