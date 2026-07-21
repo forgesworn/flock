@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { deliveredCount, RELAY_TIMEOUT, currentPosition } from './services'
+import { deliveredCount, RELAY_TIMEOUT, currentPosition, pollLocation } from './services'
 
 const ok = (v: unknown): PromiseSettledResult<unknown> => ({ status: 'fulfilled', value: v })
 const rej = (r: unknown): PromiseSettledResult<unknown> => ({ status: 'rejected', reason: r })
@@ -53,5 +53,51 @@ describe('currentPosition', () => {
   it('resolves null when geolocation is unavailable', async () => {
     vi.stubGlobal('navigator', {})
     expect(await currentPosition()).toBeNull()
+  })
+})
+
+describe('pollLocation', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+
+  const stubGeo = (getCurrentPosition: Geolocation['getCurrentPosition']): void => {
+    vi.stubGlobal('navigator', { geolocation: { getCurrentPosition } })
+  }
+
+  it('keeps polling after a transient error instead of stopping forever', async () => {
+    vi.useFakeTimers()
+    let calls = 0
+    const fixes: unknown[] = []
+    const errors: string[] = []
+    // First fix times out (a transient error), then subsequent fixes succeed.
+    stubGeo((success, error) => {
+      calls += 1
+      if (calls === 1) { (error as PositionErrorCallback)({ code: 3, message: 'timeout' } as GeolocationPositionError); return }
+      success({ coords: { latitude: 51.5, longitude: -0.12, accuracy: 20 }, timestamp: 1_700_000_000_000 } as GeolocationPosition)
+    })
+
+    const stop = pollLocation((f) => fixes.push(f), (msg) => errors.push(msg), { nextDelayMs: () => 60_000 })
+
+    // The immediate first sample errored — before this fix the loop would end here.
+    expect(calls).toBe(1)
+    expect(errors).toHaveLength(1)
+    expect(fixes).toHaveLength(0)
+
+    // After the error-retry cadence the poll must fire again and get a fix.
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(calls).toBe(2)
+    expect(fixes).toHaveLength(1)
+    stop()
+  })
+
+  it('does not reschedule after stop()', async () => {
+    vi.useFakeTimers()
+    let calls = 0
+    stubGeo((_success, error) => { calls += 1; (error as PositionErrorCallback)({ code: 3, message: 'timeout' } as GeolocationPositionError) })
+
+    const stop = pollLocation(() => {}, () => {}, { nextDelayMs: () => 60_000 })
+    expect(calls).toBe(1)
+    stop() // permanent teardown — the pending retry must not fire
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(calls).toBe(1)
   })
 })

@@ -60,7 +60,7 @@
     "url": "https://github.com/forgesworn/flock/issues"
   },
   "dependencies": {
-    "@forgesworn/covey-kit": "git+ssh://git@github.com/forgesworn/covey-kit.git#1d3b97602ccdf0d33c845eb6d82cf116a9c15636",
+    "@forgesworn/covey-kit": "github:forgesworn/covey-kit#d87c7a91da0e61499d04564129ce2110048089bb",
     "@forgesworn/flock": "git+ssh://git@github.com/forgesworn/flock-kit.git#eb96ce0c4e0b65cdaa42bdc4b47c81c9a92e4dae",
     "@forgesworn/roost-kit": "git+ssh://git@github.com/forgesworn/roost-kit.git#836471270fd7154a110fc3ff0422859492cfe1e2",
     "canary-kit": "^2.11.0",

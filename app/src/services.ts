@@ -57,6 +57,12 @@ export function watchLocation(
   return () => navigator.geolocation.clearWatch(id)
 }
 
+/** After a transient failure (timeout / temporary no-fix) the self-scheduled poll
+ *  retries at this cadence instead of stopping — a single error must never end
+ *  location sharing silently. Permanent errors (denied/unsupported) are torn down
+ *  by the caller, so this only ever paces genuine retries. */
+const POLL_ERROR_RETRY_MS = 15_000
+
 /**
  * Self-scheduled location poll (an alternative to the continuous watch) whose
  * interval the caller sets per fix via `nextDelayMs` — so a stationary night-out
@@ -79,7 +85,17 @@ export function pollLocation(
   function tick(): void {
     navigator.geolocation.getCurrentPosition(
       (pos) => { if (stopped) return; const f = toFix(pos); onFix(f); schedule(opts.nextDelayMs(f)) },
-      (err) => { if (stopped) return; onError(err.message || 'Could not get your location.', geoErrorKind(err)) },
+      (err) => {
+        if (stopped) return
+        onError(err.message || 'Could not get your location.', geoErrorKind(err))
+        // Keep the self-scheduling loop alive across a transient failure. The
+        // success path reschedules on each fix; without an equivalent reschedule
+        // here the FIRST error (indoors, cold GPS, a 20s timeout) would silently
+        // end polling forever while the UI still claims "still trying". A permanent
+        // denied/unsupported error makes the caller stop this poll (its stop fn
+        // sets `stopped`), so schedule() correctly no-ops for those.
+        schedule(POLL_ERROR_RETRY_MS)
+      },
       { enableHighAccuracy: opts.highAccuracy ?? false, maximumAge: 10_000, timeout: 20_000 },
     )
   }
