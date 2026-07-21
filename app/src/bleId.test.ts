@@ -4,6 +4,7 @@ import {
   advertIdNow,
   advertIdsToScan,
   bleWindow,
+  msUntilNextWindow,
   BLE_WINDOW_SECONDS,
   BLE_MESH_EPOCH_SECONDS,
   meshEpoch,
@@ -52,6 +53,22 @@ describe('bleWindow', () => {
     expect(bleWindow(0)).toBe(0)
     expect(bleWindow(BLE_WINDOW_SECONDS - 1)).toBe(0)
     expect(bleWindow(BLE_WINDOW_SECONDS)).toBe(1)
+  })
+})
+
+describe('msUntilNextWindow', () => {
+  it('counts down (in ms) to the next window boundary', () => {
+    expect(msUntilNextWindow(0)).toBe(BLE_WINDOW_SECONDS * 1000) // whole window ahead
+    expect(msUntilNextWindow(BLE_WINDOW_SECONDS - 1)).toBe(1000) // 1s to the boundary
+    expect(msUntilNextWindow(BLE_WINDOW_SECONDS)).toBe(BLE_WINDOW_SECONDS * 1000) // just rolled → full window
+  })
+
+  it('is always within (0, window] — never zero or negative, so the re-arm always advances', () => {
+    for (const t of [1, 123, BLE_WINDOW_SECONDS - 1, BLE_WINDOW_SECONDS + 7, 5 * BLE_WINDOW_SECONDS + 450]) {
+      const ms = msUntilNextWindow(t)
+      expect(ms).toBeGreaterThan(0)
+      expect(ms).toBeLessThanOrEqual(BLE_WINDOW_SECONDS * 1000)
+    }
   })
 })
 

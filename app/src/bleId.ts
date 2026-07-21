@@ -29,6 +29,13 @@ export function bleWindow(nowSec: number, windowSeconds = BLE_WINDOW_SECONDS): n
   return Math.floor(nowSec / windowSeconds)
 }
 
+/** Milliseconds until the NEXT rotation-window boundary. Schedule the advert re-arm
+ *  here so a member's advertId rotates on time — a STABLE UUID is a physical-world
+ *  device tracker, worse than the relay this mode exists to avoid. */
+export function msUntilNextWindow(nowSec: number, windowSeconds = BLE_WINDOW_SECONDS): number {
+  return ((bleWindow(nowSec, windowSeconds) + 1) * windowSeconds - nowSec) * 1000
+}
+
 /** Format 16 bytes as a well-formed v4 UUID string (BLE stacks want valid UUIDs).
  *  Pinning 6 version/variant bits costs negligible entropy (122 bits remain). */
 function toUuid(bytes: Uint8Array): string {

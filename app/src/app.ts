@@ -30,7 +30,7 @@ import { PIN_KINDS, PIN_KIND_LIST, pinLabel as pinKindLabel, isPinKind, buildPin
 import { openRadar, closeRadar, radarBeaconLanded } from './radarMode'
 import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
-import { advertIdNow, meshUuidNow } from './bleId'
+import { advertIdNow, meshUuidNow, msUntilNextWindow } from './bleId'
 import { classifyScan, shouldOfferAppHandoff } from './joinassist'
 import qrcode from 'qrcode-generator'
 import { npubEncode } from 'nostr-tools/nip19'
@@ -226,6 +226,8 @@ let dndAccess: boolean | null = null
 // across circles, tied to festival). See docs/plans/2026-07-04-ble-nearby-transport.md.
 let bleActive = false
 let bleMode: 'discreet' | 'mesh' = 'discreet'
+let bleAdvertUuid: string | null = null // the UUID currently on the air (idempotency + rotation)
+let bleRotationTimer: number | undefined
 // Crowd-mesh flood budget: how many extra hops a wrap is relayed past its first
 // recipient. 3 covers a large room via a couple of intermediaries without letting
 // traffic churn indefinitely (the native plugin also dedups by id + clamps hops).
@@ -878,16 +880,40 @@ async function syncBle(): Promise<void> {
     const ble = await import('../../native/ble')
     if (want && id && (mesh || c)) {
       const uuid = mesh ? meshUuidNow(nowSec()) : advertIdNow((c as store.Circle).seedHex, nowSec())
-      const hops = mesh ? BLE_MESH_HOPS : 0
-      await ble.startBle({ room: uuid, selfId: id.pk, serviceUuid: uuid, hops, reconcileGiftWraps: mesh }, onBleFrame)
-      bleActive = true
-      bleMode = mesh ? 'mesh' : 'discreet'
+      const nextMode = mesh ? 'mesh' : 'discreet'
+      // Idempotent: only (re)start the radio when the advertised UUID or mode
+      // actually changes, so the periodic rotation re-arm never churns BLE.
+      if (!(bleActive && uuid === bleAdvertUuid && bleMode === nextMode)) {
+        const hops = mesh ? BLE_MESH_HOPS : 0
+        await ble.startBle({ room: uuid, selfId: id.pk, serviceUuid: uuid, hops, reconcileGiftWraps: mesh }, onBleFrame)
+        bleActive = true
+        bleMode = nextMode
+        bleAdvertUuid = uuid
+      }
+      scheduleBleRotation() // re-arm at the next window boundary so the UUID rotates
     } else if (bleActive || ble.bleRunning()) {
       await ble.stopBle()
       bleActive = false
       bleMode = 'discreet'
+      bleAdvertUuid = null
+      cancelBleRotation()
     }
-  } catch { bleActive = false; bleMode = 'discreet' /* older shell / BLE unavailable / denied — relay carries on */ }
+  } catch { bleActive = false; bleMode = 'discreet'; bleAdvertUuid = null; cancelBleRotation() /* older shell / BLE unavailable / denied — relay carries on */ }
+}
+
+/** Rotate the BLE advert on schedule. The advertId/meshUuid are keyed by time
+ *  window (bleId.ts), but syncBle only ran on circle/toggle events — so without a
+ *  boundary-aligned re-arm a stationary circle kept ONE advertised UUID for the
+ *  whole session: a passive-BLE device tracker, the very exposure discreet mode
+ *  exists to avoid. Scheduling just past each window boundary keeps the rotation
+ *  lag near zero, so peers (whose clocks are NTP-synced) rotate together. */
+function scheduleBleRotation(): void {
+  cancelBleRotation()
+  const delayMs = Math.max(1000, msUntilNextWindow(nowSec()) + 250) // just past the boundary
+  bleRotationTimer = window.setTimeout(() => { bleRotationTimer = undefined; void syncBle() }, delayMs)
+}
+function cancelBleRotation(): void {
+  if (bleRotationTimer !== undefined) { clearTimeout(bleRotationTimer); bleRotationTimer = undefined }
 }
 
 // ── Tor `.onion` relay endpoint (native, opt-in, fail-loud) ──────────────────
