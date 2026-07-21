@@ -80,10 +80,11 @@ import cc.trotters.flock.radar.cueFor
 import cc.trotters.flock.radar.radarGuidance
 import cc.trotters.flock.radar.resolveHeading
 import cc.trotters.flock.radar.selectMode
+import cc.trotters.flock.radar.clockHour
 import cc.trotters.flock.radar.smoothClosingRate
 import cc.trotters.flock.radar.smoothHeadingDeg
+import cc.trotters.flock.radar.speakableDistanceMetres
 import cc.trotters.flock.radar.targetMoved
-import cc.trotters.flock.radar.vectorDirectionPhrase
 import cc.trotters.flock.radar.voiceLine
 import java.util.Locale
 
@@ -120,6 +121,7 @@ class RadarGuideService : Service() {
     private var lastHeadingStatus: String = "none"
     private var lastVoiceAtMs: Long = 0
     private var lastVoiceBearing: Double? = null
+    private var lastPeriodicAtMs: Long = 0
 
     // Voice: pre-baked clips (from assets) + Android TTS fallback.
     private var tts: TextToSpeech? = null
@@ -146,12 +148,23 @@ class RadarGuideService : Service() {
     private val sensorListener = object : SensorEventListener {
         private val rot = FloatArray(9)
         private val ori = FloatArray(3)
+        private var lastSinkAtMs = 0L
         override fun onSensorChanged(e: SensorEvent) {
             SensorManager.getRotationMatrixFromVector(rot, e.values)
             SensorManager.getOrientation(rot, ori)
             val az = Math.toDegrees(ori[0].toDouble())
-            headingDeg = ((az % 360.0) + 360.0) % 360.0
+            val h = ((az % 360.0) + 360.0) % 360.0
+            headingDeg = h
             headingAtMs = SystemClock.elapsedRealtime()
+            // Mirror the compass to the WebView (throttled): the DOM's
+            // deviceorientation gives the Capacitor WebView nothing absolute, so
+            // without this the on-screen scope can't act like a compass (field
+            // test 2026-07-21 — the pointer froze when the phone was set down).
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastSinkAtMs >= HEADING_SINK_MIN_MS) {
+                lastSinkAtMs = now
+                headingSink?.invoke(h, compassUsable)
+            }
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
             // Android's own "this magnetometer is unreliable" signal (v2 Fault 1):
@@ -242,13 +255,17 @@ class RadarGuideService : Service() {
 
     // ── The guide loop: pure core → sound + haptics + voice ─────────────────
 
-    /** GPS course over ground: the Doppler bearing when moving, else a two-fix
-     *  fallback ("walk a few steps"). */
+    /** GPS course over ground: the Doppler bearing when GENUINELY moving, else a
+     *  two-fix fallback ("walk a few steps"). The v2.1 trust floor: below
+     *  COURSE_MIN_SPEED_MPS the chip's bearing is a stationary artefact — it
+     *  froze the pointer at the last walking direction when the phone was set
+     *  down (field test 2026-07-21). */
     private fun effectiveCourse(): Double? {
-        myCourseDeg?.let { return it }
-        val p = prevFix; val c = curFix ?: return null
-        if (p == null) return null
-        if (SystemClock.elapsedRealtime() / 1000.0 - c.atSec > COURSE_MAX_AGE_SEC) return null
+        val c = curFix ?: return null
+        val fresh = SystemClock.elapsedRealtime() / 1000.0 - c.atSec <= COURSE_MAX_AGE_SEC
+        myCourseDeg?.let { if (fresh && (mySpeedMps ?: 0.0) >= Radar.COURSE_MIN_SPEED_MPS) return it }
+        val p = prevFix ?: return null
+        if (!fresh) return null
         return courseFromFixes(p, c)
     }
 
@@ -371,39 +388,62 @@ class RadarGuideService : Service() {
         if (mode == "vector" && g.bearingUsable && g.distanceMetres != null) {
             val ms = crossedMilestone(lastDistance, g.distanceMetres!!)
             if (ms != null) {
-                playVoice(milestoneClips(ms, g.relativeBearingDeg), voiceLine("milestone", g, distanceMetres = ms, fmtDistance = { m -> fmtMetric(m) }), nowMs)
+                if (playVoice(rangeClips(ms, g), voiceLine("milestone", g, distanceMetres = ms, fmtDistance = { m -> fmtMetric(m) }), nowMs)) {
+                    lastPeriodicAtMs = nowMs // a milestone line counts as this minute's range callout
+                }
                 lastVoiceBearing = g.relativeBearingDeg
                 return
             }
             val rb = g.relativeBearingDeg
             if (rb != null && (lastVoiceBearing == null || Math.abs(rb - lastVoiceBearing!!) > BEARING_CHANGE_DEGREES)) {
-                val dir = directionClip(rb)
+                val dir = clockClip(rb, g.bearingUsable)
                 playVoice(if (dir != null) listOf(dir) else emptyList(), voiceLine("bearing-change", g), nowMs)
                 lastVoiceBearing = rb
             }
         }
+
+        // The minute-cadence status line (v2.1, every mode): rounded range +
+        // clock-face direction, range-only when the bearing isn't honest. The
+        // by-ear glance the 2026-07-21 field test asked for.
+        val d = g.distanceMetres
+        if (d != null && g.state in PERIODIC_STATES &&
+            nowMs - lastPeriodicAtMs >= (Radar.PERIODIC_VOICE_SEC * 1000).toLong()
+        ) {
+            val rounded = speakableDistanceMetres(d)
+            if (playVoice(rangeClips(rounded, g), voiceLine("periodic", g, distanceMetres = rounded, fmtDistance = { m -> fmtMetric(m) }), nowMs)) {
+                lastPeriodicAtMs = nowMs
+            }
+        }
     }
 
-    private fun milestoneClips(milestoneMetres: Double, rel: Double?): List<String> {
-        val dist = MILESTONE_CLIP[milestoneMetres] ?: return emptyList()
-        val dir = directionClip(rel)
+    /** "<range clip>, <clock clip>" — the clock rides only an honest bearing. */
+    private fun rangeClips(metres: Double, g: RadarGuidance): List<String> {
+        val dist = DIST_CLIP[metres] ?: return emptyList()
+        val dir = clockClip(g.relativeBearingDeg, g.bearingUsable)
         return if (dir != null) listOf(dist, dir) else listOf(dist)
     }
 
-    private fun directionClip(rel: Double?): String? = DIRECTION_CLIP[vectorDirectionPhrase(rel)]
+    private fun clockClip(rel: Double?, usable: Boolean): String? {
+        if (!usable) return null
+        val h = clockHour(rel) ?: return null
+        return "clock-$h"
+    }
 
     private fun fmtMetric(m: Double): String =
         if (m < 1000) "${Math.round(m)} metres" else String.format(Locale.UK, "%.1f km", m / 1000.0)
 
     /** Play the pre-baked clip sequence when every clip is present, else speak
-     *  the fallback line with TTS. Gated on the Voice toggle + rate limit. */
-    private fun playVoice(clipIds: List<String>, fallback: String, nowMs: Long, urgent: Boolean = false) {
-        if (!voice) return
-        if (!urgent && nowMs - lastVoiceAtMs < (Radar.VOICE_MIN_INTERVAL_SEC * 1000).toLong()) return
-        if (clipIds.isEmpty() && fallback.isEmpty()) return
+     *  the fallback line with TTS. Gated on the Voice toggle + rate limit.
+     *  Returns whether a line was actually spoken (the periodic cadence stamps
+     *  its clock only on a real utterance). */
+    private fun playVoice(clipIds: List<String>, fallback: String, nowMs: Long, urgent: Boolean = false): Boolean {
+        if (!voice) return false
+        if (!urgent && nowMs - lastVoiceAtMs < (Radar.VOICE_MIN_INTERVAL_SEC * 1000).toLong()) return false
+        if (clipIds.isEmpty() && fallback.isEmpty()) return false
         lastVoiceAtMs = nowMs
         if (clipIds.isNotEmpty() && clipIds.all { availableClips.contains(it) }) playClips(clipIds)
         else ttsSpeak(fallback)
+        return true
     }
 
     private fun ttsSpeak(text: String) {
@@ -551,6 +591,10 @@ class RadarGuideService : Service() {
         @Volatile private var instance: RadarGuideService? = null
         /** The guide's currently-resolved mode, for the JS getMode bridge. */
         @Volatile private var modeShared: String = "seek"
+        /** Where the rotation-vector compass is mirrored for the WebView's
+         *  on-screen scope (RadarGuidePlugin sets it; throttled at source). */
+        @Volatile var headingSink: ((Double, Boolean) -> Unit)? = null
+        private const val HEADING_SINK_MIN_MS = 150L
 
         // The selected target's latest permitted disclosure — set from JS via
         // RadarGuidePlugin before/while the service runs. @Volatile: written on
@@ -604,20 +648,19 @@ class RadarGuideService : Service() {
             modeShared = "seek"
         }
 
-        // Direction phrase → clip id (mirrors app/src/voiceClips.ts).
-        private val DIRECTION_CLIP = mapOf(
-            "straight ahead" to "dir-straight-ahead",
-            "ahead on your left" to "dir-ahead-left",
-            "ahead on your right" to "dir-ahead-right",
-            "to your left" to "dir-left",
-            "to your right" to "dir-right",
-            "behind you on your left" to "dir-behind-left",
-            "behind you on your right" to "dir-behind-right",
-            "behind you" to "dir-behind",
+        // Speakable range → clip id (mirrors app/src/voiceClips.ts). Every step
+        // of Radar.SPEAKABLE_DISTANCES_METRES has a clip, so the minute line is
+        // always clip-composable (GrapheneOS may ship no TTS engine at all).
+        private val DIST_CLIP = mapOf(
+            10.0 to "dist-10m", 15.0 to "dist-15m", 20.0 to "dist-20m", 25.0 to "dist-25m",
+            30.0 to "dist-30m", 40.0 to "dist-40m", 50.0 to "dist-50m", 75.0 to "dist-75m",
+            100.0 to "dist-100m", 150.0 to "dist-150m", 200.0 to "dist-200m", 250.0 to "dist-250m",
+            300.0 to "dist-300m", 400.0 to "dist-400m", 500.0 to "dist-500m", 750.0 to "dist-750m",
+            1000.0 to "dist-1km", 1500.0 to "dist-1-5km", 2000.0 to "dist-2km", 3000.0 to "dist-3km",
+            4000.0 to "dist-4km", 5000.0 to "dist-5km", 10_000.0 to "dist-10km",
         )
-        private val MILESTONE_CLIP = mapOf(
-            2000.0 to "dist-2km", 1000.0 to "dist-1km", 500.0 to "dist-500m",
-            250.0 to "dist-250m", 100.0 to "dist-100m",
-        )
+        /** States that get the minute-cadence range callout: live pointing, a
+         *  compassless fallback, and a coarse share (range is still honest). */
+        private val PERIODIC_STATES = setOf("point", "no-heading", "coarse")
     }
 }

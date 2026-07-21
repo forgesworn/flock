@@ -257,4 +257,39 @@ class RadarCoreTest {
             assertCue(c.getJSONObject("cue"), cueFor(g, ctx), "cueModes case $i")
         }
     }
+
+    // ── v2.1 parity (clock-face + periodic voice) ────────────────────────────
+
+    @Test
+    fun `clock face matches`() {
+        val cases = vectors().getJSONArray("clockFace")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val rel = nullableDouble(c, "rel")
+            val hour = clockHour(rel)
+            if (c.isNull("hour")) assertNull(hour, "clock hour case $i")
+            else assertEquals(c.getInt("hour"), hour, "clock hour case $i")
+            assertEquals(c.getString("phrase"), clockFacePhrase(rel), "clock phrase case $i")
+        }
+    }
+
+    @Test
+    fun `speakable distances match`() {
+        val cases = vectors().getJSONArray("speakable")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            assertEquals(c.getDouble("expected"), speakableDistanceMetres(c.getDouble("m")), 1e-9, "speakable case $i")
+        }
+    }
+
+    @Test
+    fun `voice lines match`() {
+        val cases = vectors().getJSONArray("voiceLines")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val g = radarGuidance(parseInput(c.getJSONObject("input")))
+            val got = voiceLine(c.getString("kind"), g, distanceMetres = c.getDouble("distanceMetres"))
+            assertEquals(c.getString("expected"), got, "voice line case $i")
+        }
+    }
 }

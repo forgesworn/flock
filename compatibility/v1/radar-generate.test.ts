@@ -22,6 +22,10 @@ import {
   turnSign,
   classifyTrend,
   vectorDirectionPhrase,
+  clockHour,
+  clockFacePhrase,
+  speakableDistanceMetres,
+  voiceLine,
   crossedMilestone,
   type RadarInput,
   type HeadingInput,
@@ -146,6 +150,17 @@ const COURSE_CASES = [
   { prev: { position: { lat: 0, lon: 0 }, atSec: 10 }, next: { position: { lat: 0.001, lon: 0 }, atSec: 10 } },
 ]
 
+// v2.1 clock-face + speakable ranges + periodic line (field test 2026-07-21).
+const CLOCK_CASES = [null, 0, 14, 16, 44, 46, 90, 180, -180, -90, -16, -44, 359]
+const SPEAKABLE_CASES = [1, 12, 13, 60, 90, 340, 370, 1240, 1260, 2600, 7400, 50_000]
+const VOICE_LINE_CASES: { kind: 'periodic' | 'milestone' | 'bearing-change'; input: RadarInput; distanceMetres: number }[] = [
+  { kind: 'periodic', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 1000 },
+  { kind: 'periodic', input: { me: { lat: 0, lon: 0 }, headingDeg: null, target: target(0.01) }, distanceMetres: 500 },
+  { kind: 'periodic', input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.01, 610) }, distanceMetres: 1000 }, // coarse → range only
+  { kind: 'milestone', input: { me: { lat: 0, lon: 0 }, headingDeg: 150, target: target(0.01) }, distanceMetres: 500 },
+  { kind: 'bearing-change', input: { me: { lat: 0, lon: 0 }, headingDeg: 45, target: target(0.01) }, distanceMetres: 0 },
+]
+
 function build(): Record<string, unknown> {
   return {
     bearing: BEARING_CASES.map((c) => ({ ...c, expected: initialBearingDeg(c.a, c.b) })),
@@ -168,6 +183,13 @@ function build(): Record<string, unknown> {
     }),
     moved: MOVED_CASES.map((c) => ({ ...c, expected: targetMoved(c.prev, c.next) })),
     course: COURSE_CASES.map((c) => ({ ...c, expected: courseFromFixes(c.prev, c.next) })),
+    clockFace: CLOCK_CASES.map((rel) => ({ rel, hour: clockHour(rel), phrase: clockFacePhrase(rel) })),
+    speakable: SPEAKABLE_CASES.map((m) => ({ m, expected: speakableDistanceMetres(m) })),
+    voiceLines: VOICE_LINE_CASES.map((c) => ({
+      ...c,
+      expected: voiceLine({ kind: c.kind, distanceMetres: c.distanceMetres } as Parameters<typeof voiceLine>[0],
+        radarGuidance(c.input), (m) => `${Math.round(m)} m`),
+    })),
   }
 }
 

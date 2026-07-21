@@ -26,6 +26,7 @@ import {
   selectMode,
   crossedMilestone,
   voiceLine,
+  speakableDistanceMetres,
   haversineMetres,
   RADAR,
   type RadarCue,
@@ -124,6 +125,11 @@ interface RadarSession {
   lastDistanceAtMs: number | null
   voiceLastAtMs: number
   lastVoiceBearing: number | null
+  /** When the minute-cadence range/clock line last spoke (v2.1). */
+  lastPeriodicAtMs: number
+  /** When the native compass mirror last delivered (0 = never): while it is
+   *  fresh it owns s.compassHeading and the DOM orientation event stands down. */
+  nativeHeadingAtMs: number
   /** Pre-baked TTS clips decoded for on-device, offline playback (radar-v2). */
   voiceBuffers: Map<string, AudioBuffer>
   wakeLock: { release: () => Promise<void> } | null
@@ -216,6 +222,8 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
     lastDistanceAtMs: null,
     voiceLastAtMs: 0,
     lastVoiceBearing: null,
+    lastPeriodicAtMs: 0,
+    nativeHeadingAtMs: 0,
     voiceBuffers: new Map(),
     wakeLock: null,
     nativeGuide: false,
@@ -271,16 +279,43 @@ async function acquireWakeLock(s: RadarSession): Promise<void> {
 
 const screenAngle = (): number => (typeof screen !== 'undefined' && screen.orientation?.angle) || 0
 
-/** Compass heading via DeviceOrientation. iOS 13+ needs a permission call from
- *  a user gesture — the open tap qualifies. A denied/missing compass simply
- *  leaves heading null: the radar honestly falls back to course over ground. */
+/** How long a native compass sample owns the heading before the DOM event may
+ *  speak again (native mirrors at ~150 ms while the guide service runs). */
+const NATIVE_HEADING_FRESH_MS = 2000
+
+/** Compass heading. In the native shell the PRIMARY source is the guide
+ *  service's rotation-vector compass, mirrored over the bridge — the WebView's
+ *  own deviceorientation is not earth-referenced there, which left the scope
+ *  north-up-frozen in the field (2026-07-21). DeviceOrientation stays wired as
+ *  the web/PWA path and the fallback if the mirror goes quiet. iOS 13+ needs a
+ *  permission call from a user gesture — the open tap qualifies. A
+ *  denied/missing compass simply leaves heading null: the radar honestly falls
+ *  back to course over ground. */
 async function startOrientation(s: RadarSession): Promise<void> {
+  let removeNative: () => void = () => { /* not subscribed */ }
+  if (isNativeShell()) {
+    const m = await nativeGuideApi()
+    if (s.closed) return
+    if (m) {
+      removeNative = m.onRadarHeading((deg, usable) => {
+        // The mirror is device-frame; compensate a rotated screen like the DOM
+        // path does so heading-up stays honest in landscape.
+        s.compassHeading = (((deg + screenAngle()) % 360) + 360) % 360
+        s.compassUsable = usable
+        s.nativeHeadingAtMs = Date.now()
+      })
+    }
+  }
   const D = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }
   if (typeof D?.requestPermission === 'function') {
-    try { if (await D.requestPermission() !== 'granted') return } catch { return }
+    try {
+      if (await D.requestPermission() !== 'granted') { s.removeOrientation = removeNative; return }
+    } catch { s.removeOrientation = removeNative; return }
   }
-  if (s.closed) return
+  if (s.closed) { removeNative(); return }
   const onEvent = (e: DeviceOrientationEvent): void => {
+    // While the native mirror is fresh it owns the heading channel.
+    if (Date.now() - s.nativeHeadingAtMs < NATIVE_HEADING_FRESH_MS) return
     const webkit = (e as unknown as { webkitCompassHeading?: number }).webkitCompassHeading
     s.compassHeading = headingFromOrientation(
       { alpha: e.alpha, absolute: e.absolute, webkitCompassHeading: webkit },
@@ -295,17 +330,27 @@ async function startOrientation(s: RadarSession): Promise<void> {
   // Prefer the earth-referenced event where the platform provides it.
   const type = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation'
   window.addEventListener(type, onEvent as EventListener)
-  s.removeOrientation = () => window.removeEventListener(type, onEvent as EventListener)
+  s.removeOrientation = () => {
+    removeNative()
+    window.removeEventListener(type, onEvent as EventListener)
+  }
 }
 
-/** GPS course over ground: the Doppler `coords.heading` when moving (far better
- *  than a two-fix derivation), else the two-fix fallback ("walk a few steps"). */
-function gpsCourse(s: RadarSession, my: { heading?: number | null } | null): number | null {
-  if (my && typeof my.heading === 'number' && Number.isFinite(my.heading)) return my.heading
+/** GPS course over ground: the Doppler `coords.heading` when GENUINELY moving
+ *  (far better than a two-fix derivation), else the two-fix fallback ("walk a
+ *  few steps"). v2.1 trust floor: a heading on a fix slower than
+ *  `courseMinSpeedMps` — or an old fix — is a stationary artefact; consuming it
+ *  froze the pointer at the last walking direction when the phone was set down
+ *  (field test 2026-07-21). */
+function gpsCourse(s: RadarSession, my: { at: number; heading?: number | null; speed?: number | null } | null): number | null {
+  const nowSec = Math.floor(Date.now() / 1000)
+  if (my && typeof my.heading === 'number' && Number.isFinite(my.heading) &&
+      (my.speed ?? 0) >= RADAR.courseMinSpeedMps &&
+      nowSec - my.at <= COURSE_MAX_AGE_SEC) return my.heading
   const prev = s.lastFixes[s.lastFixes.length - 2]
   const cur = s.lastFixes[s.lastFixes.length - 1]
   if (!prev || !cur) return null
-  if (Math.floor(Date.now() / 1000) - cur.atSec > COURSE_MAX_AGE_SEC) return null
+  if (nowSec - cur.atSec > COURSE_MAX_AGE_SEC) return null
   return courseFromFixes(prev, cur)
 }
 
@@ -466,11 +511,13 @@ async function preloadVoiceClips(s: RadarSession): Promise<void> {
 
 /** Play a voice event: the pre-baked clip sequence when every clip is loaded,
  *  else on-device speechSynthesis of `fallbackText`. Gated on the Voice toggle
- *  and (unless urgent) the rate limit; silent while the native guide owns audio. */
-function playVoice(s: RadarSession, clipIds: string[], fallbackText: string, nowMs: number, urgent = false): void {
-  if (s.nativeGuide || !s.voice) return
-  if (clipIds.length === 0 && !fallbackText) return
-  if (!urgent && nowMs - s.voiceLastAtMs < VOICE_MIN_INTERVAL_MS) return
+ *  and (unless urgent) the rate limit; silent while the native guide owns audio.
+ *  Returns whether a line was actually spoken (the periodic cadence stamps its
+ *  clock only on a real utterance). */
+function playVoice(s: RadarSession, clipIds: string[], fallbackText: string, nowMs: number, urgent = false): boolean {
+  if (s.nativeGuide || !s.voice) return false
+  if (clipIds.length === 0 && !fallbackText) return false
+  if (!urgent && nowMs - s.voiceLastAtMs < VOICE_MIN_INTERVAL_MS) return false
   s.voiceLastAtMs = nowMs
   const ctx = s.audio
   const haveAll = clipIds.length > 0 && ctx !== null && clipIds.every((id) => s.voiceBuffers.has(id))
@@ -485,20 +532,27 @@ function playVoice(s: RadarSession, clipIds: string[], fallbackText: string, now
       src.start(t)
       t += buf.duration + 0.06 // a natural beat between clips
     }
-    return
+    return true
   }
   // Fallback: on-device TTS (robotic but offline + immediate).
   try {
     const synth = window.speechSynthesis
-    if (!synth || !fallbackText) return
+    if (!synth || !fallbackText) return false
     synth.cancel() // never queue a stale line behind a fresh one
     synth.speak(new SpeechSynthesisUtterance(fallbackText))
+    return true
   } catch { /* no speech synthesis — earcons + haptics carry it */ }
+  return false
 }
 
+/** States that get the minute-cadence range callout: live pointing, a
+ *  compassless fallback, and a coarse share (the range is still honest). */
+const PERIODIC_STATES: RadarGuidance['state'][] = ['point', 'no-heading', 'coarse']
+
 /** The voice policy: mode changes, degradations, compass distrust and arrival
- *  everywhere; distance milestones + sustained bearing swings only in VECTOR
- *  (voice leads there, earcons carry the on-foot load). */
+ *  everywhere; distance milestones + sustained bearing swings lead in VECTOR;
+ *  and (v2.1) a minute-cadence "<range>, at your <clock>" line in EVERY mode —
+ *  the by-ear glance the 2026-07-21 field test asked for. */
 function announceVoice(s: RadarSession, g: RadarGuidance, mode: RadarMode, nowMs: number): void {
   if (s.nativeGuide || !s.voice) return
 
@@ -529,9 +583,11 @@ function announceVoice(s: RadarSession, g: RadarGuidance, mode: RadarMode, nowMs
   if (mode === 'vector' && g.bearingUsable && g.distanceMetres !== null) {
     const milestone = crossedMilestone(s.lastDistance, g.distanceMetres)
     if (milestone !== null) {
-      playVoice(s,
+      if (playVoice(s,
         voiceClipSeq({ kind: 'milestone', milestoneMetres: milestone, relativeBearingDeg: g.relativeBearingDeg }),
-        voiceLine({ kind: 'milestone', distanceMetres: milestone }, g, s.host.fmtDistance), nowMs)
+        voiceLine({ kind: 'milestone', distanceMetres: milestone }, g, s.host.fmtDistance), nowMs)) {
+        s.lastPeriodicAtMs = nowMs // a milestone line counts as this minute's range callout
+      }
       s.lastVoiceBearing = g.relativeBearingDeg
       return
     }
@@ -539,6 +595,19 @@ function announceVoice(s: RadarSession, g: RadarGuidance, mode: RadarMode, nowMs
       playVoice(s, voiceClipSeq({ kind: 'bearing-change', relativeBearingDeg: g.relativeBearingDeg }),
         voiceLine({ kind: 'bearing-change' }, g, s.host.fmtDistance), nowMs)
       s.lastVoiceBearing = g.relativeBearingDeg
+      return
+    }
+  }
+
+  // The minute-cadence status line (v2.1): rounded range + clock-face
+  // direction; range-only when the bearing isn't honest. Every mode.
+  if (g.distanceMetres !== null && PERIODIC_STATES.includes(g.state) &&
+      nowMs - s.lastPeriodicAtMs >= RADAR.periodicVoiceSec * 1000) {
+    const rounded = speakableDistanceMetres(g.distanceMetres)
+    if (playVoice(s,
+      voiceClipSeq({ kind: 'periodic', roundedMetres: rounded, relativeBearingDeg: g.bearingUsable ? g.relativeBearingDeg : null }),
+      voiceLine({ kind: 'periodic', distanceMetres: rounded }, g, s.host.fmtDistance), nowMs)) {
+      s.lastPeriodicAtMs = nowMs
     }
   }
 }

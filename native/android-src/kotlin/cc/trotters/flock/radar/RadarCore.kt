@@ -62,6 +62,14 @@ object Radar {
 
     // v2 — voice milestones (metres, descending).
     val VOICE_MILESTONES_METRES = doubleArrayOf(2000.0, 1000.0, 500.0, 250.0, 100.0)
+
+    // v2.1 (field test 2026-07-21): periodic voice + course trust floor.
+    const val PERIODIC_VOICE_SEC = 60.0
+    const val COURSE_MIN_SPEED_MPS = 1.0
+    val SPEAKABLE_DISTANCES_METRES = doubleArrayOf(
+        10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0, 75.0, 100.0, 150.0, 200.0, 250.0,
+        300.0, 400.0, 500.0, 750.0, 1000.0, 1500.0, 2000.0, 3000.0, 4000.0, 5000.0, 10_000.0,
+    )
     const val VOICE_MIN_INTERVAL_SEC = 10.0
 }
 
@@ -417,7 +425,8 @@ fun crossedMilestone(prevMetres: Double?, nextMetres: Double): Double? {
     return crossed
 }
 
-/** Relative bearing → a spoken clock-free direction phrase (left/right). */
+/** Relative bearing → a spoken clock-free direction phrase (left/right).
+ *  Superseded for the voice channel by clockFacePhrase (v2.1). */
 fun vectorDirectionPhrase(relativeBearingDeg: Double?): String {
     if (relativeBearingDeg == null) return "ahead"
     val mag = abs(relativeBearingDeg)
@@ -429,30 +438,62 @@ fun vectorDirectionPhrase(relativeBearingDeg: Double?): String {
     return "behind you on your $side"
 }
 
+/** The clock hour a relative bearing falls on (30° sectors; ahead = 12,
+ *  right = 3, behind = 6, left = 9), or null with no bearing (v2.1). */
+fun clockHour(relativeBearingDeg: Double?): Int? {
+    if (relativeBearingDeg == null || relativeBearingDeg.isNaN()) return null
+    val sector = (Math.round(norm360(relativeBearingDeg) / 30.0).toInt()) % 12
+    return if (sector == 0) 12 else sector
+}
+
+/** Relative bearing → "at your 3 o'clock", or "" with no bearing (v2.1). */
+fun clockFacePhrase(relativeBearingDeg: Double?): String {
+    val h = clockHour(relativeBearingDeg) ?: return ""
+    return "at your $h o'clock"
+}
+
+/** Round a range to the nearest speakable-ladder step (v2.1). */
+fun speakableDistanceMetres(metres: Double): Double {
+    var best = Radar.SPEAKABLE_DISTANCES_METRES[0]
+    for (step in Radar.SPEAKABLE_DISTANCES_METRES) {
+        if (abs(step - metres) < abs(best - metres)) best = step
+    }
+    return best
+}
+
 /** Assemble one spoken line. `fmtDistance` renders metres in the user's units. */
 fun voiceLine(
-    kind: String, // milestone | bearing-change | mode | compass-unreliable | arrived | degraded
+    kind: String, // milestone | periodic | bearing-change | mode | compass-unreliable | arrived | degraded
     g: RadarGuidance,
     distanceMetres: Double = 0.0,
     mode: String = "seek",
     degradedState: String = "",
     fmtDistance: (Double) -> String = { m -> "${Math.round(m)} m" },
-): String = when (kind) {
-    "milestone" -> "${fmtDistance(distanceMetres).replace("~", "")}, ${vectorDirectionPhrase(g.relativeBearingDeg)}"
-    "bearing-change" -> "Now ${vectorDirectionPhrase(g.relativeBearingDeg)}"
-    "mode" -> when (mode) {
-        "vector" -> "Vehicle mode"
-        "homing" -> "Closing in"
-        else -> "On-foot tracking"
-    }
-    "compass-unreliable" -> "Compass unreliable — using your direction of travel"
-    "arrived" -> "Within GPS reach — look around"
-    "degraded" -> when (degradedState) {
-        "stale" -> "Their location is stale — follow with care"
-        "coarse" -> "Rough area only"
-        "no-fix" -> "Waiting for your own position"
-        "unavailable" -> "No location to navigate to"
+): String {
+    // A clock claim only while the bearing is honestly usable (mirrors JS).
+    val clock = if (g.bearingUsable) clockFacePhrase(g.relativeBearingDeg) else ""
+    val withClock = { dist: String -> if (clock.isEmpty()) dist else "$dist, $clock" }
+    return when (kind) {
+        "milestone" -> withClock(fmtDistance(distanceMetres).replace("~", ""))
+        "periodic" -> withClock(fmtDistance(distanceMetres).replace("~", ""))
+        "bearing-change" -> {
+            val c = clockFacePhrase(g.relativeBearingDeg)
+            if (c.isEmpty()) "" else "Now $c"
+        }
+        "mode" -> when (mode) {
+            "vector" -> "Vehicle mode"
+            "homing" -> "Closing in"
+            else -> "On-foot tracking"
+        }
+        "compass-unreliable" -> "Compass unreliable — using your direction of travel"
+        "arrived" -> "Within GPS reach — look around"
+        "degraded" -> when (degradedState) {
+            "stale" -> "Their location is stale — follow with care"
+            "coarse" -> "Rough area only"
+            "no-fix" -> "Waiting for your own position"
+            "unavailable" -> "No location to navigate to"
+            else -> ""
+        }
         else -> ""
     }
-    else -> ""
 }

@@ -27,6 +27,10 @@ interface RadarGuidePluginApi {
   stop(): Promise<void>
   isActive(): Promise<{ value: boolean }>
   getMode(): Promise<{ value: string }>
+  addListener(
+    eventName: 'heading',
+    cb: (data: { headingDeg: number; usable: boolean }) => void,
+  ): Promise<{ remove: () => Promise<void> }>
 }
 
 const RadarGuide = registerPlugin<RadarGuidePluginApi>('RadarGuide')
@@ -65,4 +69,20 @@ export async function isRadarGuideActive(): Promise<boolean> {
  *  when unavailable — lets the reopened JS scope reflect the locked-run mode. */
 export async function radarGuideMode(): Promise<string> {
   try { return (await RadarGuide.getMode()).value } catch { return '' }
+}
+
+/** Subscribe to the native rotation-vector compass (mirrored from the guide
+ *  service, throttled): the on-screen scope's heading source in the shell,
+ *  where the WebView's deviceorientation is not earth-referenced. Returns an
+ *  unsubscribe fn; a shell without the event just never fires it. */
+export function onRadarHeading(cb: (headingDeg: number, usable: boolean) => void): () => void {
+  let removed = false
+  let handle: { remove: () => Promise<void> } | null = null
+  RadarGuide.addListener('heading', (d) => cb(d.headingDeg, d.usable))
+    .then((h) => { if (removed) void h.remove().catch(() => { /* gone */ }); else handle = h })
+    .catch(() => { /* old shell — no native compass mirror */ })
+  return () => {
+    removed = true
+    void handle?.remove().catch(() => { /* already removed */ })
+  }
 }
