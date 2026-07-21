@@ -10,6 +10,19 @@ import com.getcapacitor.annotation.CapacitorPlugin
 
 @CapacitorPlugin(name = "RadarGuide")
 class RadarGuidePlugin : Plugin() {
+    /** Mirror the service's rotation-vector compass into the WebView as
+     *  'heading' events, so the on-screen scope rotates like a real compass
+     *  (the WebView's own deviceorientation is not earth-referenced). Throttled
+     *  at the source (RadarGuideService.HEADING_SINK_MIN_MS). */
+    override fun load() {
+        RadarGuideService.headingSink = { deg, usable ->
+            val out = JSObject()
+            out.put("headingDeg", deg)
+            out.put("usable", usable)
+            notifyListeners("heading", out)
+        }
+    }
+
     /** Start guiding. Called from an unlocked, foregrounded radar open — a
      *  legal FGS start. Optional initial target seeds the observation. */
     @PluginMethod

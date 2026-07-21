@@ -1713,5 +1713,244 @@
       },
       "expected": null
     }
+  ],
+  "clockFace": [
+    {
+      "rel": null,
+      "hour": null,
+      "phrase": ""
+    },
+    {
+      "rel": 0,
+      "hour": 12,
+      "phrase": "at your 12 o'clock"
+    },
+    {
+      "rel": 14,
+      "hour": 12,
+      "phrase": "at your 12 o'clock"
+    },
+    {
+      "rel": 16,
+      "hour": 1,
+      "phrase": "at your 1 o'clock"
+    },
+    {
+      "rel": 44,
+      "hour": 1,
+      "phrase": "at your 1 o'clock"
+    },
+    {
+      "rel": 46,
+      "hour": 2,
+      "phrase": "at your 2 o'clock"
+    },
+    {
+      "rel": 90,
+      "hour": 3,
+      "phrase": "at your 3 o'clock"
+    },
+    {
+      "rel": 180,
+      "hour": 6,
+      "phrase": "at your 6 o'clock"
+    },
+    {
+      "rel": -180,
+      "hour": 6,
+      "phrase": "at your 6 o'clock"
+    },
+    {
+      "rel": -90,
+      "hour": 9,
+      "phrase": "at your 9 o'clock"
+    },
+    {
+      "rel": -16,
+      "hour": 11,
+      "phrase": "at your 11 o'clock"
+    },
+    {
+      "rel": -44,
+      "hour": 11,
+      "phrase": "at your 11 o'clock"
+    },
+    {
+      "rel": 359,
+      "hour": 12,
+      "phrase": "at your 12 o'clock"
+    }
+  ],
+  "speakable": [
+    {
+      "m": 1,
+      "expected": 10
+    },
+    {
+      "m": 12,
+      "expected": 10
+    },
+    {
+      "m": 13,
+      "expected": 15
+    },
+    {
+      "m": 60,
+      "expected": 50
+    },
+    {
+      "m": 90,
+      "expected": 100
+    },
+    {
+      "m": 340,
+      "expected": 300
+    },
+    {
+      "m": 370,
+      "expected": 400
+    },
+    {
+      "m": 1240,
+      "expected": 1000
+    },
+    {
+      "m": 1260,
+      "expected": 1500
+    },
+    {
+      "m": 2600,
+      "expected": 3000
+    },
+    {
+      "m": 7400,
+      "expected": 5000
+    },
+    {
+      "m": 50000,
+      "expected": 10000
+    }
+  ],
+  "voiceLines": [
+    {
+      "kind": "periodic",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 1000,
+      "expected": "1000 m, at your 11 o'clock"
+    },
+    {
+      "kind": "periodic",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": null,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 500,
+      "expected": "500 m"
+    },
+    {
+      "kind": "periodic",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 0,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 610,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 1000,
+      "expected": "1000 m"
+    },
+    {
+      "kind": "milestone",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 150,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 500,
+      "expected": "500 m, at your 7 o'clock"
+    },
+    {
+      "kind": "bearing-change",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 45,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "expected": "Now at your 11 o'clock"
+    },
+    {
+      "kind": "moved",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 1000,
+      "expected": "They've moved — 1000 m, at your 11 o'clock"
+    }
   ]
 }

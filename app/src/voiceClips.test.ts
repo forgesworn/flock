@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { VOICE_CLIP_IDS, voiceClipSeq, directionClip } from './voiceClips'
+import { SPEAKABLE_DISTANCES_METRES, speakableDistanceMetres } from '@forgesworn/flock'
+import { VOICE_CLIP_IDS, voiceClipSeq, clockClip } from './voiceClips'
 
 const vocab = (): Record<string, string> => {
   const p = resolve(dirname(fileURLToPath(import.meta.url)), '../../scripts/voice-clips.json')
@@ -30,25 +31,50 @@ describe('voice clip vocabulary', () => {
       { kind: 'milestone', milestoneMetres: 1000, relativeBearingDeg: -45 },
       { kind: 'milestone', milestoneMetres: 100, relativeBearingDeg: 0 },
       { kind: 'bearing-change', relativeBearingDeg: 90 },
+      ...SPEAKABLE_DISTANCES_METRES.map((m) => ({ kind: 'periodic' as const, roundedMetres: m, relativeBearingDeg: 45 })),
     ]
     for (const ev of events) for (const id of voiceClipSeq(ev)) expect(known.has(id)).toBe(true)
+  })
+
+  it('every speakable range step resolves to a distance clip', () => {
+    for (const m of SPEAKABLE_DISTANCES_METRES) {
+      const seq = voiceClipSeq({ kind: 'periodic', roundedMetres: m, relativeBearingDeg: null })
+      expect(seq, `no clip for ${m} m`).toHaveLength(1)
+      expect(seq[0]).toMatch(/^dist-/)
+    }
+    // …and rounding always lands ON a step, so the periodic line never misses.
+    expect(SPEAKABLE_DISTANCES_METRES).toContain(speakableDistanceMetres(337))
   })
 })
 
 describe('voiceClipSeq', () => {
-  it('a milestone reads distance THEN direction, back to back', () => {
+  it('a milestone reads distance THEN clock direction, back to back', () => {
     expect(voiceClipSeq({ kind: 'milestone', milestoneMetres: 1000, relativeBearingDeg: -45 }))
-      .toEqual(['dist-1km', 'dir-ahead-left'])
+      .toEqual(['dist-1km', 'clock-11'])
   })
 
-  it('dead-ahead still speaks the "straight ahead" clip after the distance', () => {
+  it("dead-ahead speaks the 12 o'clock clip after the distance", () => {
     expect(voiceClipSeq({ kind: 'milestone', milestoneMetres: 500, relativeBearingDeg: 0 }))
-      .toEqual(['dist-500m', 'dir-straight-ahead'])
+      .toEqual(['dist-500m', 'clock-12'])
   })
 
-  it('with no heading (null bearing) a milestone drops the bare "ahead" clip', () => {
+  it('with no heading (null bearing) a range line is distance-only', () => {
     expect(voiceClipSeq({ kind: 'milestone', milestoneMetres: 500, relativeBearingDeg: null }))
       .toEqual(['dist-500m'])
+    expect(voiceClipSeq({ kind: 'periodic', roundedMetres: 250, relativeBearingDeg: null }))
+      .toEqual(['dist-250m'])
+  })
+
+  it('the periodic line reads distance THEN clock direction', () => {
+    expect(voiceClipSeq({ kind: 'periodic', roundedMetres: 300, relativeBearingDeg: 90 }))
+      .toEqual(['dist-300m', 'clock-3'])
+  })
+
+  it("a target move leads with the moved clip, then the range line", () => {
+    expect(voiceClipSeq({ kind: 'moved', roundedMetres: 300, relativeBearingDeg: 90 }))
+      .toEqual(['state-moved', 'dist-300m', 'clock-3'])
+    expect(voiceClipSeq({ kind: 'moved', roundedMetres: 300, relativeBearingDeg: null }))
+      .toEqual(['state-moved', 'dist-300m'])
   })
 
   it('mode + arrival + degradation map to their single clips', () => {
@@ -57,11 +83,12 @@ describe('voiceClipSeq', () => {
     expect(voiceClipSeq({ kind: 'degraded', state: 'stale' })).toEqual(['state-stale'])
   })
 
-  it('direction clips follow the same left/right thresholds as the phrasing', () => {
-    expect(directionClip(0)).toBe('dir-straight-ahead')
-    expect(directionClip(90)).toBe('dir-right')
-    expect(directionClip(-45)).toBe('dir-ahead-left')
-    expect(directionClip(175)).toBe('dir-behind')
-    expect(directionClip(null)).toBeNull()
+  it('clock clips follow the 30° hour sectors', () => {
+    expect(clockClip(0)).toBe('clock-12')
+    expect(clockClip(90)).toBe('clock-3')
+    expect(clockClip(-90)).toBe('clock-9')
+    expect(clockClip(180)).toBe('clock-6')
+    expect(clockClip(-16)).toBe('clock-11')
+    expect(clockClip(null)).toBeNull()
   })
 })
