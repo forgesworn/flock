@@ -359,4 +359,17 @@ class RadarCoreTest {
             assertEquals(c.getString("expected"), got, "modeBle case $i")
         }
     }
+
+    @Test
+    fun `boundary-sticky clock hours match`() {
+        val cases = vectors().getJSONArray("clockStable")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val prev = if (c.isNull("prevHour")) null else c.getInt("prevHour")
+            val rel = nullableDouble(c, "rel")
+            val got = stableClockHour(prev, rel)
+            if (c.isNull("expected")) assertNull(got, "clockStable case $i")
+            else assertEquals(c.getInt("expected"), got, "clockStable case $i")
+        }
+    }
 }

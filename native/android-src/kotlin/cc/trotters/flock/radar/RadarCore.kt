@@ -72,6 +72,13 @@ object Radar {
     )
     const val VOICE_MIN_INTERVAL_SEC = 10.0
 
+    // Direction callouts (field feedback 2026-07-21): a changed clock hour is
+    // ALWAYS spoken, every mode, on its own faster floor.
+    /** A spoken/displayed hour only flips once the bearing clears its sector
+     *  edge by this — a boundary-sat target must never chatter. */
+    const val CLOCK_HOUR_HYSTERESIS_DEG = 6.0
+    const val VOICE_DIRECTION_MIN_INTERVAL_SEC = 5.0
+
     // Phase 3 — BLE RSSI proximity assist.
     /** Median RSSI (dBm) at/above this reads as immediate — same-room close. */
     const val BLE_IMMEDIATE_RSSI = -60.0
@@ -530,6 +537,20 @@ fun clockHour(relativeBearingDeg: Double?): Int? {
 fun clockFacePhrase(relativeBearingDeg: Double?): String {
     val h = clockHour(relativeBearingDeg) ?: return ""
     return "at your $h o'clock"
+}
+
+/** The clock hour with sector-boundary hysteresis — holds the previous hour
+ *  until the bearing clears its sector edge by CLOCK_HOUR_HYSTERESIS_DEG, so
+ *  a boundary-sat target never chatters; a genuinely big swing still flips
+ *  immediately. Byte-matches the JS stableClockHour (clockStable vectors). */
+fun stableClockHour(prevHour: Int?, relativeBearingDeg: Double?): Int? {
+    val raw = clockHour(relativeBearingDeg) ?: return null
+    if (prevHour == null) return raw
+    if (raw == prevHour) return prevHour
+    val prevCentreDeg = (prevHour % 12) * 30.0
+    val offCentre = abs(angularErrorDeg(norm360(relativeBearingDeg!!), prevCentreDeg))
+    if (offCentre <= 15.0 + Radar.CLOCK_HOUR_HYSTERESIS_DEG) return prevHour
+    return raw
 }
 
 /** Round a range to the nearest speakable-ladder step (v2.1). */

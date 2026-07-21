@@ -31,6 +31,7 @@ import {
   bleProximityFromRssi,
   bleAssistUsable,
   bleCadenceFloorMetres,
+  stableClockHour,
   type RadarInput,
   type HeadingInput,
   type ModeInput,
@@ -211,6 +212,22 @@ const MODE_BLE_CASES: ModeInput[] = [
   { prevMode: 'seek', distanceMetres: 45, speedMps: 0, fastForSec: 0, slowForSec: 0, uncertaintyMetres: 2.4, bleProximity: 'immediate' }, // ble only HOLDS, never a way IN
 ]
 
+// Direction callouts: boundary-sticky clock hour — either side of the
+// 15°+hysteresis edges, the two-sided band, the rear wrap, the null path.
+const CLOCK_STABLE_CASES: { prevHour: number | null; rel: number | null }[] = [
+  { prevHour: null, rel: 0 },
+  { prevHour: null, rel: 45 },
+  { prevHour: 12, rel: 20 },   // inside the sticky band → holds 12
+  { prevHour: 12, rel: 22 },   // past it → 1
+  { prevHour: 12, rel: -22 },  // → 11
+  { prevHour: 1, rel: 14 },    // the new hour is protected by the same band
+  { prevHour: 1, rel: 8 },     // → back to 12
+  { prevHour: 12, rel: 90 },   // a big swing flips immediately
+  { prevHour: 6, rel: -170 },  // rear-boundary wrap holds
+  { prevHour: 6, rel: -150 },  // → 7
+  { prevHour: 12, rel: null }, // no bearing → no hour
+]
+
 function build(): Record<string, unknown> {
   return {
     bearing: BEARING_CASES.map((c) => ({ ...c, expected: initialBearingDeg(c.a, c.b) })),
@@ -251,6 +268,7 @@ function build(): Record<string, unknown> {
       return { input, ctx, guidance: g, cue: cueFor(g, ctx) }
     }),
     modeBle: MODE_BLE_CASES.map((input) => ({ input, expected: selectMode(input) })),
+    clockStable: CLOCK_STABLE_CASES.map((c) => ({ ...c, expected: stableClockHour(c.prevHour, c.rel) })),
   }
 }
 

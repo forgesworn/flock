@@ -2431,5 +2431,62 @@
       },
       "expected": "seek"
     }
+  ],
+  "clockStable": [
+    {
+      "prevHour": null,
+      "rel": 0,
+      "expected": 12
+    },
+    {
+      "prevHour": null,
+      "rel": 45,
+      "expected": 2
+    },
+    {
+      "prevHour": 12,
+      "rel": 20,
+      "expected": 12
+    },
+    {
+      "prevHour": 12,
+      "rel": 22,
+      "expected": 1
+    },
+    {
+      "prevHour": 12,
+      "rel": -22,
+      "expected": 11
+    },
+    {
+      "prevHour": 1,
+      "rel": 14,
+      "expected": 1
+    },
+    {
+      "prevHour": 1,
+      "rel": 8,
+      "expected": 12
+    },
+    {
+      "prevHour": 12,
+      "rel": 90,
+      "expected": 3
+    },
+    {
+      "prevHour": 6,
+      "rel": -170,
+      "expected": 6
+    },
+    {
+      "prevHour": 6,
+      "rel": -150,
+      "expected": 7
+    },
+    {
+      "prevHour": 12,
+      "rel": null,
+      "expected": null
+    }
   ]
 }
