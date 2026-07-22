@@ -2,8 +2,17 @@
 // are pure and deterministic, so every case is directly comparable: the same
 // inputs must produce the same guidance state, cue and numbers on both sides —
 // the locked-phone beeper must never be more confident than the tested JS
-// tracker. Regenerate with `npm run gen:vectors` on a deliberate rule change.
+// tracker. Regenerate with `npm run gen:vectors` (THIS repo's generator) on a
+// deliberate rule change — never from flock-kit's, whose set differs on purpose.
 // Cases sit AWAY from tier boundaries so float rounding can't flip a state.
+//
+// Divergence from flock-kit's vectors is DELIBERATE, not drift: this file pins the
+// surface the Kotlin port actually mirrors (incl. the voice-copy groups clockFace/
+// speakable/voiceLines that RadarCore.kt reproduces), and OMITS the `session` group
+// — the radar-session rules are pure-TS/app-side with no Kotlin port to pin, so
+// they are covered by radarSession.test.ts (kit + app), not here. Add a `session`
+// group here only alongside a Kotlin radarSession port. Each repo's generate test
+// verifies its own committed JSON, so both stay self-consistent independently.
 import { describe, it, expect } from 'vitest'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'

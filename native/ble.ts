@@ -30,6 +30,10 @@ let peerHandle: PluginListenerHandle | null = null
 let reliability: RunningMeshReliability | null = null
 let reliabilitySubscription: { close(): void } | null = null
 let running = false
+/** The mesh flood budget the transport is currently running with: 0 = discreet
+ *  single-hop (no relay), >0 = crowd/mesh relay. Tracked so RSSI attribution can
+ *  be refused while relaying (see armRssiWindow / bleMeshRelaying). */
+let meshHops = 0
 
 const GIFT_WRAP_KIND = 'flock-gift-wrap'
 const RELIABILITY_WIRE_KEY = '_flockMeshSync'
@@ -162,6 +166,7 @@ export async function startBle(
       ...(opts.hops !== undefined ? { hops: opts.hops } : {}),
     })
     running = true
+    meshHops = opts.hops ?? 0
   } catch (error) {
     await stopBle()
     throw error
@@ -171,6 +176,7 @@ export async function startBle(
 /** Tear BLE down (idempotent; never throws). */
 export async function stopBle(): Promise<void> {
   running = false
+  meshHops = 0
   try { await frameHandle?.remove() } catch { /* already gone */ }
   try { await peerHandle?.remove() } catch { /* already gone */ }
   frameHandle = null
@@ -194,6 +200,15 @@ export async function broadcastBle(data: string): Promise<void> {
 
 export function bleRunning(): boolean {
   return running
+}
+
+/** Is the transport currently relaying (crowd/mesh mode)? RSSI proximity is only
+ *  honest on a direct, non-relayed link — while relaying, a peer id can be bound to
+ *  a relayer's MAC or injected over the keyless crowd UUID (the plugin suppresses
+ *  attribution at source; this lets the app also skip arming the battery-costly
+ *  sampler). Discreet single-hop mode (hops 0) returns false. */
+export function bleMeshRelaying(): boolean {
+  return meshHops > 0
 }
 
 // ── Observability seam (diagnostics) ─────────────────────────────────────────
@@ -232,9 +247,13 @@ export function getBleReliabilityStats(): MeshReliabilityStats | null {
 // ── RSSI proximity (radar Phase 3) ───────────────────────────────────────────
 // Off by default (battery cost) — a caller (radarMode.ts) turns sampling on
 // only while it has an identified member target to attribute samples to, and
-// stops it unconditionally when done. Samples are attributed by the plugin
-// ONLY to a peer id already bound by a prior in-room frame exchange — never
-// to a raw, unauthenticated advert.
+// stops it unconditionally when done. The plugin attributes a sample to a peer id
+// bound by a prior in-room frame exchange, and ONLY on a direct, non-relaying link:
+// in crowd/mesh mode (relaying) that binding can be a relayer's MAC or injected over
+// the keyless crowd UUID, so the plugin emits nothing and we don't even arm the
+// sampler (bleMeshRelaying gate below). This is a trusted-neighbour proximity hint,
+// not cryptographic authentication — the honesty gates in flock-kit radar.ts treat
+// it as such (blend/hold only, never a bearing, never below a 50 m GPS story).
 
 /** Turn on periodic RSSI sampling. Idempotent (re-calling just updates the
  *  interval); a no-op on iOS/web/older shells. */
@@ -272,7 +291,10 @@ export async function armRssiWindow(
   peerId: string,
   opts: { intervalMs?: number; maxAgeMs?: number; maxSamples?: number } = {},
 ): Promise<RssiWindow | null> {
-  if (!bleRunning()) return null
+  // No transport, or relaying (crowd/mesh mode): attribution isn't honest, so the
+  // caller gets "no band" exactly as with the mesh off — and we never spin up the
+  // battery-costly sampler. The plugin enforces the same rule at source.
+  if (!bleRunning() || bleMeshRelaying()) return null
   const maxAgeMs = opts.maxAgeMs ?? 12_000
   const maxSamples = opts.maxSamples ?? 10
   let samples: { rssi: number; atMs: number }[] = []

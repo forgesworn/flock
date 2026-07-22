@@ -57,6 +57,7 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -100,6 +101,11 @@ class RadarGuideService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     /** elapsedRealtime of the wakelock's last acquire() — the renewal clock. */
     private var wakeLockAcquiredAtMs: Long = 0
+    /** elapsedRealtime the guide loop started, and when it last logged a liveness
+     *  heartbeat — lets an on-device logcat run confirm the tick (and the held
+     *  wake lock) survive well past the mooted "~8 min cap" (radar-worlds-best). */
+    private var loopStartedAtMs: Long = 0
+    private var lastHeartbeatAtMs: Long = 0
     @Volatile private var running = false
 
     // My side of the bearing — direct GPS fixes (previous + current for the
@@ -120,6 +126,9 @@ class RadarGuideService : Service() {
     private var closingRate: Double? = null
     private var lastDistance: Double? = null
     private var lastDistanceAtMs: Long = 0
+    /** My own position at the last closing-rate sample — rebases the rate onto the
+     *  current target so a beacon position JUMP never spikes the trend (JS parity). */
+    private var lastMePos: LatLng? = null
     private var fastSinceMs: Long = 0
     private var slowSinceMs: Long = 0
     private var lastState: String? = null
@@ -357,11 +366,31 @@ class RadarGuideService : Service() {
         } catch (_: Exception) {}
     }
 
+    /** A once-a-minute liveness line for on-device verification (item 4): proves
+     *  the guide loop is still ticking, and the wake lock still held, N minutes
+     *  into a screen-locked walk — the direct test of whether any real "~8 min
+     *  cap" exists. `adb logcat -s RadarGuide` and watch the minutes climb. */
+    private fun logHeartbeatIfDue(elapsedNow: Long) {
+        if (loopStartedAtMs == 0L) loopStartedAtMs = elapsedNow
+        if (elapsedNow - lastHeartbeatAtMs < HEARTBEAT_INTERVAL_MS) return
+        lastHeartbeatAtMs = elapsedNow
+        val heldFor = (elapsedNow - wakeLockAcquiredAtMs) / 1000
+        val aliveFor = (elapsedNow - loopStartedAtMs) / 1000
+        Log.i(TAG, "alive ${aliveFor}s (mode=$currentMode, wakeLock=${wakeLock?.isHeld == true}, held ${heldFor}s)")
+    }
+
     private fun tickAndSchedule() {
         if (!running) return
+        // One bad tick (a sensor/audio glitch, a math edge) must never kill the
+        // guide loop while the FGS notification still reads "Radar active" — wrap
+        // the whole body and ALWAYS reschedule (item 5 / native-parity #11). This
+        // is the most consequential place in the file to hold the defensive pattern.
+        var nextDelayMs = 500L
+        try {
         val nowMs = System.currentTimeMillis()
         val elapsed = SystemClock.elapsedRealtime()
         renewWakeLockIfNeeded(elapsed)
+        logHeartbeatIfDue(elapsed)
 
         // Heading engine (v2): arbitrate compass vs course by speed.
         val course = effectiveCourse()
@@ -390,11 +419,15 @@ class RadarGuideService : Service() {
 
         val g = radarGuidance(RadarInput(me, smoothedHeading, target, myAccuracyMetres))
 
-        // Warmer/colder: smooth d(distance)/dt for the HOMING trend note.
+        // Warmer/colder: smooth d(distance)/dt for the HOMING trend note. Rebase
+        // the previous distance onto the CURRENT target position so a beacon's
+        // position JUMP cancels and only my own motion feeds the trend (JS parity;
+        // the geiger cadence still carries the target's own approach via distance).
         val dist = g.distanceMetres
-        if (dist != null && lastDistance != null && lastDistanceAtMs != 0L) {
+        if (dist != null && lastDistanceAtMs != 0L && me != null && target != null) {
             val dt = (nowMs - lastDistanceAtMs) / 1000.0
-            closingRate = smoothClosingRate(closingRate, lastDistance!!, dist, dt, RATE_ALPHA)
+            val prevDist = lastMePos?.let { haversineMetres(it, target.position) } ?: lastDistance
+            if (prevDist != null) closingRate = smoothClosingRate(closingRate, prevDist, dist, dt, RATE_ALPHA)
         }
 
         val cue = cueFor(g, CueContext(currentMode, closingRate, bleProximity))
@@ -436,8 +469,13 @@ class RadarGuideService : Service() {
         lastState = g.state
         lastAnnouncedMode = currentMode
         lastHeadingStatus = solution.status
-        if (dist != null) { lastDistance = dist; lastDistanceAtMs = nowMs }
-        handler?.postDelayed({ tickAndSchedule() }, if (cue.pattern == "silent") 300 else cue.periodMs)
+        if (dist != null) { lastDistance = dist; lastDistanceAtMs = nowMs; lastMePos = me }
+        nextDelayMs = if (cue.pattern == "silent") 300 else cue.periodMs
+        } catch (e: Exception) {
+            Log.w(TAG, "radar tick failed; continuing", e)
+        } finally {
+            if (running) handler?.postDelayed({ tickAndSchedule() }, nextDelayMs)
+        }
     }
 
     /** The distinct "target moved" interrupt (rising two-note + short triple).
@@ -708,10 +746,13 @@ class RadarGuideService : Service() {
     }
 
     companion object {
+        private const val TAG = "RadarGuide"
         private const val CHANNEL_ID = "flock-radar-v1"
         private const val NOTIF_ID = 4212
         private const val ACTION_STOP = "cc.trotters.flock.RADAR_STOP"
         private const val GPS_INTERVAL_MS = 2_000L
+        /** Liveness heartbeat cadence for on-device longevity verification (item 4). */
+        private const val HEARTBEAT_INTERVAL_MS = 60_000L
         private const val SAMPLE_RATE = 22_050
         private const val BEEP_MS = 70
         private const val HEADING_MAX_AGE_MS = 3_000L
@@ -770,6 +811,10 @@ class RadarGuideService : Service() {
          *  `meshPeerId` (null for a pin) is the mesh peer id BLE RSSI samples
          *  are attributed under — re-sent on every call, same as lat/lon. */
         fun updateTarget(lat: Double, lon: Double, uncertaintyMetres: Double, timestampMs: Long, meshPeerId: String? = null) {
+            // Reject a malformed coordinate at ingest rather than feed NaN/garbage
+            // into the bearing math (the JS core throws on this; here we degrade to
+            // "no update", keeping the last good target — never a fabricated bearing).
+            if (!lat.isFinite() || !lon.isFinite() || lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) return
             val prev = targetLat?.let { la ->
                 targetLon?.let { lo -> PositionObservation(LatLng(la, lo), targetUncertaintyMetres) }
             }

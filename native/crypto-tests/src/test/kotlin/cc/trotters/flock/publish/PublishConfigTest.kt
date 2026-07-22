@@ -38,4 +38,19 @@ class PublishConfigTest {
         assertEquals(3, effectivePrecision(c.copy(precision = 1), 1000))       // clamp floor
         assertEquals(9, effectivePrecision(c.copy(precision = 99), 1000))      // clamp ceiling
     }
+
+    @Test
+    fun `a live radar session lifts precision to Exact and expires on this clock`() {
+        val c = parsePublishConfig(json)!!.copy(sessionMinIntervalSec = 5, sessionHeartbeatSec = 30)
+        // Live (now < untilSec): a default-precision (6) share lifts to Exact (9).
+        assertEquals(9, effectivePrecision(c.copy(sessionUntilSec = 2000), 1000))
+        // Expired (now >= untilSec): back to the base share, no residue.
+        assertEquals(6, effectivePrecision(c.copy(sessionUntilSec = 500), 1000))
+        // A cadence lift with no untilSec is not a live session — never lifts.
+        assertEquals(6, effectivePrecision(c.copy(sessionUntilSec = 0), 1000))
+        // The lift never LOWERS a finer share (festival already at 9 stays 9).
+        assertEquals(9, effectivePrecision(c.copy(sessionUntilSec = 2000, festivalUntil = 2000), 1000))
+        // shareCeiling is the un-lifted ceiling — the coarse no-report cap floor.
+        assertEquals(6, shareCeiling(c.copy(sessionUntilSec = 2000), 1000))
+    }
 }

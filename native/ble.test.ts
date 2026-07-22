@@ -8,6 +8,8 @@ const sharedBle = vi.hoisted(() => ({
   broadcast: vi.fn(async () => ({ queuedPeers: 0 })),
   send: vi.fn(async () => ({ queuedPeers: 0 })),
   getStatus: vi.fn(async () => ({})),
+  startRssiSampling: vi.fn(async () => {}),
+  stopRssiSampling: vi.fn(async () => {}),
   addListener: vi.fn(async (event: string, listener: (value: any) => void) => {
     sharedBle.listeners.set(event, listener)
     return { remove: async () => void sharedBle.listeners.delete(event) }
@@ -17,6 +19,8 @@ const sharedBle = vi.hoisted(() => ({
 vi.mock('capacitor-mesh-ble', () => ({ MeshBle: sharedBle }))
 
 import {
+  armRssiWindow,
+  bleMeshRelaying,
   broadcastBle,
   decodeBleReliabilityFrame,
   encodeBleReliabilityFrame,
@@ -112,5 +116,34 @@ describe('Flock BLE reconciliation adapter', () => {
     const legacyPeerWrap = wrap('f')
     sharedBle.listeners.get('frame')?.({ from: 'old-client', data: legacyPeerWrap })
     expect(received).toEqual([legacyPeerWrap])
+  })
+
+  describe('RSSI proximity honesty gate', () => {
+    it('does not arm sampling — and never binds the rssi listener — while relaying (crowd/mesh mode)', async () => {
+      await startBle({ room: 'mesh', selfId: 'alice', serviceUuid: 'mesh', hops: 3 }, () => {})
+      expect(bleMeshRelaying()).toBe(true)
+      const w = await armRssiWindow('bob')
+      expect(w).toBeNull() // attribution isn't honest across relays — read as "no band"
+      expect(sharedBle.startRssiSampling).not.toHaveBeenCalled()
+      expect(sharedBle.listeners.has('rssi')).toBe(false)
+    })
+
+    it('arms a peer-filtered window on a direct, non-relaying link (discreet mode)', async () => {
+      await startBle({ room: 'svc', selfId: 'alice', serviceUuid: 'svc', hops: 0 }, () => {})
+      expect(bleMeshRelaying()).toBe(false)
+      const w = await armRssiWindow('bob')
+      expect(w).not.toBeNull()
+      expect(sharedBle.startRssiSampling).toHaveBeenCalledOnce()
+      // The window only surfaces samples attributed to the requested peer.
+      sharedBle.listeners.get('rssi')?.({ peer: 'carol', address: 'MAC-C', rssi: -50, source: 'gatt', at: Date.now() })
+      sharedBle.listeners.get('rssi')?.({ peer: 'bob', address: 'MAC-B', rssi: -55, source: 'gatt', at: Date.now() })
+      expect(w!.values()).toEqual([-55])
+      w!.stop()
+    })
+
+    it('is inert with the mesh off', async () => {
+      expect(bleMeshRelaying()).toBe(false)
+      expect(await armRssiWindow('bob')).toBeNull() // not running → no band
+    })
   })
 })

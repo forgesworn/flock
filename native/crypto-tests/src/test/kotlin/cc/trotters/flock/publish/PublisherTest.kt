@@ -118,6 +118,33 @@ class PublisherTest {
         assertTrue(store.journal.none { it.contains("\"t\":\"pub\"") })
     }
 
+    private fun sessionConfig(zones: String = "[]") = """
+      {"v":1,"skHex":"${v.getString("identitySkHex")}","circleId":"${v.getString("circleId")}",
+       "seedHex":"${v.getString("seedHex")}","precision":6,"festivalUntil":0,
+       "relayUrls":["wss://r"],"offGridUntil":0,"noReportZones":$zones,
+       "sessionMinIntervalSec":5,"sessionHeartbeatSec":30,"sessionUntilSec":9999999999}
+    """.trimIndent()
+
+    @Test
+    fun `a live radar session lifts the published beacon to Exact precision`() {
+        val store = FakeStore(sessionConfig()); val relays = FakeRelays(1)
+        publisher(store, relays).onFix(51.5007, -0.1246, 10.0, 1_751_699_000_000)
+        assertEquals(1, relays.published.size)
+        // Emitted at Exact (9), not the base slider precision (6): the JS autoEmit twin.
+        assertTrue(store.journal.any { it.contains("\"t\":\"pub\"") && it.contains("\"p\":9") })
+    }
+
+    @Test
+    fun `a session lift is re-coarsened to the base share inside a coarse no-report zone`() {
+        val zones = """[{"policy":"coarse","area":{"kind":"circle","centre":{"lat":51.5007,"lon":-0.1246},"radiusMetres":200}}]"""
+        val store = FakeStore(sessionConfig(zones)); val relays = FakeRelays(1)
+        publisher(store, relays).onFix(51.5007, -0.1246, 10.0, 1_751_699_000_000)
+        assertEquals(1, relays.published.size)
+        // A session never overrides geography policy: over a sensitive address the
+        // Exact lift caps back to the base share (6), never leaking the building.
+        assertTrue(store.journal.any { it.contains("\"t\":\"pub\"") && it.contains("\"p\":6") })
+    }
+
     @Test
     fun `malformed skHex does not throw — build failure retries like publish failure`() {
         // Config with odd-length (invalid) skHex — buildBeaconWrapJson will throw
