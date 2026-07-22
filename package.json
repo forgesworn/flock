@@ -64,7 +64,7 @@
     "@forgesworn/flock": "git+ssh://git@github.com/forgesworn/flock-kit.git#b8429b0bccd069c858e808e291c1ad9d04b7c441",
     "@forgesworn/roost-kit": "github:forgesworn/roost-kit#9be5f7c06b5e410859ca15283e27c4bd42dfdfd5",
     "canary-kit": "^2.11.0",
-    "capacitor-mesh-ble": "github:forgesworn/capacitor-mesh-ble#b8f94020ac68e4da2c6a17160c7c788761d68482",
+    "capacitor-mesh-ble": "github:forgesworn/capacitor-mesh-ble#42a05198cd7e69cecd57b96a12350ab7dcd48b08",
     "mesh-kit": "git+ssh://git@github.com/forgesworn/mesh-kit.git#7aa9f211eef5f8455601f88aeea833829dfe7c28",
     "rendezvous-kit": "^1.21.6"
   },
