@@ -137,6 +137,10 @@ interface RadarSession {
   closingRate: number | null
   lastDistance: number | null
   lastDistanceAtMs: number | null
+  /** My own position at the last closing-rate sample — lets the rate rebase onto
+   *  the CURRENT target position so a beacon's position JUMP never spikes the
+   *  warmer/colder trend (only my own motion feeds it). */
+  lastMePos: { lat: number; lon: number } | null
   voiceLastAtMs: number
   /** The boundary-sticky clock hour every spoken direction uses (null = no
    *  honest bearing). One tracker feeds the callout, the milestone, the
@@ -267,6 +271,7 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
     closingRate: null,
     lastDistance: null,
     lastDistanceAtMs: null,
+    lastMePos: null,
     voiceLastAtMs: 0,
     spokenClockHour: null,
     lastSpokenClockHour: null,
@@ -303,7 +308,15 @@ export function openRadar(host: RadarHost, opts: { evergreen?: boolean } = {}): 
     if (!m || s.closed) return
     const t = host.getTarget()
     void m.startRadarGuide(t ? { lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, evergreen: s.evergreen, meshPeerId: host.meshPeerId ?? null } : null, s.muted, s.voice)
-      .then(() => { if (s.closed) void m.stopRadarGuide(); else s.nativeGuide = true })
+      .then(() => {
+        if (s.closed) { void m.stopRadarGuide(); return }
+        s.nativeGuide = true
+        // A beacon may have landed WHILE the guide was starting (radar opened
+        // target-less). Seed it now so the locked guide isn't stuck 'unavailable'
+        // until the next disclosure; idempotent with syncTarget's forward.
+        const cur = host.getTarget()
+        if (cur) void m.updateRadarTarget({ lat: cur.lat, lon: cur.lon, uncertaintyMetres: cur.uncertaintyMetres, timestampMs: cur.timestamp * 1000, meshPeerId: host.meshPeerId ?? null })
+      })
   })
   void startOrientation(s)
   const onVis = (): void => { if (!s.closed && document.visibilityState === 'visible') void acquireWakeLock(s) }
@@ -333,10 +346,13 @@ async function acquireWakeLock(s: RadarSession): Promise<void> {
 // A THIN consumer: native/ble.ts owns starting/stopping sampling and the
 // peer-filtered rolling window (armRssiWindow) — this only decides WHEN to
 // arm/disarm against the live disclosure and turns the window into a band
-// every tick. Attribution comes from the plugin (an RSSI sample is only ever
-// tagged with a mesh peer id already bound to that member by an authenticated
-// frame exchange — never a raw, unattributed advert), so armRssiWindow's peer
-// filter is exactly the "identified GATT link" rule, not an extra trust call.
+// every tick. Attribution comes from the plugin: a sample is tagged with the
+// mesh peer id bound to its MAC by a prior in-room frame exchange, and is emitted
+// ONLY on a direct, non-relaying link (discreet mode). In crowd/mesh mode the
+// plugin suppresses attribution (a bound id could be a relayer's MAC or injected
+// over the keyless crowd UUID) and ble.ts won't even arm — so the band is a
+// trusted-neighbour proximity hint, never treated as identity proof. The kit
+// honesty gates keep it to blend/hold, never a bearing, never below a 50 m GPS story.
 
 /** Re-evaluate arm/disarm against the LIVE disclosure every tick — never start
  *  sampling for a pin (no `meshPeerId`) or a deliberately coarse share, and
@@ -462,17 +478,25 @@ function gpsSpeed(s: RadarSession, my: { speed?: number | null } | null): number
 function syncTarget(s: RadarSession): void {
   const t = s.host.getTarget()
   if (!t) return
-  if (s.lastObservation && t.timestamp !== s.lastObservation.timestamp) {
+  // New disclosure = the first one we've seen, or a fresher timestamp. The moved
+  // interrupt needs a PRIOR observation to compare; the native forward does not.
+  const isFirst = !s.lastObservation
+  const changed = isFirst || t.timestamp !== s.lastObservation!.timestamp
+  if (!isFirst && t.timestamp !== s.lastObservation!.timestamp) {
     // A genuinely fresher beacon that MOVED gets its own interrupt — the user
     // must feel the direction change without looking (goal §6).
     if (targetMoved(s.lastObservation, { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres })) {
       movedPulse(s)
       s.movedAnnouncePending = true // the spoken twin rides the next tick's guidance
     }
-    if (s.nativeGuide) {
-      void nativeGuideApi().then((m) =>
-        m?.updateRadarTarget({ lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, meshPeerId: s.host.meshPeerId ?? null }))
-    }
+  }
+  // Forward to the native guide on the FIRST beacon too, not only on changes:
+  // radar can open before the target has ever beaconed (startRadarGuide(null)),
+  // and without this the locked-phone guide would sit 'unavailable' until the
+  // SECOND beacon — up to a full cadence (>=45 s) of silent guidance.
+  if (changed && s.nativeGuide) {
+    void nativeGuideApi().then((m) =>
+      m?.updateRadarTarget({ lat: t.lat, lon: t.lon, uncertaintyMetres: t.uncertaintyMetres, timestampMs: t.timestamp * 1000, meshPeerId: s.host.meshPeerId ?? null }))
   }
   s.lastObservation = { position: { lat: t.lat, lon: t.lon }, uncertaintyMetres: t.uncertaintyMetres, timestamp: t.timestamp }
 }
@@ -550,10 +574,19 @@ function tick(s: RadarSession): void {
     myAccuracyMetres: my?.accuracy ?? null,
   })
 
-  // Warmer/colder: smooth d(distance)/dt for the HOMING trend note.
-  if (g.distanceMetres !== null && s.lastDistance !== null && s.lastDistanceAtMs !== null) {
+  // Warmer/colder: smooth d(distance)/dt for the HOMING trend note. Beacons are
+  // discrete — the target's disclosed position JUMPS when one lands, and dividing
+  // that jump by the 0.5 s tick spikes the rate (a receding blip flips to a false
+  // "closing", and back, every beacon). Rebase the previous distance onto the
+  // CURRENT target position (using my previous fix), so the jump cancels and only
+  // MY motion toward where they are now feeds the trend — the geiger cadence still
+  // carries their own approach via the raw distance.
+  if (g.distanceMetres !== null && s.lastDistanceAtMs !== null && my && target) {
     const dt = (nowMs - s.lastDistanceAtMs) / 1000
-    s.closingRate = smoothClosingRate(s.closingRate, s.lastDistance, g.distanceMetres, dt, RATE_ALPHA)
+    const prevDist = s.lastMePos !== null
+      ? haversineMetres(s.lastMePos, target.position)
+      : s.lastDistance
+    if (prevDist !== null) s.closingRate = smoothClosingRate(s.closingRate, prevDist, g.distanceMetres, dt, RATE_ALPHA)
   }
 
   // Arrival: silence immediately, one short confirmation haptic (goal §4).
@@ -579,7 +612,11 @@ function tick(s: RadarSession): void {
   s.lastAnnouncedMode = mode
   s.lastBleClose = s.bleClose
   s.lastSpokenClockHour = s.spokenClockHour
-  if (g.distanceMetres !== null) { s.lastDistance = g.distanceMetres; s.lastDistanceAtMs = nowMs }
+  if (g.distanceMetres !== null) {
+    s.lastDistance = g.distanceMetres
+    s.lastDistanceAtMs = nowMs
+    if (my) s.lastMePos = { lat: my.lat, lon: my.lon }
+  }
   s.cue = cueFor(g, { mode, closingRateMps: s.closingRate, bleProximity: s.bleProximity })
   patchScope(s, g, target?.ageSeconds ?? null, heading, mode)
 }

@@ -42,7 +42,16 @@ class RadarGuidePlugin : Plugin() {
                 call.getString("meshPeerId"),
             )
         }
-        RadarGuideService.start(context)
+        // startForegroundService can throw on Android 12+ (a background-start
+        // restriction, or a missing FGS permission). Degrade to foreground-only
+        // radar rather than a half-started guide: JS treats a reject as "no native
+        // guide" and keeps its own audio/haptics, exactly like an old shell.
+        try {
+            RadarGuideService.start(context)
+        } catch (e: Exception) {
+            call.reject("radar guide start failed", e)
+            return
+        }
         call.resolve()
     }
 
