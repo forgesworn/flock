@@ -24,6 +24,52 @@ coercion, disclosure, metadata, native-background, and off-relay invariants.
 
 ## Why this is required
 
+**The concrete security failure is that removing a hostile member does not
+reliably keep that member out.**
+
+An attack using the acceptance-test actors is:
+
+1. `owner-a`, `member-b`, and `former-c` share a circle.
+2. `owner-a` removes `former-c` and sends the honest replacement seed to
+   `member-b`.
+3. `former-c` still knows the circle id and `member-b`'s public key. That is
+   normal former-member knowledge, not an owner-key or relay compromise.
+4. `former-c` signs and encrypts a personal-inbox `reseed` for that known circle,
+   containing a seed chosen by `former-c`.
+5. `member-b` verifies that the message is signed and decryptable, but the
+   current receive path checks only that the circle exists and the seed is new.
+   It does not require the signer to be the circle's lifecycle authority and
+   does not require the reseed to extend the exact epoch `member-b` holds.
+6. `member-b` adopts the attacker-chosen seed. `owner-a` and `member-b` are now
+   split across different circle states, while `former-c` knows the seed held by
+   `member-b` and can create traffic that device can decrypt.
+
+Because shared-inbox traffic is also processed before a single current-member
+gate, attacker-authored traffic can then reach map, alert, buzz, ring, find,
+notification, join, or lifecycle handling before the application establishes
+that the signer is still allowed in the circle. Separately, any signer able to
+produce a valid disband payload can currently pass the payload/signer binding;
+the receiver does not additionally prove that the signer may end the circle.
+
+The attacker does **not** need the owner's private key, control of a relay, or a
+cryptographic break. A removed member already has the identifiers and member
+pubkeys needed to address surviving devices. The missing check is application
+authority and state continuity.
+
+The resulting failures are not cosmetic:
+
+- a removed member can split surviving members onto attacker-selected state;
+- the attacker can regain a usable shared secret with a targeted survivor;
+- location and safety effects may be accepted from someone the user believes
+  has been removed;
+- an ordinary or removed member may end a circle they do not control;
+- stale or competing reseeds can roll devices backwards or leave honest members
+  permanently disagreeing about the current circle.
+
+For a cooperative group these cases may never occur. Flock's threat model
+explicitly includes relationships becoming hostile, compromised, or coercive,
+so removal must remain valid when the removed person actively resists it.
+
 The current reseed path proves that a personal-inbox message is correctly signed
 and decryptable by its recipient, but the application does not prove that its
 sender is authorised to change the named circle or that the new seed extends the
@@ -47,6 +93,22 @@ The current browser tests prove the **honest path**: one member removes another,
 the retained members receive the new seed, and the removed browser stays on the
 old inbox. They do not prove the hostile-former-member, forged-transition,
 competing-rotation, or unauthorised-disband cases.
+
+### Non-negotiable security outcome
+
+After `owner-a` removes `former-c`:
+
+- every retained device must remain on the state authorised by `owner-a`;
+- a reseed, catch-up, removal, authority change, or disband authored by
+  `former-c` must be rejected without changing state or causing an application
+  side effect;
+- knowing the old seed, circle id, roster, or retained member pubkeys must not
+  let `former-c` regain future access;
+- replaying an older valid transition must not roll any retained device back;
+- `owner-a` and `member-b` must still converge when messages are delayed,
+  duplicated, reordered, or delivered after an offline period.
+
+This is the minimum promise the implementation and hostile-path tests must prove.
 
 ## Security boundary
 
