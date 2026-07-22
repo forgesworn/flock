@@ -56,13 +56,16 @@ test.describe('radar session — live navigation', () => {
     const shell = A.locator('#radar-shell')
     await expect(shell).toBeVisible()
     await expect(shell.locator('#radar-distance')).toHaveText(/\d/)
-    // The precision lift, observed: B never raised their slider, yet the session
-    // makes A's radar navigate precisely — NOT the "rough area only" a default
-    // coarse share would force (the bug this closes).
-    await expect(shell.locator('#radar-status')).not.toContainText(/rough area/i, { timeout: 15_000 })
     await A.waitForTimeout(7_000) // clear the 5 s session floor (jittered)
     await setLocation(B, { latitude: LONDON.latitude + 0.00027, longitude: LONDON.longitude }) // ~30 m from A
+    // The precision lift, observed end to end: B never touched their slider, yet
+    // the session lifts B to Exact AND to high-accuracy GPS sampling, so B's move
+    // publishes a precise beacon and A's radar zooms to a 50 m scale — UNREACHABLE
+    // at the default ~610 m coarse cell, whose uncertainty would floor the scope at
+    // ~1 km — and never reads "rough area only". This is the bug this closes:
+    // cadence-only sessions left a default pair navigating a 610 m blob.
     await expect(shell.locator('#radar-range')).toHaveText('50 m', { timeout: 15_000 })
+    await expect(shell.locator('#radar-status')).not.toContainText(/rough area/i)
     await shell.locator('.radar-stop').click()
 
     // B stops the session. B's pill goes at once; A's ends on the stop signal

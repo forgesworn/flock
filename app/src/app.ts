@@ -4085,6 +4085,7 @@ function startRadarSessionLocal(s: LiveRadarSession): void {
   radarSessions.set(s.peer, s)
   toast(`Live with ${nameFor(s.peer)} — ${Math.round(Math.min(s.ttlSec, RADAR_SESSION.maxTtlSec) / 60)} min`)
   if (dmPeer === s.peer) mountDmSheet()
+  syncWatch() // the session lifts to Exact — re-tier to high-accuracy GPS now
   refresh() // re-render + (native) publish-mirror resync pick up the lift
 }
 
@@ -4098,6 +4099,7 @@ function endRadarSession(pk: string, mine: boolean): void {
   if (mine) void sendRadarSessionSignal(pk, s.circleId, encodeSessionText({ kind: 'stop', sessionId: s.sessionId }))
   toast('Live navigation ended')
   if (dmPeer === pk) mountDmSheet()
+  syncWatch() // session over → drop back to the slider's low-power tier
   refresh()
 }
 
@@ -4591,7 +4593,13 @@ function shouldSample(): boolean {
 // too. Street-level and finer needs GPS, or the "exact" pin would quietly be a
 // network guess. (Minimal-footprint north star — Phase H.)
 function desiredHighAccuracy(): boolean {
-  return sharePrecisionOf(activeCircle()) >= 7
+  const c = activeCircle()
+  // A live radar session lifts the ambient share to Exact — which needs GPS, not
+  // the low-power network location a coarse share runs on. Without this the lifted
+  // precision-9 geohash would encode a low-accuracy network fix (precise-looking,
+  // imprecise in truth). Match the watch tier to the session.
+  if (c && sessionCadenceOptions(radarSessions, c.id, nowSec()) !== null) return true
+  return sharePrecisionOf(c) >= 7
 }
 let watchHighAccuracy = true // accuracy tier the running watch was armed at
 

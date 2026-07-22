@@ -10,7 +10,12 @@
 > be navigated to (the pill says "share exactly"), so it lifts precision to Exact
 > for the window, exactly like the one-shot "come to me" share — implemented as a
 > `pickup`-trigger emission at full precision in `autoEmit` (JS) and
-> `effectivePrecision` (native), both gated by `sessionUntilSec`. Every geography
+> `effectivePrecision` (native), both gated by `sessionUntilSec`. A live session
+> also re-tiers the location watch to **high-accuracy GPS** (`desiredHighAccuracy`
+> +`syncWatch` on start/end) — without it the lifted precision-9 geohash would
+> encode a low-power network fix (precise-looking, imprecise in truth), and a
+> default-precision member on `pollLocation` would not even sample promptly enough
+> to feel live. Every geography
 > cap still applies (a no-report **coarse** zone re-coarsens the lift back to the
 > base share, a **withhold** zone withholds, a private posture never beacons). The
 > §"Publisher integration" line below about honouring a lowered slider as a ceiling
