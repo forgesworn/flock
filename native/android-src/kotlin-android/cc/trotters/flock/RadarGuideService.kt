@@ -150,6 +150,8 @@ class RadarGuideService : Service() {
     // loop, like every other tick-loop field here. (rssi, atEpochMs) pairs,
     // oldest first.
     private val bleWindow = ArrayDeque<Pair<Double, Long>>()
+    /** Last derived band, fed back for the sticky-boundary hysteresis (JS parity). */
+    private var lastBleProximity: String? = null
 
     // Voice: pre-baked clips (from assets) + Android TTS fallback.
     private var tts: TextToSpeech? = null
@@ -350,7 +352,9 @@ class RadarGuideService : Service() {
     private fun currentBleProximity(nowMs: Long): String? {
         val cutoff = nowMs - BLE_WINDOW_MAX_AGE_MS
         while (bleWindow.isNotEmpty() && bleWindow.first().second < cutoff) bleWindow.removeFirst()
-        return bleProximityFromRssi(bleWindow.map { it.first })
+        val band = bleProximityFromRssi(bleWindow.map { it.first }, lastBleProximity)
+        lastBleProximity = band
+        return band
     }
 
     /** Re-acquire the capped partial wakelock before its timeout expires, so a

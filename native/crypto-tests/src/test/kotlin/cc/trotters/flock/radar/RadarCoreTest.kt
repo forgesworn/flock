@@ -311,6 +311,18 @@ class RadarCoreTest {
     }
 
     @Test
+    fun `ble band hysteresis matches`() {
+        val cases = vectors().getJSONArray("bleHysteresis")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val samples = c.getJSONArray("samples").doubles()
+            val prev = if (c.isNull("prev")) null else c.optString("prev")
+            val band = bleProximityFromRssi(samples, prev)
+            if (c.isNull("expected")) assertNull(band, "ble hysteresis case $i") else assertEquals(c.getString("expected"), band, "ble hysteresis case $i")
+        }
+    }
+
+    @Test
     fun `ble assist usability and cadence floor match`() {
         val cases = vectors().getJSONArray("bleAssist")
         for (i in 0 until cases.length()) {

@@ -192,6 +192,20 @@ const BLE_PROXIMITY_CASES: number[][] = [
   [-62, -58, -64, -59],
 ]
 
+// Sticky-boundary hysteresis: the same window reads differently depending on the
+// incumbent band, so a fading link on a boundary doesn't flap the cadence.
+const BLE_HYSTERESIS_CASES: { samples: number[]; prev: BleProximity }[] = [
+  { samples: [-62, -62, -62], prev: 'immediate' }, // holds immediate within the margin
+  { samples: [-62, -62, -62], prev: 'near' },      // a near link stays near at the same reading
+  { samples: [-65, -65, -65], prev: 'immediate' }, // demotes only past -60 - 4
+  { samples: [-58, -58, -58], prev: 'near' },      // holds near — promotion needs > -60 + 4
+  { samples: [-55, -55, -55], prev: 'near' },      // clearly above → immediate
+  { samples: [-78, -78, -78], prev: 'far' },       // stays far — needs > -80 + 4
+  { samples: [-75, -75, -75], prev: 'far' },       // clearly above → near
+  { samples: [-84, -84, -84], prev: 'near' },      // demotes to far past -80 - 4
+  { samples: [-58], prev: 'immediate' },           // thin window clears the band (null)
+]
+
 const bleTarget = (lat: number, u = 2.4, age = 5): NonNullable<RadarInput['target']> =>
   ({ position: { lat, lon: 0 }, uncertaintyMetres: u, ageSeconds: age })
 
@@ -268,6 +282,7 @@ function build(): Record<string, unknown> {
     })),
     // Phase 3 — BLE RSSI proximity assist (append-only from here).
     bleProximity: BLE_PROXIMITY_CASES.map((samples) => ({ samples, median: medianRssi(samples), expected: bleProximityFromRssi(samples) })),
+    bleHysteresis: BLE_HYSTERESIS_CASES.map(({ samples, prev }) => ({ samples, prev, expected: bleProximityFromRssi(samples, undefined, prev) })),
     bleAssist: BLE_ASSIST_CASES.map(({ input, ble }) => {
       const g = radarGuidance(input)
       return { input, ble, usable: bleAssistUsable(g, ble), floorMetres: bleCadenceFloorMetres(ble) }

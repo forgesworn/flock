@@ -373,7 +373,10 @@ function syncBleArm(s: RadarSession, target: { uncertaintyMetres: number } | nul
  *  its own samples, so a quiet mesh (dropped, out of range) decays to null
  *  within one window's width without any extra bookkeeping here. */
 function updateBleWindow(s: RadarSession): void {
-  s.bleProximity = s.bleWindow ? bleProximityFromRssi(s.bleWindow.values()) : null
+  // Feed the CURRENT band back as the previous, so the boundaries stay sticky and
+  // a fading link doesn't flap the cadence (the RHS reads s.bleProximity before the
+  // assignment). A disarmed window resets it to null → next arm re-acquires raw.
+  s.bleProximity = s.bleWindow ? bleProximityFromRssi(s.bleWindow.values(), RADAR, s.bleProximity) : null
 }
 
 // ── Sensors ──────────────────────────────────────────────────────────────────

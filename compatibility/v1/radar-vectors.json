@@ -2021,6 +2021,87 @@
       "expected": "near"
     }
   ],
+  "bleHysteresis": [
+    {
+      "samples": [
+        -62,
+        -62,
+        -62
+      ],
+      "prev": "immediate",
+      "expected": "immediate"
+    },
+    {
+      "samples": [
+        -62,
+        -62,
+        -62
+      ],
+      "prev": "near",
+      "expected": "near"
+    },
+    {
+      "samples": [
+        -65,
+        -65,
+        -65
+      ],
+      "prev": "immediate",
+      "expected": "near"
+    },
+    {
+      "samples": [
+        -58,
+        -58,
+        -58
+      ],
+      "prev": "near",
+      "expected": "near"
+    },
+    {
+      "samples": [
+        -55,
+        -55,
+        -55
+      ],
+      "prev": "near",
+      "expected": "immediate"
+    },
+    {
+      "samples": [
+        -78,
+        -78,
+        -78
+      ],
+      "prev": "far",
+      "expected": "far"
+    },
+    {
+      "samples": [
+        -75,
+        -75,
+        -75
+      ],
+      "prev": "far",
+      "expected": "near"
+    },
+    {
+      "samples": [
+        -84,
+        -84,
+        -84
+      ],
+      "prev": "near",
+      "expected": "near"
+    },
+    {
+      "samples": [
+        -58
+      ],
+      "prev": "immediate",
+      "expected": null
+    }
+  ],
   "bleAssist": [
     {
       "input": {

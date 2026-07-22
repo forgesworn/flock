@@ -61,7 +61,7 @@
   },
   "dependencies": {
     "@forgesworn/covey-kit": "github:forgesworn/covey-kit#d87c7a91da0e61499d04564129ce2110048089bb",
-    "@forgesworn/flock": "git+ssh://git@github.com/forgesworn/flock-kit.git#b8429b0bccd069c858e808e291c1ad9d04b7c441",
+    "@forgesworn/flock": "git+ssh://git@github.com/forgesworn/flock-kit.git#a714b910e625d0297422f4c53014e11d310e0518",
     "@forgesworn/roost-kit": "github:forgesworn/roost-kit#9be5f7c06b5e410859ca15283e27c4bd42dfdfd5",
     "canary-kit": "^2.11.0",
     "capacitor-mesh-ble": "github:forgesworn/capacitor-mesh-ble#42a05198cd7e69cecd57b96a12350ab7dcd48b08",

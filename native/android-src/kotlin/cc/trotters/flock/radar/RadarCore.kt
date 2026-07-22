@@ -91,6 +91,8 @@ object Radar {
     /** Cadence floors: an immediate/near band paces the geiger AS IF this close. */
     const val BLE_IMMEDIATE_FLOOR_METRES = 3.0
     const val BLE_NEAR_FLOOR_METRES = 10.0
+    /** Band hysteresis (dBm): the incumbent band is sticky by this margin. */
+    const val BLE_BAND_HYSTERESIS_DB = 4.0
 }
 
 data class TargetObservation(
@@ -259,13 +261,25 @@ fun medianRssi(samples: List<Double>): Double? {
 /** RSSI sample window → proximity band ("immediate" | "near" | "far" | null).
  *  Bands only — RSSI-to-metres is pseudo-science and no number is ever derived
  *  from radio. Fewer than Radar.BLE_MIN_SAMPLES claims nothing: one lucky
- *  packet is not proximity. */
-fun bleProximityFromRssi(samples: List<Double>): String? {
+ *  packet is not proximity. `prevBand` makes the boundaries sticky (JS parity):
+ *  promotion needs the median clearly above a threshold (+margin), demotion
+ *  clearly below (−margin); a fresh window (null prev) reads the raw band. */
+fun bleProximityFromRssi(samples: List<Double>, prevBand: String? = null): String? {
     if (samples.size < Radar.BLE_MIN_SAMPLES) return null
     val median = medianRssi(samples) ?: return null
+    if (prevBand == null) {
+        return when {
+            median >= Radar.BLE_IMMEDIATE_RSSI -> "immediate"
+            median >= Radar.BLE_NEAR_RSSI -> "near"
+            else -> "far"
+        }
+    }
+    val h = Radar.BLE_BAND_HYSTERESIS_DB
+    val immediateThreshold = if (prevBand == "immediate") Radar.BLE_IMMEDIATE_RSSI - h else Radar.BLE_IMMEDIATE_RSSI + h
+    val nearThreshold = if (prevBand == "far") Radar.BLE_NEAR_RSSI + h else Radar.BLE_NEAR_RSSI - h
     return when {
-        median >= Radar.BLE_IMMEDIATE_RSSI -> "immediate"
-        median >= Radar.BLE_NEAR_RSSI -> "near"
+        median >= immediateThreshold -> "immediate"
+        median >= nearThreshold -> "near"
         else -> "far"
     }
 }
