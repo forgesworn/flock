@@ -71,6 +71,39 @@ keys.
   Heavier (bonding UX, pairing prompts) and still needs the in-band identity proof, so A
   is preferred.
 
+## Concrete touchpoints (traced 2026-07-22 — ready to implement Approach A)
+
+The seal-verified sender already exists in the flock unwrap path; the wiring gap is that
+attribution is decided a layer BELOW it, from unverified transport metadata. Specifically:
+
+- **`app.ts onBleFrame(data)`** receives only the opaque wrap `{id,pubkey,content,sig}` —
+  the wrap `pubkey` is the NIP-59 EPHEMERAL key, not the sender. It DROPS the transport
+  `from` and never sees the delivering MAC or hop count (ble.ts calls `onFrame(payload,
+  from)` but onBleFrame ignores `from`). It then `dispatchWrap(c.id, wrap, deriveInbox(
+  c.seedHex).sk)` for every circle; the ONE circle whose inbox key decrypts reveals the
+  real, seal-verified sender (`rumor.pubkey`). **That success point is the only honest
+  identity signal, and today nothing feeds it back to BLE.**
+- **Plan:**
+  1. Plugin (Android `MeshBlePlugin` + iOS `MeshBlePlugin.swift`): stop attributing RSSI
+     via `peerAddresses` (the `learnPeer` envelope binding). Add a SEPARATE
+     `confirmedAddresses` (peer→{address,atMs}) populated ONLY by a new `confirmPeer(peer,
+     address)` bridge method; `emitRssiForAddress` attributes via `confirmedAddresses`
+     within a freshness window (a rotated MAC lapses). Include the delivering `address`
+     and travelled-hop count on the `frame` event.
+  2. `ble.ts`: thread `address`+`hops` through to `onBleFrame`; expose `confirmPeer`.
+  3. `app.ts onBleFrame(data, address, hops)`: only when `hops === 0` (direct) AND a
+     `dispatchWrap` unwrap SUCCEEDS (seal author verified), call `confirmPeer(rumor.pubkey,
+     address)`. A spoofed `f` never unwraps → never confirms; a relayed frame has hops>0.
+  4. Once confirmed attribution is live and field-proven, RELAX the discreet-mode gate
+     (`ble.ts bleMeshRelaying` / `MeshBleWire.shouldAttributeRssi`) so crowd-mode BLE assist
+     returns — now honestly, on verified direct links only.
+- **Tests:** the acceptance list above, plus a unit test that a `confirmedAddresses` entry
+  older than the freshness window yields no attribution, and that `onBleFrame` confirms
+  only on a successful unwrap.
+- **Effort:** two-platform plugin change + crypto-path wiring + honesty tests — a focused
+  slice of its own, deliberately NOT rushed alongside other work (a subtle error re-opens
+  the hole). The shipped discreet-mode gate is the safe interim until this lands.
+
 ## Acceptance
 - A frame with a spoofed `f` (valid crowd UUID, no valid seal for that pubkey) produces
   **no** RSSI attribution to the impersonated member — in crowd mode, foreground and locked.
