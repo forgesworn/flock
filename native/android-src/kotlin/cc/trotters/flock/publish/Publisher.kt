@@ -34,15 +34,20 @@ class FlockPublisher(
         store.appendJournal("""{"t":"fix","at":${fixTimeMs / 1000},"rx":$now}""")
         if (cfg.offGridUntil > now) return
         // No-report cap (decideEmission's last word): possibly inside a withhold
-        // zone → nothing; a coarse cap can't lower an already-coarse beacon.
+        // zone → nothing; a coarse zone re-coarsens to the base share ceiling
+        // (JS applyNoReportCap: min(precision, coarse)). Without a session lift
+        // effectivePrecision == shareCeiling, so this stays a no-op — but a session
+        // lift to Exact MUST be capped back over a sensitive address.
         val cap = noReportPolicyAt(LatLng(lat, lon), cfg.zones, accuracyMetres)
         if (cap == "withhold") return
-        val precision = effectivePrecision(cfg, now)
+        val precision = effectivePrecision(cfg, now).let {
+            if (cap == "coarse") minOf(it, shareCeiling(cfg, now)) else it
+        }
         val geohash = encodeGeohash(lat, lon, precision)
         val prev = store.getCadence(cfg.circleId)
-        // A live radar session lifts the CADENCE floors only — strictly while
-        // now < sessionUntilSec, so the lift expires on THIS clock even if the
-        // WebView never wakes to withdraw it. Precision and every cap above
+        // A live radar session lifts the CADENCE floors (precision lifted above) —
+        // strictly while now < sessionUntilSec, so the lift expires on THIS clock
+        // even if the WebView never wakes to withdraw it. Every cap above
         // (off-grid, no-report, posture) ran exactly as without a session.
         val sessionLive = cfg.sessionUntilSec > now && cfg.sessionMinIntervalSec > 0
         val minInterval = if (sessionLive) cfg.sessionMinIntervalSec else COARSE_MIN_INTERVAL

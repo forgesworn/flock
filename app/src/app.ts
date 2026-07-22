@@ -4976,27 +4976,34 @@ async function autoEmit(): Promise<void> {
   // is simply off here. The native background publisher mirrors this guard.
   if (store.postureOf(c) === 'private') { refresh(); return }
   const f = fix
-  // Mode is pinned to the share-live path regardless of the circle's stored mode
-  // (legacy 'family' circles behave the same) — the slider drives the precision,
-  // and no-report zones still cap or withhold inside a private place.
+  // A live radar session is an explicit, mutual, time-boxed consent to be
+  // navigated to — so while one is live this circle's ambient share lifts to
+  // Exact precision (the come-to-me pattern: a 'pickup' trigger with full
+  // precision) as well as lifting the cadence floors below. Without a session
+  // the slider drives the precision exactly as before. Every geography cap still
+  // runs in decideEmission: a no-report COARSE zone re-coarsens the lift back to
+  // the base share (min(Exact, base)), a WITHHOLD zone still withholds, and a
+  // private posture already returned above — a session never overrides policy,
+  // only the ambient precision/cadence.
+  const now = nowSec()
+  const sessionOpts = sessionCadenceOptions(radarSessions, c.id, now)
+  const sessionLive = sessionOpts !== null
   const plan = decideEmission({
     mode: 'nightout',
     position: { lat: f.lat, lon: f.lon },
-    trigger: 'none',
+    trigger: sessionLive ? 'pickup' : 'none',
     offGrid: false,
     noReportZones: persisted.noReportZones,
     accuracyMetres: f.accuracy,
-  }, { coarse: sharePrecisionOf(c) })
-  const type = signalTypeForReason(plan.reason)
+  }, { coarse: sharePrecisionOf(c), full: PRECISION_MAX })
+  // A session beacon is an ambient position beacon at lifted precision — force
+  // the normal 'beacon' wire type (as sendExactBeacon does), never a 'pickup'
+  // alert, so the receiver renders it as a position, not a pickup request.
+  const type = sessionLive ? 'beacon' : signalTypeForReason(plan.reason)
   // The guard narrows `type` to a LocationSignalType for buildLocationSignal.
   if (!type || type === 'help' || plan.action === 'withhold') { refresh(); return }
   const geohash = encode(f.lat, f.lon, plan.precision)
   const prev = beaconCadence.get(c.id) ?? { lastGeohash: null, lastSentAt: 0 }
-  const now = nowSec()
-  // A live radar session lifts the CADENCE floors (5 s moving / 30 s still) —
-  // and nothing else: precision stays the chosen posture, no-report zones and
-  // the whole policy above ran exactly as without a session.
-  const sessionOpts = sessionCadenceOptions(radarSessions, c.id, now)
   // Timing hygiene (audit F1): re-roll the cadence each tick so the interval
   // itself isn't perfectly periodic on the wire.
   if (!shouldEmitBeacon(geohash, prev, now, {

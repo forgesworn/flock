@@ -15,10 +15,11 @@ data class PublishConfig(
     val relayUrls: List<String>,
     val zones: List<NoReportZone>,
     val offGridUntil: Long,
-    // Radar session (live navigation) cadence lift — all 0 when none is live.
-    // Applied strictly while now < sessionUntilSec, so a session expires on
-    // THIS clock even if the WebView never wakes to withdraw it. Cadence
-    // only: precision and every policy cap apply exactly as without.
+    // Radar session (live navigation) lift — all 0 when none is live. Applied
+    // strictly while now < sessionUntilSec, so a session expires on THIS clock
+    // even if the WebView never wakes to withdraw it. Lifts cadence AND precision
+    // (to Exact) exactly like the JS autoEmit twin; every geography cap (off-grid,
+    // no-report withhold/coarse) still applies above.
     val sessionMinIntervalSec: Long = 0,
     val sessionHeartbeatSec: Long = 0,
     val sessionUntilSec: Long = 0,
@@ -27,6 +28,7 @@ data class PublishConfig(
 private const val PRECISION_MIN = 3
 private const val PRECISION_MAX = 9
 private const val FESTIVAL_PRECISION = PRECISION_MAX
+private const val SESSION_PRECISION = PRECISION_MAX // live navigation lifts to Exact
 
 fun parsePublishConfig(json: String): PublishConfig? = try {
     val o = JSONObject(json)
@@ -63,8 +65,20 @@ fun parsePublishConfig(json: String): PublishConfig? = try {
     )
 } catch (_: Exception) { null }
 
-/** sharePrecisionOf twin: slider base clamped 3..9, festival boost (never lower). */
-fun effectivePrecision(cfg: PublishConfig, nowSec: Long): Int {
+/** sharePrecisionOf twin: slider base clamped 3..9, festival boost (never lower).
+ *  This is the ambient share ceiling AND the coarse no-report cap ceiling (the JS
+ *  `p.coarse` a session lift is capped back to inside a coarse zone). */
+fun shareCeiling(cfg: PublishConfig, nowSec: Long): Int {
     val base = cfg.precision.coerceIn(PRECISION_MIN, PRECISION_MAX)
     return if (cfg.festivalUntil > nowSec) maxOf(base, FESTIVAL_PRECISION) else base
+}
+
+/** The precision a beacon emits at, before the no-report coarse cap: the ambient
+ *  share ceiling, lifted to Exact while a radar session is live (never lowers a
+ *  finer share). Mirrors the JS autoEmit lift (a 'pickup' trigger at full precision
+ *  while a session is live, the slider otherwise). */
+fun effectivePrecision(cfg: PublishConfig, nowSec: Long): Int {
+    val ceiling = shareCeiling(cfg, nowSec)
+    val sessionLive = cfg.sessionUntilSec > nowSec && cfg.sessionMinIntervalSec > 0
+    return if (sessionLive) maxOf(ceiling, SESSION_PRECISION) else ceiling
 }

@@ -1,4 +1,4 @@
-import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, setSharePrecision, openDmWith, myPubkey, setLocation, LONDON, SOHO } from './fixtures'
+import { test, expect, newPerson, createCircle, inviteCode, joinByCode, startSharing, openDmWith, myPubkey, setLocation, LONDON, SOHO } from './fixtures'
 
 // Radar session (live navigation): the consented, time-boxed cadence lift —
 // docs/plans/2026-07-21-radar-session-design.md. This proves the whole consent
@@ -16,12 +16,13 @@ test.describe('radar session — live navigation', () => {
     const code = await inviteCode(A)
     await joinByCode(B, code)
 
-    // Both share (an approach is mutual); B precisely — the session lifts
-    // CADENCE only; precision stays whatever each member chose (asserted
-    // implicitly: A's radar reads exact distances from B's chosen precision).
+    // Both share (an approach is mutual) at the DEFAULT precision — a coarse
+    // neighbourhood cell. The session lifts precision to Exact (as well as
+    // cadence), so A's radar can produce a real bearing/distance to B despite
+    // neither having touched the precision slider (asserted below: the scope
+    // navigates precisely, never "rough area only").
     await startSharing(A)
     await startSharing(B)
-    await setSharePrecision(B, 9)
 
     const aPk = await myPubkey(A)
     const bPk = await myPubkey(B)
@@ -55,6 +56,10 @@ test.describe('radar session — live navigation', () => {
     const shell = A.locator('#radar-shell')
     await expect(shell).toBeVisible()
     await expect(shell.locator('#radar-distance')).toHaveText(/\d/)
+    // The precision lift, observed: B never raised their slider, yet the session
+    // makes A's radar navigate precisely — NOT the "rough area only" a default
+    // coarse share would force (the bug this closes).
+    await expect(shell.locator('#radar-status')).not.toContainText(/rough area/i, { timeout: 15_000 })
     await A.waitForTimeout(7_000) // clear the 5 s session floor (jittered)
     await setLocation(B, { latitude: LONDON.latitude + 0.00027, longitude: LONDON.longitude }) // ~30 m from A
     await expect(shell.locator('#radar-range')).toHaveText('50 m', { timeout: 15_000 })

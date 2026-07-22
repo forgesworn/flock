@@ -1,6 +1,22 @@
 # Radar session — consented liveliness for an active approach
 
 **Date:** 2026-07-21 · **Status:** design · **Owner:** flock-kit (pure session rules) + flock app + native
+
+> **Addendum 2026-07-22 — precision lift SHIPPED.** The first cut lifted cadence
+> only, which left a default-precision pair (neighbourhood, ~610 m) reading "rough
+> area only" for the whole session — the consent pill promised "share exactly" but
+> the radar never got a bearing. Resolved in favour of §"What a session is" (both
+> devices publish **Exact**): accepting a session is explicit, informed consent to
+> be navigated to (the pill says "share exactly"), so it lifts precision to Exact
+> for the window, exactly like the one-shot "come to me" share — implemented as a
+> `pickup`-trigger emission at full precision in `autoEmit` (JS) and
+> `effectivePrecision` (native), both gated by `sessionUntilSec`. Every geography
+> cap still applies (a no-report **coarse** zone re-coarsens the lift back to the
+> base share, a **withhold** zone withholds, a private posture never beacons). The
+> §"Publisher integration" line below about honouring a lowered slider as a ceiling
+> is superseded for the ambient slider; an **optional explicit hard cap** ("never
+> share finer than X even in live nav") remains a clean future addition and is the
+> right home for the "Street-precision member" posture test.
 **Parent:** `2026-07-21-radar-worlds-best.md` item B · **Consent posture:** the v1 goal doc's
 "Optional active radar session", unchanged: *explicit, time-boxed, visible on the other
 device* — radar remains a better way to consume a permitted disclosure, never a new
