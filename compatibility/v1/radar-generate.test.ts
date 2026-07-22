@@ -46,6 +46,8 @@ import {
   type ModeInput,
   type CueContext,
   type BleProximity,
+  type RadarMode,
+  type RadarState,
 } from '@forgesworn/flock'
 
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), 'radar-vectors.json')
@@ -168,13 +170,26 @@ const COURSE_CASES = [
 // v2.1 clock-face + speakable ranges + periodic line (field test 2026-07-21).
 const CLOCK_CASES = [null, 0, 14, 16, 44, 46, 90, 180, -180, -90, -16, -44, 359]
 const SPEAKABLE_CASES = [1, 12, 13, 60, 90, 340, 370, 1240, 1260, 2600, 7400, 50_000]
-const VOICE_LINE_CASES: { kind: 'periodic' | 'milestone' | 'bearing-change' | 'moved'; input: RadarInput; distanceMetres: number }[] = [
+type VoiceLineKind = 'periodic' | 'milestone' | 'bearing-change' | 'moved' | 'mode' | 'degraded' | 'arrived' | 'ble-close' | 'compass-unreliable'
+const VOICE_LINE_CASES: { kind: VoiceLineKind; input: RadarInput; distanceMetres: number; mode?: RadarMode; state?: RadarState }[] = [
   { kind: 'periodic', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 1000 },
   { kind: 'periodic', input: { me: { lat: 0, lon: 0 }, headingDeg: null, target: target(0.01) }, distanceMetres: 500 },
   { kind: 'periodic', input: { me: { lat: 0, lon: 0 }, headingDeg: 0, target: target(0.01, 610) }, distanceMetres: 1000 }, // coarse → range only
   { kind: 'milestone', input: { me: { lat: 0, lon: 0 }, headingDeg: 150, target: target(0.01) }, distanceMetres: 500 },
   { kind: 'bearing-change', input: { me: { lat: 0, lon: 0 }, headingDeg: 45, target: target(0.01) }, distanceMetres: 0 },
   { kind: 'moved', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 1000 },
+  // The five previously-unpinned kinds — fixed copy that must match the Kotlin port
+  // (RadarCore.kt voiceLine) exactly (layer-placement audit 2026-07-22).
+  { kind: 'arrived', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0 },
+  { kind: 'ble-close', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0 },
+  { kind: 'compass-unreliable', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0 },
+  { kind: 'mode', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0, mode: 'vector' },
+  { kind: 'mode', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0, mode: 'seek' },
+  { kind: 'mode', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0, mode: 'homing' },
+  { kind: 'degraded', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0, state: 'stale' },
+  { kind: 'degraded', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0, state: 'coarse' },
+  { kind: 'degraded', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0, state: 'no-fix' },
+  { kind: 'degraded', input: { me: { lat: 0, lon: 0 }, headingDeg: 30, target: target(0.01) }, distanceMetres: 0, state: 'unavailable' },
 ]
 
 // Phase 3 — BLE RSSI proximity assist (append-only; positional Kotlin reads of
@@ -275,11 +290,16 @@ function build(): Record<string, unknown> {
     course: COURSE_CASES.map((c) => ({ ...c, expected: courseFromFixes(c.prev, c.next) })),
     clockFace: CLOCK_CASES.map((rel) => ({ rel, hour: clockHour(rel), phrase: clockFacePhrase(rel) })),
     speakable: SPEAKABLE_CASES.map((m) => ({ m, expected: speakableDistanceMetres(m) })),
-    voiceLines: VOICE_LINE_CASES.map((c) => ({
-      ...c,
-      expected: voiceLine({ kind: c.kind, distanceMetres: c.distanceMetres } as Parameters<typeof voiceLine>[0],
-        radarGuidance(c.input), (m) => `${Math.round(m)} m`),
-    })),
+    voiceLines: VOICE_LINE_CASES.map((c) => {
+      const ev = c.kind === 'mode' ? { kind: 'mode', mode: c.mode }
+        : c.kind === 'degraded' ? { kind: 'degraded', state: c.state }
+        : c.kind === 'arrived' || c.kind === 'ble-close' || c.kind === 'compass-unreliable' || c.kind === 'bearing-change' ? { kind: c.kind }
+        : { kind: c.kind, distanceMetres: c.distanceMetres }
+      return {
+        ...c,
+        expected: voiceLine(ev as Parameters<typeof voiceLine>[0], radarGuidance(c.input), (m) => `${Math.round(m)} m`),
+      }
+    }),
     // Phase 3 — BLE RSSI proximity assist (append-only from here).
     bleProximity: BLE_PROXIMITY_CASES.map((samples) => ({ samples, median: medianRssi(samples), expected: bleProximityFromRssi(samples) })),
     bleHysteresis: BLE_HYSTERESIS_CASES.map(({ samples, prev }) => ({ samples, prev, expected: bleProximityFromRssi(samples, undefined, prev) })),

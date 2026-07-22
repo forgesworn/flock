@@ -288,7 +288,12 @@ class RadarCoreTest {
         for (i in 0 until cases.length()) {
             val c = cases.getJSONObject(i)
             val g = radarGuidance(parseInput(c.getJSONObject("input")))
-            val got = voiceLine(c.getString("kind"), g, distanceMetres = c.getDouble("distanceMetres"))
+            val got = voiceLine(
+                c.getString("kind"), g,
+                distanceMetres = c.getDouble("distanceMetres"),
+                mode = if (c.isNull("mode")) "seek" else c.optString("mode"),
+                degradedState = if (c.isNull("state")) "" else c.optString("state"),
+            )
             assertEquals(c.getString("expected"), got, "voice line case $i")
         }
     }

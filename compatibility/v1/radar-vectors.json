@@ -1951,6 +1951,213 @@
       },
       "distanceMetres": 1000,
       "expected": "They've moved — 1000 m, at your 11 o'clock"
+    },
+    {
+      "kind": "arrived",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "expected": "Within GPS reach — look around"
+    },
+    {
+      "kind": "ble-close",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "expected": "Very close — by Bluetooth"
+    },
+    {
+      "kind": "compass-unreliable",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "expected": "Compass unreliable — using your direction of travel"
+    },
+    {
+      "kind": "mode",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "mode": "vector",
+      "expected": "Vehicle mode"
+    },
+    {
+      "kind": "mode",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "mode": "seek",
+      "expected": "On-foot tracking"
+    },
+    {
+      "kind": "mode",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "mode": "homing",
+      "expected": "Closing in"
+    },
+    {
+      "kind": "degraded",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "state": "stale",
+      "expected": "Their location is stale — follow with care"
+    },
+    {
+      "kind": "degraded",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "state": "coarse",
+      "expected": "Rough area only"
+    },
+    {
+      "kind": "degraded",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "state": "no-fix",
+      "expected": "Waiting for your own position"
+    },
+    {
+      "kind": "degraded",
+      "input": {
+        "me": {
+          "lat": 0,
+          "lon": 0
+        },
+        "headingDeg": 30,
+        "target": {
+          "position": {
+            "lat": 0.01,
+            "lon": 0
+          },
+          "uncertaintyMetres": 2.4,
+          "ageSeconds": 5
+        }
+      },
+      "distanceMetres": 0,
+      "state": "unavailable",
+      "expected": "No location to navigate to"
     }
   ],
   "bleProximity": [
