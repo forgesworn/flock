@@ -112,17 +112,24 @@ voice UX is preserved and diffs stay reviewable.
 
 ## meatchat consideration
 
-- **Signed-presence is the shared CONCEPT, not shared CODE — and that's defensible.**
-  meatchat's `announce.ts` (`verifyAnnounce`, BIP-340 Schnorr over persona+venue+
-  nonce) solves the same root problem radar's planned verified-attribution fix needs:
-  *the BLE transport's claimed `from` is untrustworthy*. But the two apps have
-  **different trust models** — meatchat authenticates a lightweight persona announce;
-  flock already gets a seal-verified sender for free from its NIP-59 gift-wrap unwrap
-  (`dispatchWrap` success). Verdict: radar's verified-attribution fix should use
-  flock's OWN seal-author-on-unwrap (see 2026-07-22-ble-attribution-authentication.md,
-  Approach A), NOT adopt meatchat's announce — forcing a shared primitive across two
-  distinct trust models would be over-abstraction. Cross-reference announce.ts as
-  prior art; don't couple them.
+- **Build verified attribution ONCE — at the transport layer, not per app** (sharpened by
+  the shared-lib audit). meatchat's `announce.ts` already defeats the exact two threats
+  radar's planned fix targets: `verifyAnnounce` (BIP-340 signed presence — spoofing) AND
+  `verifyChannelProof` (Noise channel-binding *directness* proof — relay MITM), 21 tests,
+  app-local to meatchat. Don't lift it *verbatim* — flock's identity proof is a free
+  side-effect of its NIP-59 seal-on-unwrap, so it needs no separate signed beacon. But the
+  **transport-level primitives ARE shared and should not be duplicated**: (a) the
+  app-confirmed-attribution *contract* (`confirmPeer`) belongs in the **plugin** — both apps
+  have the untrusted-`from` problem; (b) a channel-binding **directness proof** belongs in
+  **mesh-kit** (which owns the Noise `SecureChannel`) — it is strictly stronger than the
+  `hops === 0` idea in an earlier draft, because the hop count rides the attacker-controlled
+  envelope. So my earlier "don't couple them" was right at the app-identity layer, wrong at
+  the transport layer: couple THERE, once. (Design updated in
+  2026-07-22-ble-attribution-authentication.md.)
+- **iOS parity is broken** — RSSI sampling + the honesty gate are Android-only; iOS rejects
+  the call (flock's try/catch masks it), and the plugin's "no-op elsewhere" API doc is
+  inaccurate. The security-relevant gate exists on one platform; port it with the
+  verified-attribution fix or iOS emits dishonest attributions.
 - **Proximity is a false cognate.** meatchat's `ambient.ts proximity` (0..1, for
   match scoring, NOT RSSI-derived) and radar's RSSI physical-ranging bands are
   legitimately separate concerns. No shared abstraction warranted.

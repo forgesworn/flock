@@ -91,9 +91,15 @@ attribution is decided a layer BELOW it, from unverified transport metadata. Spe
      within a freshness window (a rotated MAC lapses). Include the delivering `address`
      and travelled-hop count on the `frame` event.
   2. `ble.ts`: thread `address`+`hops` through to `onBleFrame`; expose `confirmPeer`.
-  3. `app.ts onBleFrame(data, address, hops)`: only when `hops === 0` (direct) AND a
-     `dispatchWrap` unwrap SUCCEEDS (seal author verified), call `confirmPeer(rumor.pubkey,
-     address)`. A spoofed `f` never unwraps → never confirms; a relayed frame has hops>0.
+  3. `app.ts onBleFrame(data, address, hops)`: on a SUCCESSFUL `dispatchWrap` unwrap (seal
+     author verified) over a DIRECT link, call `confirmPeer(rumor.pubkey, address)`. A
+     spoofed `f` never unwraps → never confirms. **CAUTION (shared-lib audit 2026-07-22):
+     do NOT gate directness on the envelope `hops === 0` — the hop count rides the
+     attacker-controlled envelope, so a relayed/injected frame can simply claim `hops=0`.**
+     Directness must be a fact the transport observes, not the sender asserts: confirm only
+     on a frame delivered over a link THIS device established/verified (a GATT link we
+     initiated, or — stronger — a Noise channel-binding proof, see below), so the delivering
+     MAC provably belongs to the sender's own radio, not a relayer's.
   4. Once confirmed attribution is live and field-proven, RELAX the discreet-mode gate
      (`ble.ts bleMeshRelaying` / `MeshBleWire.shouldAttributeRssi`) so crowd-mode BLE assist
      returns — now honestly, on verified direct links only.
@@ -112,6 +118,40 @@ attribution is decided a layer BELOW it, from unverified transport metadata. Spe
 - A direct, seal-verified member link in crowd mode **does** attribute — restoring the
   indoor endgame the assist exists for, now honestly, without needing discreet mode.
 - Discreet mode behaviour unchanged.
+
+## Cross-app architecture — build verified attribution ONCE (shared-lib audit 2026-07-22)
+
+An independent shared-lib audit found flock is about to re-solve a problem meatchat has
+already solved with tested crypto — and that the two pieces belong in shared libs, not
+duplicated per app:
+
+- **meatchat already defeats these exact two threats.** `meatchat/src/app/announce.ts`
+  has `verifyAnnounce` (BIP-340 Schnorr signed presence — defeats spoofing) AND
+  `verifyChannelProof` (a Noise channel-binding *directness* proof — defeats relay MITM),
+  x-only/Nostr-compatible, **21 tests**. It is app-local to meatchat (NOT in mesh-kit).
+  flock/flock-kit has no equivalent yet.
+- **Don't lift `announce.ts` verbatim** — flock's identity proof is a free side-effect of
+  the NIP-59 seal it already verifies on unwrap, so flock needs no separate signed beacon.
+  The shared primitives are one level UP:
+  - **(a) The app-confirmed-attribution CONTRACT belongs in the plugin** (transport-generic:
+    meatchat has the same untrusted-`from` problem). Plugin stops asserting identity from the
+    plaintext `from`; exposes the raw observation (MAC delivered a frame claiming P + the
+    delivering link's provenance) and accepts an app-side `confirmPeer(P, X)`. This is exactly
+    step 1 above — build it as a generic plugin capability, not a flock special.
+  - **(b) The channel-binding directness proof belongs in `mesh-kit`** (which owns the
+    Noise `SecureChannel`). It is strictly stronger than the `hops === 0` idea, and both apps
+    can share it. Draw the design from meatchat's `verifyChannelProof`.
+- **iOS parity is broken and the plugin's own doc is inaccurate.** RSSI sampling +
+  `emitRssiForAddress` + `shouldAttributeRssi` exist **Android-only**; iOS `MeshBlePlugin.swift`
+  has no such method, so a call is REJECTED by Capacitor (only flock's `try/catch` in
+  `ble.ts` turns it into a no-op) — `definitions.ts`'s "Android only for now; a no-op
+  elsewhere" is wrong at the plugin boundary. **The security-relevant honesty gate lives on
+  Android only.** If iOS ever grows sampling, the gate (and this whole verified-attribution
+  contract) MUST be ported in the same change, or iOS emits dishonest attributions.
+- **Coordinate the plugin bump.** This change adds `address`+provenance to the `frame` event
+  and repoints attribution off `peerAddresses` — landing on meatchat's consumed frame/peer
+  surface. Move the plugin to **semver** and bump flock + meatchat together (they're on
+  SHA-divergent pins today: flock 42a0519 vs meatchat c29c1d17).
 
 ## Non-goals
 No RSSI-to-metres. No attribution from unverified adverts. No relaxing the kit honesty
