@@ -19,7 +19,37 @@ identically on a live screen and a locked phone. The golden-vector parity harnes
 the correct mechanism and is genuinely comprehensive for the pure core (23 vector
 groups incl. guidance/mode/heading/cue/ble/clock/session).
 
-## The one real placement gap: voice announce-PRIORITY is un-pinned decision logic
+## Cross-checked by a parallel layer-placement audit (2026-07-22)
+
+An independent deep audit confirmed this verdict: *leaf decisions are correctly
+delegated to the pinned kit; the gap is the ORCHESTRATION layer that sequences the
+pinned leaves — hand-duplicated in `radarMode.ts` (JS) and `RadarGuideService.kt`,
+pinned by neither vectors nor tests, with no current drift between runtimes.* The
+audit surfaced a broader **extraction backlog** (all currently-matching, so
+hardening not bug-fixes), ranked:
+
+- **DONE (2026-07-22, commit 88af807):** the 5 previously-unpinned `voiceLine`
+  kinds (arrived, ble-close, compass-unreliable, mode, degraded) are now in the
+  golden vectors — `RadarCoreTest` verifies all 9 kinds, so a Kotlin copy can no
+  longer drift from the tested TS reference. Safe, additive, no runtime change.
+- **#1 (below):** the voice announce-priority ladder → a pure kit reducer.
+- **#2 shaping constants in controllers, not `RADAR`:** per-mode heading alpha
+  (`radarMode.ts:85` ↔ `RadarGuideService.alphaFor`), `COURSE_MAX_AGE_SEC`,
+  `RATE_ALPHA`, `PERIODIC_STATES`, and the DEGRADED state-set (THREE copies:
+  radarMode, service, voiceClips). Move into the kit's `RADAR` so the single
+  source + vectors cover them. (Trend-note pitch ratios ×1.5/×0.7 and the haptic
+  waveforms are genuine controller I/O — leave them.)
+- **#3 `gpsCourse`/`gpsSpeed` selection** (Doppler-vs-two-fix, `courseMinSpeedMps`
+  floor, age gate) and the **closing-rate rebase** (this session's fix) are
+  pure-ish controller wrappers around pinned kit primitives — extractable +
+  pinnable.
+- **Infra:** no unit-test seam exists on `radarMode.ts` (1027 lines) or
+  `RadarGuideService.kt` (830) — contrast `radarView.ts`, which IS tested; and
+  nothing guards the installed `@forgesworn/flock` matching `flock-kit/src` at
+  vector-generation time (a stale linked kit could pin Kotlin against the wrong
+  reference). Add a version/hash guard.
+
+## The headline placement gap: voice announce-PRIORITY is un-pinned decision logic
 
 `announceVoice` — the policy deciding WHICH voice event wins each tick (arrived →
 mode → compass → degraded → ble-close → moved → milestone → bearing-change →
