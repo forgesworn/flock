@@ -8,6 +8,9 @@
   "engines": {
     "node": ">=24"
   },
+  "overrides": {
+    "nostr-tools": "2.23.9"
+  },
   "scripts": {
     "build": "vite build && npm run bundle:check",
     "test": "vitest run",
@@ -91,7 +94,7 @@
     "jsqr": "^1.4.0",
     "keystore-kit": "git+ssh://git@github.com/forgesworn/keystore-kit.git#dea195d70db486fccdab4b18d2c610f60ba554cd",
     "maplibre-gl": "^5.20.2",
-    "nostr-tools": "^2.23.3",
+    "nostr-tools": "2.23.9",
     "nsec-tree": "^1.5.1",
     "pmtiles": "^4.4.1",
     "qrcode-generator": "^2.0.4",
