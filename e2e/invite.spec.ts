@@ -37,7 +37,7 @@ test.describe('invites — both ways', () => {
     await expect(B.locator('[data-action="join-skip"]')).toBeVisible()
     await B.click('[data-action="join-skip"]')
 
-    await expect(B.locator('[data-action="tab"][data-tab="circle"]')).toBeVisible()
+    await expect(B.locator('[data-action="tab"][data-tab="circle"]:not(.posture-badge)')).toBeVisible()
     await gotoTab(B, 'circle')
     await expect(B.locator('.circle-chip.on')).toContainText('Say it out loud')
   })
@@ -105,7 +105,7 @@ test.describe('invites — both ways', () => {
     await expect(B.locator('[data-action="join-skip"]')).toBeVisible()
     await B.click('[data-action="join-skip"]')
     // B lands joined, and the seed is scrubbed from the address bar immediately.
-    await expect(B.locator('[data-action="tab"][data-tab="circle"]')).toBeVisible()
+    await expect(B.locator('[data-action="tab"][data-tab="circle"]:not(.posture-badge)')).toBeVisible()
     expect(B.url()).not.toContain('join=')
     await gotoTab(B, 'circle')
     await expect(B.locator('.circle-chip.on')).toContainText('The Smiths')
