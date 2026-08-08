@@ -55,6 +55,13 @@ git status --porcelain                   # must be empty — a dirty tree is mar
 npm ci
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home  # or your JDK 21
 
+# 2b. Regenerate the self-hosted basemap assets (gitignored, deterministic):
+node scripts/fetch-basemap-assets.mjs   # glyphs + sprite
+# The town PMTiles under app/public/basemap/ are build-host local state
+# (gitignored, produced with go-pmtiles — see scripts/fetch-basemap-assets.mjs).
+# A release built WITH them bundled (e.g. 7363e51) will not byte-match a
+# rebuild without the same files; restore them before building.
+
 # 3. Build the unsigned release APK and print its hash.
 npm run apk:verify
 #   (on a fresh clone this first runs `npx cap add android` to generate the
@@ -106,6 +113,16 @@ apksigner verify --print-certs flock.apk     # exit 0; certificate SHA-256 must 
 - **Toolchain drift breaks byte-identity.** A different AGP/Gradle/JDK *major*
   version can change output. Verify with the versions above; CI should rebuild and
   diff on each release tag so a regression is caught, not discovered later.
+  (Observed 2026-08-08: even same-major toolchains on different hosts emitted a
+  byte-different `AndroidManifest.xml` — identical permission set, different
+  element ordering from the manifest merger. Compare entry-by-entry CRCs, not
+  just the whole-file hash, when localising a mismatch.)
+- **Map assets are inputs too.** A rebuild on 2026-08-08 of the deployed
+  `7363e51` APK confirmed every dex/resource entry byte-identical; the only
+  payload differences were the gitignored basemap inputs (glyphs/sprite +
+  five town PMTiles) absent from the fresh clone. Verifiability of the map
+  bundle therefore rests on pmtiles provenance (the go-pmtiles commands) or on
+  committing those inputs — an open decision recorded in `docs/ROADMAP.md`.
 - **Transitive dependency drift.** Direct versions are pinned; a far-future rebuild
   could still resolve different transitive artefacts. Gradle dependency locking is
   a future hardening step (plan doc).

@@ -936,6 +936,23 @@ Two halves that compose into one feature:
     The GitHub repository is currently **private**; public independent tag/source
     verification therefore remains gated on an explicit future visibility decision.
     See `docs/transparency/README.md`.
+  - [ ] **Attest the live `7363e51` build (or cut a fresh attested release) —
+    PRE-HCPP (2–4 Oct 2026).** Found 2026-08-08: the APK served at
+    `downloads/flock.apk` is build `7363e51` ("pin @forgesworn/flock to a7c253f,
+    radar v2.1 voice core") but has **no `release/7363e51` signed tag and no
+    RELEASES.jsonl line** — the transparency chain is broken for the bytes being
+    served. A clean rebuild at that commit (JBR 21.0.10, this machine) verified
+    **every dex/resource entry byte-identical** to the served APK; the only
+    differences are the gitignored basemap inputs (glyphs + five town PMTiles,
+    incl. `prague.pmtiles`) and `AndroidManifest.xml` element *ordering*
+    (identical permission set — manifest-merger ordering across toolchains). So
+    the live build is honest, but the *demonstrable* chain ("anyone can check
+    the tag") currently fails at step one. Fix needs the release-signing key
+    (out-of-band backup, not on the dev workstation): either rebuild + attest
+    `7363e51`, or cut + attest a fresh release from main. Decide pmtiles
+    provenance at the same time (commit them, or publish hashes + the exact
+    go-pmtiles commands) so map-bundling releases stay third-party
+    reproducible — see `docs/verify-apk.md` "Known limits".
   - [ ] **Gradle dependency locking** — pin transitive artefacts against far-future
     drift.
   - [ ] **PWA tamper-evidence** — signed asset manifest + SRI, honest ceiling stated;
