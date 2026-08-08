@@ -9,7 +9,8 @@
     "node": ">=24"
   },
   "overrides": {
-    "nostr-tools": "2.23.9"
+    "nostr-tools": "2.23.9",
+    "tar": "7.5.22"
   },
   "scripts": {
     "build": "vite build && npm run bundle:check",
