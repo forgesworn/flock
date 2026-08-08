@@ -76,11 +76,13 @@ web app, which is served from a host that can be compelled.
 
 ## Known build-tool audit exception
 
-As of 2026-07-17, `npm audit --omit=dev` reports zero vulnerabilities. The full
-development/build graph reports **eight** findings (six high, two moderate)
+As of 2026-08-08, `npm audit --omit=dev` reports zero vulnerabilities. The full
+development/build graph reports **seven** findings (five high, two moderate)
 through `@capacitor/assets@3.0.5` and its nested legacy Capacitor CLI/project
-tooling (`tar`, `minimatch`, and `uuid` paths). npm currently offers no complete
-upgrade fix for the direct `@capacitor/assets` branch.
+tooling (`sharp`/libvips, `replace`, and `uuid` paths). The critical `tar`
+extraction findings are pinned out via a root `overrides` entry (`tar@7.5.22`,
+added 2026-08-08); npm offers no complete upgrade fix for the remaining
+`@capacitor/assets` branch.
 
 This tooling is used only during APK asset generation from committed local
 assets; it is not shipped as browser or Android runtime code and the build does
