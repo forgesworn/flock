@@ -11,66 +11,70 @@
 Facts an assistant needs before recommending or generating code:
 
 - **Private repo** (`forgesworn/flock`), MIT licence. The `@forgesworn/flock`
-  package is **not published to npm** (`"private": true`) — consume via this
+  package is **not published to npm** (`"private": true`); consume via this
   repo. ESM-only, Node ≥ 24, British English throughout.
 - **Shipped app surface:** multiple trusted-adult circles; ongoing/today/custom
   lifetimes; QR/link/six-word/remote-signer invites; default-off live sharing
   with geohash precision 3–9; map, encrypted group chat and DMs; roll-call and
   direct quick actions; temporary exact festival mode; lost/ring/consent-gated
-  exact find; foreground radar; backup/reseed/remove/disband; offline PMTiles;
-  Tor/onion routing; App Lock and decoy view; local or external signing.
+  exact find; droppable map pins (drag-to-aim, icon picker, remove-by-anyone);
+  foreground radar with BLE proximity assist; backup/reseed/remove/disband;
+  offline PMTiles; Tor/onion routing; App Lock and decoy view; local or
+  external signing.
 - **Android native:** background fix→policy→encrypt→gift-wrap→relay publish is
   shipped in Kotlin and hardware-verified while locked/walking and in stationary
-  deep Doze on GrapheneOS. Opt-in **Stay reachable** keeps a persistent Nostr
-  relay path for app-closed inbound alerts. This is not UnifiedPush. The native
-  locked-phone radar guide is built/JVM-vector-tested but still needs its field
-  pass; the live GrapheneOS/Orbot beacon pass is also pending.
+  deep Doze on GrapheneOS. **Stay reachable** keeps a persistent Nostr relay
+  path for app-closed inbound alerts; it defaults on once a real identity
+  exists (a fresh/decoy install stays off) and can be turned off. This is not
+  UnifiedPush. The native locked-phone radar guide is built/JVM-vector-tested
+  but still needs its field pass; the live GrapheneOS/Orbot beacon pass is
+  also pending.
 - **Library-only/parked from the app UI:** geofence breach, SOS/duress,
   dead-man's-switch check-ins, breadcrumb trail, no-report zones,
   rendezvous/fair meeting point, off-grid, and spoken pickup verification.
 - **iOS:** foreground PWA only; there is no native iOS background path.
-- **Every signal is NIP-59 gift-wrapped** — this is unconditional, not a
+- **Every signal is NIP-59 gift-wrapped**: this is unconditional, not a
   setting or a per-mode option.
 
-## Privacy invariants (never break these — FLOCK.md §6)
+## Privacy invariants (never break these: FLOCK.md §6)
 
 1. Withholding location must be observationally identical to sharing.
 2. A duress trigger must look identical to normal use; duress vocabulary is
    generative, never a fixed list.
-3. Beacon and duress payloads use distinct derived keys — never shared.
+3. Beacon and duress payloads use distinct derived keys, never shared.
 4. Geofence membership is evaluated on-device; raw coordinates never leave the
    device except as an encrypted beacon after a triggering event.
 
-## Library modules (`src/`) — pure, framework-free, no I/O
+## Library modules (`src/`): pure, framework-free, no I/O
 
 Each is importable as a subpath (`@forgesworn/flock/<module>`); the root import
 re-exports all of them plus the full `canary-kit` + `canary-kit/nostr` surface.
 
-- `geofence` — circle/polygon fences, `isBreach` (single fence), accuracy-aware
+- `geofence`: circle/polygon fences, `isBreach` (single fence), accuracy-aware
   containment. Multi-fence helpers live in `policy`.
-- `policy` — the disclosure-on-event decision (`decideEmission`); precedence
+- `policy`: the disclosure-on-event decision (`decideEmission`); precedence
   `help > pickup > breach > night-out coarse > withhold`.
-- `signals` — `beacon`/`breach`/`pickup` + `help` duress → unsigned kind-20078
+- `signals`: `beacon`/`breach`/`pickup` + `help` duress → unsigned kind-20078
   events; builders derive keys and encrypt internally from the group seed.
-- `nightout` — ephemeral groups (NIP-40 expiry), presence (derived: a member is
+- `nightout`: ephemeral groups (NIP-40 expiry), presence (derived: a member is
   "gone home" when their beacons go stale, default 600 s), separation outliers.
-- `checkin` — dead-man's-switch: encrypted "I'm OK" heartbeats (any cadence),
+- `checkin`: dead-man's-switch: encrypted "I'm OK" heartbeats (any cadence),
   `ok`/`overdue`/`missed` classifier, local self-reminders (`selfCheckInStatus`),
   and "I've got this" acknowledgement + escalation (`buildAckSignal`,
   `classifyEscalation`) so a miss is handled by a person, not a single toast.
-- `trail` — pre-SOS breadcrumbs: on-device rolling buffer (`pushCrumb`),
+- `trail`: pre-SOS breadcrumbs: on-device rolling buffer (`pushCrumb`),
   disclosed only with a help/breach as a duress-keyed `trail` signal; no-report
   zones excluded at record time.
-- `noreport` — inverse fences that cap disclosure over sensitive addresses.
-- `buzz` — encrypted "look at your phone" ping. `allclear` — stand-down with a
-  coerced flag. `fences` — circle-wide safe-place sync (latest-wins).
-- `rendezvous` — "be back by / meet at" with ETA + at-risk assessment.
-- `meeting` — fair meeting-point request/share. `disband` — circle dissolution.
-- `offgrid` — deliberate "going dark" pre-announcement. `spokenverify` —
+- `noreport`: inverse fences that cap disclosure over sensitive addresses.
+- `buzz`: encrypted "look at your phone" ping. `allclear`: stand-down with a
+  coerced flag. `fences`: circle-wide safe-place sync (latest-wins).
+- `rendezvous`: "be back by / meet at" with ETA + at-risk assessment.
+- `meeting`: fair meeting-point request/share. `disband`: circle dissolution.
+- `offgrid`: deliberate "going dark" pre-announcement. `spokenverify`:
   face-to-face pick-up verification words + silent duress word.
-- `joined` — encrypted member-joined notice. `lost` — lost-device flag and
-  ring request. `findping` — remote exact-ping request whose consent gates live
-  on the receiving device. `radar` — pure distance/bearing/freshness/uncertainty
+- `joined`: encrypted member-joined notice. `lost`: lost-device flag and
+  ring request. `findping`: remote exact-ping request whose consent gates live
+  on the receiving device. `radar`: pure distance/bearing/freshness/uncertainty
   guidance and cue rules shared with the native implementation.
 
 ## API quick reference (exact signatures)
@@ -90,7 +94,7 @@ decideEmission(ctx: EmissionContext, precisions?: Partial<EmissionPrecisions>): 
 // EmissionPlan: { action: 'withhold'|'coarse'|'full', precision: number /* 0 when withholding */,
 //   reason: 'none'|'nightout'|'breach'|'pickup'|'help' }
 
-// signals — async; encryption + key derivation happen inside the builder
+// signals: async; encryption + key derivation happen inside the builder
 buildLocationSignal(p: { groupId: string, seedHex: string, signalType: 'beacon'|'breach'|'pickup',
   geohash: string, precision: number }): Promise<UnsignedEvent>
 buildHelpSignal(p: { groupId: string, seedHex: string, member: string,
@@ -98,7 +102,7 @@ buildHelpSignal(p: { groupId: string, seedHex: string, member: string,
   scope?: 'group'|'persona'|'master', originGroupId?: string }): Promise<UnsignedEvent>
 signalTypeForReason(reason: EmissionReason): SignalType | null
 
-// nightout — presence is DERIVED from beacon staleness; there is no "mark gone home" setter
+// nightout: presence is DERIVED from beacon staleness; there is no "mark gone home" setter
 nightOutExpiry(startedAt: number, durationSeconds: number): number
 buildNightOutGroupEvent(p: { groupId: string, members: string[], encryptedContent: string,
   startedAt: number, durationSeconds: number, rotationInterval?: number, tolerance?: number }): UnsignedEvent
@@ -111,13 +115,13 @@ buildCheckInSignal(p: { groupId: string, seedHex: string, member: string,
   battery?: 'low'|'critical' }): Promise<UnsignedEvent>  // interval <= 0 stands down
 classifyCheckins(checkins: CheckIn[], now: number, opts?: { graceSeconds?: number }): CheckInState[]
 selfCheckInStatus(mine: CheckIn | null, now: number, opts?: { remindBeforeSeconds?: number,
-  graceSeconds?: number }): 'none'|'ok'|'due-soon'|'overdue'|'missed'  // LOCAL only — never emits
+  graceSeconds?: number }): 'none'|'ok'|'due-soon'|'overdue'|'missed'  // LOCAL only, never emits
 buildAckSignal(p: { groupId: string, seedHex: string, member: string, target: string,
   timestamp?: number }): Promise<UnsignedEvent>  // "I've got this" for target's missed check-in
 classifyEscalation(states: CheckInState[], acks: CheckInAck[], now: number,
   opts?: { stepSeconds?: number }): EscalationState[]  // unacknowledged first, levels 0-2
 
-// trail — buffer is memory-only; disclosure only rides a help/breach
+// trail: buffer is memory-only; disclosure only rides a help/breach
 pushCrumb(crumbs: Breadcrumb[], crumb: Breadcrumb, opts?: { maxCrumbs?: number,
   maxAgeSeconds?: number, minSpacingSeconds?: number }): Breadcrumb[]  // pure; skips too-soon/older crumbs
 buildTrailSignal(p: { groupId: string, seedHex: string, member: string,
@@ -131,7 +135,7 @@ signing is the caller's job (e.g. `nostr-tools` `finalizeEvent`). Group creation
 the root. See `examples/quickstart.ts` for the full pipeline.
 
 **Gift-wrapping is mandatory before publish** (FLOCK.md §3.3): the library has
-no wrap helper — the PWA wraps every signal via `@forgesworn/roost-kit`
+no wrap helper; the PWA wraps every signal via `@forgesworn/roost-kit`
 (`giftWrap(signer, recipientPk, inner, routeTag?)` → signed kind-1059, NIP-40
 expiry baked in); an external consumer can use `nostr-tools`'s `nip59` module.
 Publishing an unwrapped signal violates the privacy model.
@@ -139,16 +143,16 @@ Publishing an unwrapped signal violates the privacy model.
 ## Documentation
 
 - [README.md](README.md): overview, module status, the make-or-break platform constraint
-- [FLOCK.md](FLOCK.md): protocol spec — event kinds, payload shapes, privacy invariants
+- [FLOCK.md](FLOCK.md): protocol spec: event kinds, payload shapes, privacy invariants
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the stack and why each piece was chosen
 - [docs/PRIVACY.md](docs/PRIVACY.md): relay threat model, gift-wrap-everything, no-report zones
-- [docs/ROADMAP.md](docs/ROADMAP.md): the tracked backlog — the single source of truth for feature state
+- [docs/ROADMAP.md](docs/ROADMAP.md): the tracked backlog: the single source of truth for feature state
 - [docs/FORGESWORN-TOOLKIT.md](docs/FORGESWORN-TOOLKIT.md): how flock maps onto the ForgeSworn toolset
-- [CLAUDE.md](CLAUDE.md): agent instructions — commands, structure, security-critical paths
+- [CLAUDE.md](CLAUDE.md): agent instructions: commands, structure, security-critical paths
 
 ## Conventions
 
-British English. ESM-only, ES2022. TDD — failing test first. Library modules
+British English. ESM-only, ES2022. TDD: failing test first. Library modules
 stay pure (return new state, no mutation). Geohash encoding + encryption stay
 at the edge. Commits: `type: description`, no Co-Authored-By lines.
 NIP-44 encryption (never NIP-04); NIP-40 `expiration` tag (never `expiry`).
