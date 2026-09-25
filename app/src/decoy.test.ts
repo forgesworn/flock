@@ -6,7 +6,7 @@ const STATE = JSON.stringify({
   identity: { pk: 'a'.repeat(64), skHex: 'b'.repeat(64) },
   circles: [{ id: 'c'.repeat(64), name: 'The Smiths', seedHex: 'd'.repeat(64), mode: 'family', members: ['a'.repeat(64)] }],
   activeCircleId: 'c'.repeat(64),
-  relayUrls: ['wss://relay.trotters.cc'],
+  relayUrls: ['wss://relay.example'],
   noReportZones: [],
   petnames: {},
   presence: {},

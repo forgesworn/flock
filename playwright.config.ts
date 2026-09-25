@@ -4,9 +4,9 @@ import { defineConfig, devices } from '@playwright/test'
 //
 // Each test drives TWO isolated browser contexts (two real identities) that talk
 // to each other through a Nostr relay, exactly as two phones would. Local runs
-// use relay.trotters.cc by default; CI starts a fresh RAM-only relay so pushes
-// neither write production data nor inherit production flakiness. Override with
-// FLOCK_E2E_RELAY for an explicit pre-deploy relay smoke pass.
+// use the app's default relay set by default; CI starts a fresh RAM-only relay
+// so pushes neither write production data nor inherit production flakiness.
+// Override with FLOCK_E2E_RELAY for an explicit pre-deploy relay smoke pass.
 //
 // The app under test is the Vite dev server (root app/). VITE_DEFAULT_RELAY is
 // injected below so both browser contexts always use the selected relay.
@@ -15,7 +15,7 @@ const PORT = Number(process.env.FLOCK_E2E_PORT ?? 5173)
 const RELAY_PORT = Number(process.env.FLOCK_E2E_RELAY_PORT ?? 7777)
 const START_LOCAL_RELAY = !!process.env.CI && !process.env.FLOCK_E2E_RELAY
 const RELAY_URL = process.env.FLOCK_E2E_RELAY ??
-  (START_LOCAL_RELAY ? `ws://127.0.0.1:${RELAY_PORT}` : 'wss://relay.trotters.cc')
+  (START_LOCAL_RELAY ? `ws://127.0.0.1:${RELAY_PORT}` : 'wss://nos.lol')
 export const BASE_URL = `http://localhost:${PORT}`
 
 export default defineConfig({

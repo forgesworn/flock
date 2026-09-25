@@ -21,7 +21,7 @@ function state(name: string): store.Persisted {
     identity: { pk: 'c'.repeat(64), skHex: 'd'.repeat(64) } as unknown as store.Identity,
     circles: [{ id: 'e'.repeat(64), name, seedHex: 'f'.repeat(64), mode: 'family', members: [] } as unknown as store.Circle],
     activeCircleId: 'e'.repeat(64),
-    relayUrls: ['wss://relay.trotters.cc'],
+    relayUrls: ['wss://relay.example'],
     noReportZones: [],
     petnames: {},
     presence: {},

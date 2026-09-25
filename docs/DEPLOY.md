@@ -23,7 +23,7 @@ flock is designed to minimise what the host processes:
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `VITE_DEFAULT_RELAY` | `wss://relay.trotters.cc` | Default Nostr relay (users can still change it in-app) |
+| `VITE_DEFAULT_RELAY` | `wss://nos.lol` | Default Nostr relay (users can still change it in-app) |
 | `VITE_TILE_URL` | `/tiles/{z}/{x}/{y}.png` (host-proxied → OSM) | Map tile template `{z}/{x}/{y}`; point at any tile server to bypass the proxy |
 | `VITE_TILE_ATTRIBUTION` | © OpenStreetMap | Attribution shown on the map |
 | `VITE_NOMINATIM_URL` | `/nominatim` (host-proxied → OSM) | Geocoding endpoint (rendezvous-by-name) |
@@ -59,7 +59,7 @@ npm run test:e2e      # two-person e2e; Playwright self-starts the dev server
                       #   npm run test:e2e -- e2e/quick-action.spec.ts
 ```
 
-Local `npm run test:e2e` uses `relay.trotters.cc` by default. Override with
+Local `npm run test:e2e` uses `nos.lol` by default. Override with
 `FLOCK_E2E_RELAY` to point at any explicit target; `npm run test:e2e:ci` starts
 the isolated test relay automatically. Don't edit source mid-run — Vite HMR
 reloads the app under the test.

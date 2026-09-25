@@ -10,7 +10,7 @@ const persisted = (over: Partial<Persisted> = {}): Persisted => ({
     { id: 'trip', seedHex: 'cd'.repeat(32), name: 'Trip', mode: 'nightout', expiresAt: 2_000_000_000 },
   ],
   activeCircleId: 'fam1',
-  relayUrls: ['wss://relay.trotters.cc'],
+  relayUrls: ['wss://relay.example'],
   noReportZones: [{ area: { kind: 'circle', centre: { lat: 51.5, lon: -0.12 }, radiusMetres: 300 } }],
   petnames: { [ALICE]: 'Me' },
   presence: {},
@@ -52,7 +52,7 @@ describe('backup — export/import round-trip', () => {
 
 describe('applyBackup — merge into current device state', () => {
   it('restores onto a fresh device wholesale', () => {
-    const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrls: ['wss://relay.trotters.cc'], noReportZones: [], petnames: {}, presence: {} }
+    const fresh: Persisted = { identity: null, circles: [], activeCircleId: null, relayUrls: ['wss://relay.example'], noReportZones: [], petnames: {}, presence: {} }
     const out = applyBackup(fresh, collectBackup(persisted()))
     expect(out.identity?.pk).toBe(ALICE)
     expect(out.circles.map((c) => c.id)).toEqual(['fam1', 'trip'])

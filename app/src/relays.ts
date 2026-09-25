@@ -31,19 +31,21 @@ import {
 const ENV_RELAY = import.meta.env.VITE_DEFAULT_RELAY
 const ENV_ONION_RELAY = import.meta.env.VITE_ONION_RELAY
 
-/** Our own relay(s) — sensitive flock traffic only. Overridable at build time. */
+/** Default relay set — no longer the project's own relay (the operator has
+ *  stepped back from running a relay for other people's traffic; see
+ *  docs/ROADMAP.md "Resolved inputs"). A user may still add any relay,
+ *  including a self-hosted or onion one, in Settings. Overridable at build
+ *  time via VITE_DEFAULT_RELAY / VITE_ONION_RELAY. */
 const defaults = createRelayConfig({
-  privateRelays: ENV_RELAY ? [ENV_RELAY] : ['wss://relay.trotters.cc'],
-  onionRelays: ENV_ONION_RELAY
-    ? [ENV_ONION_RELAY]
-    : ['ws://gdtkccgtod3om7bvycaygjjske6sj6vnsu3d7csutkofnoa3ylt6haid.onion'],
+  privateRelays: ENV_RELAY ? [ENV_RELAY] : ['wss://nos.lol', 'wss://relay.primal.net', 'wss://nostr.mom'],
+  onionRelays: ENV_ONION_RELAY ? [ENV_ONION_RELAY] : [],
   profileRelays: [
-    'wss://relay.trotters.cc',
     'wss://nos.lol',
     'wss://relay.damus.io',
     'wss://relay.nostr.band',
     'wss://relay.primal.net',
     'wss://relay.ditto.pub',
+    'wss://nostr.mom',
   ],
 })
 
@@ -52,13 +54,15 @@ export const PRIVATE_RELAYS = defaults.PRIVATE_RELAYS
 /** The `.onion` twin of PRIVATE_RELAYS — same relay(s), reachable over Tor
  *  without ever exposing an IP (docs/plans/2026-07-04-mesh-bridge-goal.md Task
  *  B; DarkFi survey: adopt Tor as a user TOGGLE, not the default — unreliable
- *  on mobile). This is the v3 onion twin of relay.trotters.cc (stood up
- *  2026-07-11, verified end-to-end: NIP-11 + a NIP-40-expiring publish/read
- *  round-trip over a real Tor circuit). Plain `ws://` is deliberate — Tor's
+ *  on mobile). There is no default onion relay now that the project's own
+ *  relay has left the defaults (docs/ROADMAP.md "Resolved inputs") — a user
+ *  who wants Tor routing configures their own `.onion` relay via
+ *  VITE_ONION_RELAY at build time (or the equivalent Settings field once
+ *  set), and the Tor toggle fails loud (see effectiveRelays below) rather
+ *  than silently falling back to clearnet when none is configured. Plain
+ *  `ws://` is deliberate for any onion relay a user does configure — Tor's
  *  rendezvous encryption is the transport security, and no CA issues certs
- *  for `.onion` names we could pin instead. Override at build time via
- *  VITE_ONION_RELAY. Also bypasses the CDN in front of the clearnet relay,
- *  so neither the CDN nor the relay host ever sees a member IP. */
+ *  for `.onion` names to pin instead. */
 export const ONION_RELAYS = defaults.ONION_RELAYS
 
 /** Broad public set — for reading public kind:0 profiles only. */

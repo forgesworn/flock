@@ -1,5 +1,30 @@
 import { describe, it, expect } from 'vitest'
-import { parseRelayList, resolveRelays, isKnownNoLogRelay, unknownRelays, torRouteReady, effectiveRelays, PRIVATE_RELAYS } from './relays'
+import { parseRelayList, resolveRelays, isKnownNoLogRelay, unknownRelays, torRouteReady, effectiveRelays, PRIVATE_RELAYS, PROFILE_RELAYS, ONION_RELAYS } from './relays'
+
+// The operator stepped back from running a relay for other people's traffic
+// (UK Online Safety Act exposure) — the project's own relay must never be a
+// default again, in any set, and there is no default onion relay either. A
+// user may still add any relay, including their own onion one, themselves.
+describe('defaults no longer include the project\'s own relay', () => {
+  it('pins the exact default private relay set', () => {
+    expect(PRIVATE_RELAYS).toEqual(['wss://nos.lol', 'wss://relay.primal.net', 'wss://nostr.mom'])
+  })
+
+  it('pins the exact default public profile relay set', () => {
+    expect(PROFILE_RELAYS).toEqual([
+      'wss://nos.lol',
+      'wss://relay.damus.io',
+      'wss://relay.nostr.band',
+      'wss://relay.primal.net',
+      'wss://relay.ditto.pub',
+      'wss://nostr.mom',
+    ])
+  })
+
+  it('has no default onion relay', () => {
+    expect(ONION_RELAYS).toEqual([])
+  })
+})
 
 describe('parseRelayList', () => {
   it('splits one-per-line and trims each', () => {
@@ -63,12 +88,12 @@ describe('isKnownNoLogRelay / unknownRelays (F5 — warn on an unvetted relay)',
   })
 
   it('a relay outside the vetted set is not known', () => {
-    expect(isKnownNoLogRelay('wss://nos.lol')).toBe(false)
+    expect(isKnownNoLogRelay('wss://relay.damus.io')).toBe(false)
     expect(isKnownNoLogRelay('wss://some-random-relay.example')).toBe(false)
   })
 
   it('unknownRelays returns only the entries outside the vetted set, order preserved', () => {
-    expect(unknownRelays([...PRIVATE_RELAYS, 'wss://nos.lol'])).toEqual(['wss://nos.lol'])
+    expect(unknownRelays([...PRIVATE_RELAYS, 'wss://relay.damus.io'])).toEqual(['wss://relay.damus.io'])
     expect(unknownRelays([...PRIVATE_RELAYS])).toEqual([])
   })
 })
@@ -99,7 +124,7 @@ describe('torRouteReady', () => {
 })
 
 describe('effectiveRelays (fail-loud Tor routing)', () => {
-  const clearnetRelays = ['wss://relay.trotters.cc']
+  const clearnetRelays = ['wss://relay.example']
   const onionRelays = ['ws://abc123.onion']
 
   it('returns the clearnet set unchanged when the toggle is off (default — byte-for-byte unaffected)', () => {
