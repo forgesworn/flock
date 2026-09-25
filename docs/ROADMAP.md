@@ -1217,3 +1217,13 @@ centralised, subpoenable custodian).
 - **Relay set** ✅ — adopted from `pallasite/src/credits.ts` into `app/src/relays.ts`:
   private = `relay.trotters.cc` (ours, sensitive traffic); public profile set =
   trotters/nos.lol/damus/nostr.band/primal/ditto (kind:0 reads only).
+- **Project's own relay dropped from every default (2026-09-25)** — the operator
+  stepped back from running a relay for other people's traffic (UK Online
+  Safety Act exposure). `app/src/relays.ts` default private relay set is now
+  `nos.lol`/`relay.primal.net`/`nostr.mom` (the same set another of our apps
+  moved to); the public profile set drops it too; there is no default onion
+  relay any more (the toggle already fails loud with none configured — see
+  `effectiveRelays`). Each replacement relay was probed before adoption: a
+  throwaway NIP-59 kind:1059 gift wrap with a NIP-40 `expiration` tag an hour
+  ahead published and read back cleanly on all three. Users may still add any
+  relay, including their own onion one, themselves in Settings.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildSignInOptions, SIGN_IN_METHODS, SIGN_IN_ADVANCED, SIGN_IN_PERMS } from './signin'
 
-const RELAYS = ['wss://relay.trotters.cc', 'wss://relay2.example']
+const RELAYS = ['wss://relay.example', 'wss://relay2.example']
 
 describe('sign-in picker config', () => {
   // SAFETY: pasting a raw private key into flock is the exact risk the
