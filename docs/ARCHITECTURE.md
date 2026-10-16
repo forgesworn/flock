@@ -61,7 +61,11 @@ host      ▶ static PWA; canonical Caddy access logging is disabled
 ### Transport — Nostr
 - **What:** application semantics live in **inner** events, normally ephemeral
   kind 20078. Before publish, the app encrypts each sensitive inner event and
-  creates one NIP-59 **outer kind-1059 gift wrap per recipient**. The relay sees
+  creates one NIP-59 **outer kind-1059 gift wrap**: a circle signal is wrapped
+  once, to the circle's shared inbox key derived from its seed (every member
+  derives the same key, so there is no per-member loop), while invites, reseeds,
+  direct messages and private location shares get one wrap per recipient, to
+  that person's personal inbox. The relay sees
   the random outer author, opaque content, expiry/route tags, timing, volume, and
   connection metadata — not the inner type, location, real author, or roster.
 - **Group state:** the current PWA does not publish public kind-30078 circle
@@ -109,8 +113,8 @@ host      ▶ static PWA; canonical Caddy access logging is disabled
 - **PWA:** foreground operation on iOS, Android, and GrapheneOS. Web platforms
   still cannot provide the required locked/background location execution.
 - **Android APK:** the shipped `FlockLocationService` owns the background
-  fix → cadence/movement policy → encryption → per-recipient gift wrap → relay
-  publish path in Kotlin, independent of WebView execution. Locked walking and
+  fix → cadence/movement policy → encryption → gift wrap to the circle inbox →
+  relay publish path in Kotlin, independent of WebView execution. Locked walking and
   stationary deep-Doze publishing are hardware-measured green on GrapheneOS.
 - **Inbound:** the **Stay reachable** foreground service (on by default once a
   real identity exists; the user can turn it off) keeps the relay

@@ -11,8 +11,8 @@ chat; and let each member choose how closely the others see them with a
 Temporary exact "Find each other" mode, lost-phone ring/find, and foreground
 radar help people regroup without enabling permanent remote tracking.
 
-The shipped privacy foundation includes per-recipient gift wrapping, nsec-tree
-personas/epochs, multi-circle support, app lock, and a decoy view — see
+The shipped privacy foundation includes NIP-59 gift wrapping of every signal,
+nsec-tree personas/epochs, multi-circle support, app lock, and a decoy view; see
 [`docs/PRIVACY.md`](docs/PRIVACY.md). The wider safety set (SOS/duress,
 pick-me-up, geofences, dead-man's-switch, rendezvous/meeting points, off-grid,
 spoken verification) is **parked post-MVP**: it remains tested in the
@@ -57,10 +57,14 @@ The **library** additionally retains the experimental wider safety capability se
 post-MVP app phases and other ForgeSworn tools. The hosted preview is 18+ and must
 not be used to track children; see [`docs/LEGAL.md`](docs/LEGAL.md).
 
-All sensitive transport is **decentralised over Nostr** and per-recipient
-gift-wrapped. Relays receive opaque outer kind-1059 events; authorised devices
-unwrap the inner application signal (normally kind 20078). Each device evaluates
-its own geofence locally. No Flock service or relay receives plaintext location,
+All sensitive transport is **decentralised over Nostr** and NIP-59 gift-wrapped.
+Signals for a whole circle (beacons, buzz, lost and find requests, pins and the
+rest) are wrapped **once**, to the circle's shared inbox key derived from its
+seed; every member derives the same key, so a sender never loops over members.
+Invites, reseeds, direct messages and private location shares are wrapped once
+per recipient, to that person's personal inbox. Relays receive opaque outer
+kind-1059 events; authorised devices unwrap the inner application signal
+(normally kind 20078). Each device evaluates its own geofence locally. No Flock service or relay receives plaintext location,
 although relays and network providers can still observe connection and timing metadata.
 
 ## Quick start
@@ -89,7 +93,10 @@ geohashes, signs, gift-wraps and publishes. This is the live-sharing beacon path
 the app takes, end to end. Run it from a checkout after `npm install`, since the
 imports resolve to this app's pinned dependencies. Replace the placeholder relay
 before publishing for real. `finalizeEvent` sits inside the `Signer`: the inner
-signal stays unsigned (a NIP-59 rumour) and `giftWrap` signs the seal.
+signal stays unsigned (a NIP-59 rumour) and `giftWrap` signs the seal. A circle
+signal is wrapped once, to the shared circle inbox (`deriveInbox(seedHex).pk`);
+do not loop over members. Only invites, reseeds, direct messages and private
+shares are wrapped per recipient, to a personal inbox.
 
 ```ts
 import { encode } from 'geohash-kit'
@@ -118,7 +125,10 @@ if (plan.action !== 'withhold' && type && type !== 'help') {
     groupId, seedHex, signalType: type,
     geohash: encode(fix.lat, fix.lon, plan.precision), precision: plan.precision, // caller encodes
   })
-  const wrap = await giftWrap(signer, deriveInbox(seedHex).pk, inner) // unsigned inner -> signed kind 1059
+  // One wrap per signal, to the circle's shared inbox (every member derives the
+  // same key from the seed), so there is no loop over members.
+  // Unsigned inner -> signed kind 1059.
+  const wrap = await giftWrap(signer, deriveInbox(seedHex).pk, inner)
   await publishSigned(['wss://relay.example'], { ...wrap }) // placeholder relay
 }
 ```
@@ -201,8 +211,10 @@ lifecycle. Geohash encoding and encryption stay at the edge.
 
 The PWA is vanilla TS + Vite, fonts self-hosted (Fraunces + Hanken Grotesk — no
 Google CDN), installable (manifest + service worker). It builds inner kind-20078
-signals, then encrypts and gift-wraps one outer kind-1059 event per recipient
-before publishing. Recipients unwrap and decrypt locally. The web app is
+signals, then encrypts and gift-wraps them before publishing: one outer
+kind-1059 event per circle signal, addressed to the circle's shared inbox, and
+one per recipient for invites, reseeds, direct messages and private shares.
+Members unwrap and decrypt locally. The web app is
 foreground-only; the Android shell owns background publishing and reachability.
 
 ## Built on canary-kit
@@ -216,7 +228,7 @@ foreground-only; the Android shell owns background publishing and reachability.
 | "I need help / SOS" | `buildDuressAlert` / `encryptDuressAlert` (precision-11, scope) | UI panic trigger |
 | Breach / pick-me-up | `buildSignalEvent` (kind 20078, `t`=type) | two signal types |
 | Ephemeral night-out group | local/invite expiry; draft kind 30078 + NIP-40 protocol form | auto-dissolve |
-| Metadata-hiding transport | NIP-59 gift wrap / NIP-17, NIP-44 | mandatory per-recipient wrapping for every sensitive signal |
+| Metadata-hiding transport | NIP-59 gift wrap / NIP-17, NIP-44 | mandatory wrapping of every signal: one wrap to the circle's shared inbox; per-recipient wraps only for invites, reseeds, direct messages and private shares |
 
 See the [original historical build plan](docs/plans/DESIGN.md) for the initial
 mapping; current delivery status lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).

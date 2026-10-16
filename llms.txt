@@ -7,7 +7,8 @@
 > breach/pick-up/help trigger; the app UI does not use them. A thin application
 > layer over `canary-kit` (which extends `spoken-token`): the library decides
 > policy and builds inner events; the app encodes geohashes, signs, encrypts,
-> gift-wraps per recipient, and publishes outer kind-1059 events.
+> gift-wraps (circle signals once, to the circle's shared inbox), and publishes
+> outer kind-1059 events.
 
 Facts an assistant needs before recommending or generating code:
 
@@ -38,7 +39,10 @@ Facts an assistant needs before recommending or generating code:
   rendezvous/fair meeting point, off-grid, and spoken pickup verification.
 - **iOS:** foreground PWA only; there is no native iOS background path.
 - **Every signal is NIP-59 gift-wrapped**: this is unconditional, not a
-  setting or a per-mode option.
+  setting or a per-mode option. A circle signal is wrapped once, to the
+  circle's derived inbox, not once per member; only invites, reseeds, direct
+  messages and private shares are wrapped per recipient (see the end-to-end
+  example below).
 
 ## Privacy invariants (never break these: FLOCK.md §6)
 
@@ -181,7 +185,9 @@ the root.
 
 End to end, as the app does it for a live-sharing beacon (decide, encode,
 build, gift-wrap, publish). `finalizeEvent` sits inside the `Signer`: the inner
-signal stays unsigned (a NIP-59 rumour), and `giftWrap` signs the seal:
+signal stays unsigned (a NIP-59 rumour), and `giftWrap` signs the seal. The one
+`giftWrap` call is correct: it addresses the shared circle inbox, so do not loop
+over members:
 
 ```ts
 import { encode } from 'geohash-kit'
@@ -209,7 +215,10 @@ if (plan.action !== 'withhold' && type && type !== 'help') {
     groupId, seedHex, signalType: type,
     geohash: encode(fix.lat, fix.lon, plan.precision), precision: plan.precision, // caller encodes
   })
-  const wrap = await giftWrap(signer, deriveInbox(seedHex).pk, inner) // unsigned inner -> kind 1059
+  // One wrap per signal, to the circle's shared inbox (every member derives the
+  // same key from the seed), so there is no loop over members.
+  // Unsigned inner -> signed kind 1059.
+  const wrap = await giftWrap(signer, deriveInbox(seedHex).pk, inner)
   await publishSigned(['wss://relay.example'], { ...wrap }) // placeholder relay
 }
 ```
@@ -223,6 +232,16 @@ no wrap helper; the PWA wraps every signal via `@forgesworn/roost-kit`
 (`giftWrap(signer, recipientPk, inner, routeTag?)` → signed kind-1059, NIP-40
 expiry baked in); an external consumer can use `nostr-tools`'s `nip59` module.
 Publishing an unwrapped signal violates the privacy model.
+
+**Addressing: who `recipientPk` is.** For anything the whole circle should read
+(beacons, buzz, lost, find, pins, disband), call `giftWrap` once with
+`deriveInbox(seedHex).pk` from `@forgesworn/covey-kit`; members subscribe to
+kind 1059 with `#p` set to that key and decrypt with the matching inbox secret.
+The inbox rotates when the circle's seed rotates (a reseed). Only one-to-one
+traffic is wrapped per recipient, to that person's personal inbox: invites,
+reseeds (`buildReseedWraps` returns one wrap per recipient pubkey), direct
+messages (`buildDmWrap`) and private location shares
+(`buildPrivateLocationWrap`), all from `@forgesworn/covey-kit`.
 
 ## Documentation
 

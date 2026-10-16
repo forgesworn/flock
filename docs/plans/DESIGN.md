@@ -2,7 +2,7 @@
 
 > **Status snapshot: 2026-06-30, retained for decision history. Do not use this
 > file for current feature state or architecture.** The shipped system now uses
-> mandatory per-recipient gift wrapping, a Kotlin-native Android background
+> mandatory NIP-59 gift wrapping of every signal, a Kotlin-native Android background
 > publisher, opt-in Stay reachable inbound relay service, multi-circle MVP,
 > offline maps, Tor/onion routing, lost/find, and radar. Current truth lives in
 > [`../ARCHITECTURE.md`](../ARCHITECTURE.md) and
@@ -63,8 +63,9 @@ a **silent alarm**, not flip a status anyone can see.
 
 **Resolved after this snapshot:** live beacons/alerts migrated from the original
 AES-256-GCM envelope to NIP-59 gift-wrap (hides sender + event kind from relays). The
-shipped app wraps every sensitive signal per recipient; this is no longer a
-per-mode decision.
+shipped app wraps every sensitive signal (circle signals once, to the shared
+circle inbox; invites, reseeds and private messages per recipient); this is no
+longer a per-mode decision.
 
 ## 4. Platform strategy
 
