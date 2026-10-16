@@ -63,6 +63,25 @@ unwrap the inner application signal (normally kind 20078). Each device evaluates
 its own geofence locally. No Flock service or relay receives plaintext location,
 although relays and network providers can still observe connection and timing metadata.
 
+## Quick start
+
+Prerequisites:
+
+- Node ≥ 24 (`engines` in `package.json`).
+- An SSH key registered with GitHub. `@forgesworn/flock` (from
+  [`forgesworn/flock-kit`](https://github.com/forgesworn/flock-kit)), `mesh-kit`
+  and `keystore-kit` are installed over `git+ssh`, so `npm install` fails
+  without it.
+- JDK 21, only for `npm run test:native` (the Kotlin JVM tests; no Android SDK
+  needed) and the APK build.
+
+```sh
+git clone git@github.com:forgesworn/flock.git && cd flock && npm install && npm run dev
+```
+
+Then open the localhost URL Vite prints. Before a change is done, run
+`npm run typecheck`, `npm run lint` and `npm test`.
+
 ## ⚠️ The make-or-break constraint
 
 **No web/PWA platform can do reliable background geofencing in 2026** (high-confidence,
@@ -79,7 +98,7 @@ native Capacitor wrapper.** PWA-first, native-fallback — by necessity, not pre
 |---|:--:|:--:|:--:|
 | Live sharing, chat, buzz (app open) | ✅ | ✅ | ✅ |
 | **Background location sharing** | ❌ | ❌ | ✅ hardware-verified on GrapheneOS |
-| App-closed inbound Nostr alerts | ❌ | ❌ | ✅ opt-in **Stay reachable** service |
+| App-closed inbound Nostr alerts | ❌ | ❌ | ✅ **Stay reachable** service (on by default once a real identity exists; can be turned off) |
 | Locked-phone radar guide | ❌ | ❌ | 🧪 built/JVM-tested; hardware pass pending |
 
 ## Targets
@@ -123,7 +142,7 @@ lifecycle. Geohash encoding and encryption stay at the edge.
 | `findping` | Consent-gated remote exact-ping request for a flagged-lost device | ✅ tested |
 | `radar` | Distance, bearing, freshness, uncertainty, and cue decisions | ✅ tested |
 | `app/` (PWA) | Multi-circle MVP: live precision control, map/chat/DMs, QR/link/word invites, temporary exact mode, lost/ring/find, foreground radar, backup/reseed/remove/disband, offline maps, Tor toggle, app lock and decoy. SOS, geofences, dead-man's-switch, rendezvous/meeting, and off-grid remain parked from the UI | ✅ MVP |
-| `native/` (Capacitor) | Android APK with Kotlin background publish, opt-in Stay reachable inbound relay service, native notifications, Tor/Orbot routing, and a built locked-phone radar guide. Outbound publish is hardware-verified; radar/Orbot evidence still has explicit pending rows in the roadmap | ✅ Android; 🧪 field checks |
+| `native/` (Capacitor) | Android APK with Kotlin background publish, Stay reachable inbound relay service (on by default once a real identity exists; can be turned off), native notifications, Tor/Orbot routing, and a built locked-phone radar guide. Outbound publish is hardware-verified; radar/Orbot evidence still has explicit pending rows in the roadmap | ✅ Android; 🧪 field checks |
 
 **App gates:** `npm run build` · `npm run test:coverage` · `npm run typecheck` · `npm run lint` · `npm run test:e2e`
 

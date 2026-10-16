@@ -1,18 +1,22 @@
 # flock
 
-> Coercion-resistant safety and privacy-preserving location coordination for
-> trusted adult circles over Nostr. Location sharing is off by default; while
-> sharing, each sender chooses region-to-exact precision. Safety-library modes
-> can also disclose on a local breach/pick-up/help trigger. A thin application
+> Privacy-preserving location coordination for trusted adult circles (18+, never
+> for tracking children) over Nostr. Location sharing is off by default; while
+> sharing, each sender chooses region-to-exact precision. The library also
+> carries parked coercion-resistant safety modules that can disclose on a local
+> breach/pick-up/help trigger; the app UI does not use them. A thin application
 > layer over `canary-kit` (which extends `spoken-token`): the library decides
 > policy and builds inner events; the app encodes geohashes, signs, encrypts,
 > gift-wraps per recipient, and publishes outer kind-1059 events.
 
 Facts an assistant needs before recommending or generating code:
 
-- **Private repo** (`forgesworn/flock`), MIT licence. The `@forgesworn/flock`
-  package is **not published to npm** (`"private": true`); consume via this
-  repo. ESM-only, Node ≥ 24, British English throughout.
+- **Private repo** (`forgesworn/flock`), MIT licence. This repo is the app
+  (`flock-app`), not the library. The `@forgesworn/flock` package is **not
+  published to npm** (`"private": true`); its source lives in
+  `forgesworn/flock-kit`, and this repo pins it by full commit SHA via git+ssh.
+  There is no local `src/` alias. ESM-only, Node ≥ 24, British English
+  throughout.
 - **Shipped app surface:** multiple trusted-adult circles; ongoing/today/custom
   lifetimes; QR/link/six-word/remote-signer invites; default-off live sharing
   with geohash precision 3–9; map, encrypted group chat and DMs; roll-call and
@@ -43,9 +47,10 @@ Facts an assistant needs before recommending or generating code:
    generative, never a fixed list.
 3. Beacon and duress payloads use distinct derived keys, never shared.
 4. Geofence membership is evaluated on-device; raw coordinates never leave the
-   device except as an encrypted beacon after a triggering event.
+   device except as an encrypted beacon after a triggering event, or while the
+   user is actively sharing, as encrypted beacons at their chosen precision.
 
-## Library modules (`src/`): pure, framework-free, no I/O
+## Library modules (`@forgesworn/flock`, source in flock-kit): pure, framework-free, no I/O
 
 Each is importable as a subpath (`@forgesworn/flock/<module>`); the root import
 re-exports all of them plus the full `canary-kit` + `canary-kit/nostr` surface.
@@ -53,7 +58,8 @@ re-exports all of them plus the full `canary-kit` + `canary-kit/nostr` surface.
 - `geofence`: circle/polygon fences, `isBreach` (single fence), accuracy-aware
   containment. Multi-fence helpers live in `policy`.
 - `policy`: the disclosure-on-event decision (`decideEmission`); precedence
-  `help > pickup > breach > night-out coarse > withhold`.
+  `help > pickup > breach > night-out coarse > withhold`. `mode: 'family'` is
+  library-only/legacy: the app's `decideEmission` calls all use `'nightout'`.
 - `signals`: `beacon`/`breach`/`pickup` + `help` duress → unsigned kind-20078
   events; builders derive keys and encrypt internally from the group seed.
 - `nightout`: ephemeral groups (NIP-40 expiry), presence (derived: a member is
@@ -88,7 +94,7 @@ type Geofence = { kind: 'circle', centre: LatLng, radiusMetres: number }
 // policy (multi-fence helpers live here, not in geofence)
 isWithinAnyFence(point: LatLng, fences: Geofence[]): boolean
 decideEmission(ctx: EmissionContext, precisions?: Partial<EmissionPrecisions>): EmissionPlan
-// EmissionContext: { mode: 'family'|'nightout', position?: LatLng|null,
+// EmissionContext: { mode: 'family'|'nightout' /* 'family' is library-only/legacy */, position?: LatLng|null,
 //   geofences?: Geofence[], trigger?: 'none'|'pickup'|'help', accuracyMetres?: number,
 //   offGrid?: boolean, noReportZones?: NoReportZone[] }
 // EmissionPlan: { action: 'withhold'|'coarse'|'full', precision: number /* 0 when withholding */,
@@ -127,12 +133,89 @@ pushCrumb(crumbs: Breadcrumb[], crumb: Breadcrumb, opts?: { maxCrumbs?: number,
 buildTrailSignal(p: { groupId: string, seedHex: string, member: string,
   reason: 'help'|'breach', crumbs: Breadcrumb[], timestamp?: number }): Promise<UnsignedEvent>  // DURESS key
 // Breadcrumb = { geohash: string, precision: number, timestamp: number }
+
+// radar: pure guidance and cue rules, shared with the native locked-phone radar guide
+radarGuidance(input: RadarInput, opts?: RadarOptions): RadarGuidance
+// RadarInput: { me: LatLng|null, headingDeg: number|null, target: TargetObservation|null,
+//   myAccuracyMetres?: number|null }
+// TargetObservation: { position: LatLng, uncertaintyMetres: number, ageSeconds: number }
+// RadarGuidance: { state: 'unavailable'|'no-fix'|'stale'|'coarse'|'arrived'|'no-heading'|'point',
+//   distanceMetres, bearingDeg, relativeBearingDeg: number|null, freshness: Freshness|null,
+//   alignment: 'aligned'|'near'|'off'|null, bearingUsable: boolean,
+//   uncertaintyMetres: number|null, myAccuracyMetres: number|null }
+cueFor(g: RadarGuidance, ctx?: { mode?: 'vector'|'seek'|'homing', closingRateMps?: number|null,
+  bleProximity?: 'immediate'|'near'|'far'|null }, opts?: RadarOptions): RadarCue
+// RadarCue: { pattern: 'silent'|'sparse'|'single'|'double'|'triple', periodMs: number,
+//   toneHz: number, vibrateMs: number[], pan: number, sign: 'left'|'right'|null,
+//   trend: 'closing'|'receding'|null }
+classifyFreshness(ageSeconds: number, opts?: RadarOptions): 'fresh'|'aging'|'stale'
+// RADAR defaults: freshSeconds 60, staleSeconds 600, arriveMetres 2
+
+// lost: LOST_SIGNAL_TYPE = 'lost'
+buildLostSignal(p: { groupId: string, seedHex: string, member: string, by: string, lost: boolean,
+  timestamp?: number, message?: string }): Promise<UnsignedEvent>
+decryptLost(seedHex: string, content: string): Promise<LostReport>
+// LostReport = { member: string, by: string, lost: boolean, timestamp: number, message?: string }
+
+// findping: FIND_PING_SIGNAL_TYPE = 'findreq'; consent is gated on the receiving device
+buildFindPingSignal(p: { groupId: string, seedHex: string, from: string, target: string,
+  timestamp?: number }): Promise<UnsignedEvent>
+decryptFindPing(seedHex: string, content: string): Promise<FindPing>
+// FindPing = { from: string, target: string, timestamp: number }
+
+// buzz: BUZZ_SIGNAL_TYPE = 'buzz'
+buildBuzzSignal(p: { groupId: string, seedHex: string, from: string, action: BuzzAction,
+  target?: string, timestamp?: number }): Promise<UnsignedEvent>
+decryptBuzz(seedHex: string, content: string): Promise<Buzz>
+// BuzzAction = 'check_in'|'on_my_way'|'ring_lost_phone'
+// Buzz = { from: string, action: BuzzAction, reason: string, target?: string,
+//   timestamp: number, ask?: 'location' }
+
+// other modules: see flock-kit
 ```
 
 Geohash encoding is the caller's job (`geohash-kit`'s `encode(lat, lon, precision)`);
 signing is the caller's job (e.g. `nostr-tools` `finalizeEvent`). Group creation
 (`createGroup`, `buildGroupStateEvent`) comes from `canary-kit`, re-exported at
-the root. See `examples/quickstart.ts` for the full pipeline.
+the root.
+
+End to end, as the app does it for a live-sharing beacon (decide, encode,
+build, gift-wrap, publish). `finalizeEvent` sits inside the `Signer`: the inner
+signal stays unsigned (a NIP-59 rumour), and `giftWrap` signs the seal:
+
+```ts
+import { encode } from 'geohash-kit'
+import { finalizeEvent, generateSecretKey, getPublicKey, nip44 } from 'nostr-tools'
+import { deriveInbox } from '@forgesworn/covey-kit'
+import { giftWrap, publishSigned, type Signer } from '@forgesworn/roost-kit'
+import { decideEmission } from '@forgesworn/flock/policy'
+import { buildLocationSignal, signalTypeForReason } from '@forgesworn/flock/signals'
+
+const sk = generateSecretKey()
+const signer: Signer = {
+  pubkey: getPublicKey(sk),
+  signEvent: async (t) => finalizeEvent({ ...t, created_at: t.created_at ?? Math.floor(Date.now() / 1000) }, sk),
+  nip44Encrypt: async (peer, text) => nip44.encrypt(text, nip44.getConversationKey(sk, peer)),
+  nip44Decrypt: async (peer, text) => nip44.decrypt(text, nip44.getConversationKey(sk, peer)),
+}
+const groupId = 'demo-circle'
+const seedHex = 'a'.repeat(64) // from canary-kit's createGroup
+const fix = { lat: 51.5074, lon: -0.1278 }
+
+const plan = decideEmission({ mode: 'nightout', position: fix, trigger: 'none' }, { coarse: 6 })
+const type = signalTypeForReason(plan.reason) // 'nightout' -> 'beacon'
+if (plan.action !== 'withhold' && type && type !== 'help') {
+  const inner = await buildLocationSignal({
+    groupId, seedHex, signalType: type,
+    geohash: encode(fix.lat, fix.lon, plan.precision), precision: plan.precision, // caller encodes
+  })
+  const wrap = await giftWrap(signer, deriveInbox(seedHex).pk, inner) // unsigned inner -> kind 1059
+  await publishSigned(['wss://relay.example'], { ...wrap })
+}
+```
+
+`examples/quickstart.ts` tours the wider library modules (geofence, help,
+night-out, check-in) and runs with `node examples/quickstart.ts` on Node ≥ 24.
 
 **Gift-wrapping is mandatory before publish** (FLOCK.md §3.3): the library has
 no wrap helper; the PWA wraps every signal via `@forgesworn/roost-kit`
@@ -148,7 +231,7 @@ Publishing an unwrapped signal violates the privacy model.
 - [docs/PRIVACY.md](docs/PRIVACY.md): relay threat model, gift-wrap-everything, no-report zones
 - [docs/ROADMAP.md](docs/ROADMAP.md): the tracked backlog: the single source of truth for feature state
 - [docs/FORGESWORN-TOOLKIT.md](docs/FORGESWORN-TOOLKIT.md): how flock maps onto the ForgeSworn toolset
-- [CLAUDE.md](CLAUDE.md): agent instructions: commands, structure, security-critical paths
+- [AGENTS.md](AGENTS.md): agent instructions: commands, structure, security-critical paths
 
 ## Conventions
 

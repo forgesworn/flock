@@ -112,7 +112,8 @@ host      ▶ static PWA; canonical Caddy access logging is disabled
   fix → cadence/movement policy → encryption → per-recipient gift wrap → relay
   publish path in Kotlin, independent of WebView execution. Locked walking and
   stationary deep-Doze publishing are hardware-measured green on GrapheneOS.
-- **Inbound:** the opt-in **Stay reachable** foreground service keeps the relay
+- **Inbound:** the **Stay reachable** foreground service (on by default once a
+  real identity exists; the user can turn it off) keeps the relay
   path available for app-closed Nostr alerts. Flock does not currently implement
   UnifiedPush.
 - **Radar/Tor:** locked-phone radar is built and JVM/vector-tested but still
