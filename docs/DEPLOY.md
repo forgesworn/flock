@@ -5,7 +5,7 @@ geolocation, install, and later Web Push all require a secure context). The host
 does not receive plaintext circle messages or location and has no account or
 location database. It does serve the app and proxy optional map/search requests,
 so connection and request metadata still reach it. Sensitive circle traffic goes
-through the configured **Nostr relay** as per-recipient ciphertext.
+through the configured **Nostr relay** as gift-wrapped ciphertext.
 
 ## Privacy posture
 

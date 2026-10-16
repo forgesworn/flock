@@ -169,6 +169,10 @@ Be extra careful when modifying:
   (mirrors `canary-kit`).
 - **NIP-44** encryption (not the deprecated NIP-04); **NIP-59** gift wraps;
   **NIP-40** `expiration` tag.
+- Gift-wrap addressing: a circle signal is wrapped once, to the shared circle
+  inbox `deriveInbox(seedHex).pk` (`@forgesworn/covey-kit`); never loop over
+  members. Only invites, reseeds, DMs and private location shares are wrapped
+  per recipient, to a personal inbox.
 - Keep changes minimal and consistent with the existing module layout.
 
 ## Common pitfalls
