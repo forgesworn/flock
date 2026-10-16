@@ -210,12 +210,13 @@ if (plan.action !== 'withhold' && type && type !== 'help') {
     geohash: encode(fix.lat, fix.lon, plan.precision), precision: plan.precision, // caller encodes
   })
   const wrap = await giftWrap(signer, deriveInbox(seedHex).pk, inner) // unsigned inner -> kind 1059
-  await publishSigned(['wss://relay.example'], { ...wrap })
+  await publishSigned(['wss://relay.example'], { ...wrap }) // placeholder relay
 }
 ```
 
 `examples/quickstart.ts` tours the wider library modules (geofence, help,
-night-out, check-in) and runs with `node examples/quickstart.ts` on Node ≥ 24.
+night-out, check-in) and runs offline with `node examples/quickstart.ts` on
+Node ≥ 24 after `npm install`; it needs no build step.
 
 **Gift-wrapping is mandatory before publish** (FLOCK.md §3.3): the library has
 no wrap helper; the PWA wraps every signal via `@forgesworn/roost-kit`

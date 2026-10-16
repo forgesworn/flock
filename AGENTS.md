@@ -118,8 +118,8 @@ must never import `android.*`.
 - `docs/`: `VISION.md`, `ARCHITECTURE.md`, `PRIVACY.md`, `ROADMAP.md`,
   `FORGESWORN-TOOLKIT.md`, and `plans/`
 - `FLOCK.md`: protocol spec (event kinds, payloads, privacy invariants)
-- `examples/`: `quickstart.ts`, a tour of the library modules (run with
-  `node examples/quickstart.ts`)
+- `examples/`: `quickstart.ts`, an offline tour of the library modules (run
+  with `node examples/quickstart.ts` after `npm install`; no build step)
 - `e2e/`: Playwright two-person specs
 - `compatibility/v1/`: golden vectors mirrored against the Kotlin port
 - `dist-app/`: build output (generated); `android/`: the generated
