@@ -1,10 +1,12 @@
 # AGENTS.md: flock
 
-Coercion-resistant family and friends safety and privacy-preserving location
-sharing. A thin application layer over `canary-kit` (which extends
-`spoken-token`), adding disclosure-on-event location, geofencing, and ephemeral
-night-out sharing over Nostr. A PWA (`app/`) packaged as a Capacitor native app
-for locked-phone operation (Android; iOS is foreground-only).
+Privacy-preserving location coordination for trusted adult circles (18+; never
+for tracking children); safety modules are library-only. A thin application
+layer over `canary-kit` (which extends `spoken-token`) over Nostr: live,
+precision-controlled sharing and ephemeral night-out circles in the app, with
+disclosure-on-event, geofencing and SOS/duress kept in the library and parked
+from the app UI. A PWA (`app/`) packaged as a Capacitor native app for
+locked-phone operation (Android; iOS is foreground-only).
 
 **Private repo: `forgesworn/flock`.**
 
@@ -70,7 +72,8 @@ alias or edit installed dependency files here. Protocol changes begin in
 `flock-kit`, pass its package gates, then land here as an explicit SHA update.
 
 - `@forgesworn/flock/geofence`: on-device circle/polygon fence evaluation
-- `@forgesworn/flock/policy`: disclosure-on-event decisions
+- `@forgesworn/flock/policy`: disclosure-on-event decisions (`mode: 'family'`
+  is legacy/library-only; the app's `decideEmission` calls all use `'nightout'`)
 - `@forgesworn/flock/signals`: location and duress signal construction
 - `@forgesworn/flock/radar`: distance, bearing, freshness and cue decisions
 - `@forgesworn/flock`: the full public surface across the Flock modules
@@ -89,7 +92,9 @@ alias or edit installed dependency files here. Protocol changes begin in
 
 ### Native (`native/`): Capacitor shell (Android ships)
 
-Background geofencing on Android/GrapheneOS (no Google APIs). `npm run apk` /
+Background location publishing on Android/GrapheneOS (no Google APIs);
+geofence-breach alerting is not yet wired into the native pipeline (geofencing
+is parked with the other safety modules). `npm run apk` /
 `npm run apk:release` build a sideloadable APK (`native/build-apk.sh`); the
 generated `android/` project is gitignored, so all native config lives in the
 committed scripts (`patch-android.mjs`, `native/assets/`). The background
@@ -113,6 +118,8 @@ must never import `android.*`.
 - `docs/`: `VISION.md`, `ARCHITECTURE.md`, `PRIVACY.md`, `ROADMAP.md`,
   `FORGESWORN-TOOLKIT.md`, and `plans/`
 - `FLOCK.md`: protocol spec (event kinds, payloads, privacy invariants)
+- `examples/`: `quickstart.ts`, an offline tour of the library modules (run
+  with `node examples/quickstart.ts` after `npm install`; no build step)
 - `e2e/`: Playwright two-person specs
 - `compatibility/v1/`: golden vectors mirrored against the Kotlin port
 - `dist-app/`: build output (generated); `android/`: the generated
@@ -146,7 +153,9 @@ Be extra careful when modifying:
 3. Beacon and duress payloads use distinct derived keys: never share key
    material.
 4. Geofence membership is evaluated on-device; raw coordinates never leave
-   the device except as an encrypted beacon after a triggering event.
+   the device except as an encrypted beacon after a triggering event, or while
+   the user is actively sharing, as encrypted beacons at their chosen
+   precision.
 
 ## Conventions
 

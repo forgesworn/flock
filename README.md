@@ -63,6 +63,76 @@ unwrap the inner application signal (normally kind 20078). Each device evaluates
 its own geofence locally. No Flock service or relay receives plaintext location,
 although relays and network providers can still observe connection and timing metadata.
 
+## Quick start
+
+Prerequisites:
+
+- Node ≥ 24 (`engines` in `package.json`).
+- An SSH key registered with GitHub. `@forgesworn/flock` (from
+  [`forgesworn/flock-kit`](https://github.com/forgesworn/flock-kit)), `mesh-kit`
+  and `keystore-kit` are installed over `git+ssh`, so `npm install` fails
+  without it.
+- JDK 21, only for `npm run test:native` (the Kotlin JVM tests; no Android SDK
+  needed) and the APK build.
+
+```sh
+git clone git@github.com:forgesworn/flock.git && cd flock && npm install && npm run dev
+```
+
+Then open the localhost URL Vite prints. Before a change is done, run
+`npm run typecheck`, `npm run lint` and `npm test`.
+
+## Using the library
+
+The library decides policy and builds **unsigned** events; the caller encodes
+geohashes, signs, gift-wraps and publishes. This is the live-sharing beacon path
+the app takes, end to end. Run it from a checkout after `npm install`, since the
+imports resolve to this app's pinned dependencies. Replace the placeholder relay
+before publishing for real. `finalizeEvent` sits inside the `Signer`: the inner
+signal stays unsigned (a NIP-59 rumour) and `giftWrap` signs the seal.
+
+```ts
+import { encode } from 'geohash-kit'
+import { finalizeEvent, generateSecretKey, getPublicKey, nip44 } from 'nostr-tools'
+import { deriveInbox } from '@forgesworn/covey-kit'
+import { giftWrap, publishSigned, type Signer } from '@forgesworn/roost-kit'
+import { decideEmission } from '@forgesworn/flock/policy'
+import { buildLocationSignal, signalTypeForReason } from '@forgesworn/flock/signals'
+
+const sk = generateSecretKey()
+const signer: Signer = {
+  pubkey: getPublicKey(sk),
+  signEvent: async (t) => finalizeEvent({ ...t, created_at: t.created_at ?? Math.floor(Date.now() / 1000) }, sk),
+  nip44Encrypt: async (peer, text) => nip44.encrypt(text, nip44.getConversationKey(sk, peer)),
+  nip44Decrypt: async (peer, text) => nip44.decrypt(text, nip44.getConversationKey(sk, peer)),
+}
+const groupId = 'demo-circle'
+const seedHex = 'a'.repeat(64) // stand-in: the real seed comes from canary-kit's createGroup
+const fix = { lat: 51.5074, lon: -0.1278 }
+
+// Night-out mode, coarse precision 6: { action: 'coarse', precision: 6, reason: 'nightout' }
+const plan = decideEmission({ mode: 'nightout', position: fix, trigger: 'none' }, { coarse: 6 })
+const type = signalTypeForReason(plan.reason) // 'nightout' -> 'beacon'
+if (plan.action !== 'withhold' && type && type !== 'help') {
+  const inner = await buildLocationSignal({
+    groupId, seedHex, signalType: type,
+    geohash: encode(fix.lat, fix.lon, plan.precision), precision: plan.precision, // caller encodes
+  })
+  const wrap = await giftWrap(signer, deriveInbox(seedHex).pk, inner) // unsigned inner -> signed kind 1059
+  await publishSigned(['wss://relay.example'], { ...wrap }) // placeholder relay
+}
+```
+
+[`examples/quickstart.ts`](examples/quickstart.ts) is a wider, offline tour of the
+library modules: geofence, disclosure policy, SOS/help, a night-out group with
+derived presence, and a check-in. It builds events but never signs or publishes.
+Run it with `node examples/quickstart.ts` (Node ≥ 24 strips the types); after
+`npm install` it needs no build step. It prints lines such as
+`breached home fence: true` and
+`plan: { action: 'full', precision: 9, reason: 'breach' }`. It uses the
+legacy, library-only `'family'` mode for its geofence demonstration, whereas the
+app always passes `'nightout'`.
+
 ## ⚠️ The make-or-break constraint
 
 **No web/PWA platform can do reliable background geofencing in 2026** (high-confidence,
@@ -79,7 +149,7 @@ native Capacitor wrapper.** PWA-first, native-fallback — by necessity, not pre
 |---|:--:|:--:|:--:|
 | Live sharing, chat, buzz (app open) | ✅ | ✅ | ✅ |
 | **Background location sharing** | ❌ | ❌ | ✅ hardware-verified on GrapheneOS |
-| App-closed inbound Nostr alerts | ❌ | ❌ | ✅ opt-in **Stay reachable** service |
+| App-closed inbound Nostr alerts | ❌ | ❌ | ✅ **Stay reachable** service (on by default once a real identity exists; can be turned off) |
 | Locked-phone radar guide | ❌ | ❌ | 🧪 built/JVM-tested; hardware pass pending |
 
 ## Targets
@@ -123,7 +193,7 @@ lifecycle. Geohash encoding and encryption stay at the edge.
 | `findping` | Consent-gated remote exact-ping request for a flagged-lost device | ✅ tested |
 | `radar` | Distance, bearing, freshness, uncertainty, and cue decisions | ✅ tested |
 | `app/` (PWA) | Multi-circle MVP: live precision control, map/chat/DMs, QR/link/word invites, temporary exact mode, lost/ring/find, foreground radar, backup/reseed/remove/disband, offline maps, Tor toggle, app lock and decoy. SOS, geofences, dead-man's-switch, rendezvous/meeting, and off-grid remain parked from the UI | ✅ MVP |
-| `native/` (Capacitor) | Android APK with Kotlin background publish, opt-in Stay reachable inbound relay service, native notifications, Tor/Orbot routing, and a built locked-phone radar guide. Outbound publish is hardware-verified; radar/Orbot evidence still has explicit pending rows in the roadmap | ✅ Android; 🧪 field checks |
+| `native/` (Capacitor) | Android APK with Kotlin background publish, Stay reachable inbound relay service (on by default once a real identity exists; can be turned off), native notifications, Tor/Orbot routing, and a built locked-phone radar guide. Outbound publish is hardware-verified; radar/Orbot evidence still has explicit pending rows in the roadmap | ✅ Android; 🧪 field checks |
 
 **App gates:** `npm run build` · `npm run test:coverage` · `npm run typecheck` · `npm run lint` · `npm run test:e2e`
 

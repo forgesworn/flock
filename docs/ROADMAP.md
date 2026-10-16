@@ -796,7 +796,9 @@ Two halves that compose into one feature:
   **already-always-on relay subscription** — alive, so the normal decrypt →
   `LocalNotifications` pipeline runs closed exactly as in the foreground. Opt-in
   toggle **You → Notifications → "Stay reachable when closed"**
-  (`persisted.stayReachable`, `native/stayReachable.ts`), off by default; requests
+  (`persisted.stayReachable`, `native/stayReachable.ts`), off by default when first
+  shipped (since changed: it now defaults on once a real identity exists, and a
+  fresh/decoy install stays off); requests
   a Doze **battery-optimisation exemption** on enable (Samsung/OEM would freeze it
   otherwise); torn down on decoy-hide + reset so its ongoing notification is never
   a "fresh install" tell.
