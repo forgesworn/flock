@@ -105,7 +105,7 @@ host      ▶ static PWA; canonical Caddy access logging is disabled
   so self-hosters avoid leaking the viewport to a third party.
 - **Fonts:** **Fraunces** + **Hanken Grotesk**, self-hosted via `@fontsource`.
   Why: no Google Fonts CDN — nothing phones home.
-- **Bits:** `geohash-kit` (encode/decode at the edge), `qrcode-generator`
+- **Bits:** `geohash-kit` (encode/decode at the edge), `@forgesworn/qr`
   (invite/npub QR). **PWA:** hand-rolled service worker (network-first
   navigations so updates land) + web manifest — no plugin, precise control.
 

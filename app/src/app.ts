@@ -32,7 +32,7 @@ import { memberHue, nameInitials } from './avatar'
 import { shouldAnswerFindPing, withinPingRateLimit, FIND_PING_CANCEL_SECONDS, FIND_PING_MIN_GAP_SECONDS } from './findping'
 import { advertIdNow, advertIdsToScan, meshUuidNow, meshUuidsToScan, msUntilNextWindow } from './bleId'
 import { classifyScan, shouldOfferAppHandoff } from './joinassist'
-import qrcode from 'qrcode-generator'
+import { qrSvg } from './qr'
 import { npubEncode } from 'nostr-tools/nip19'
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure'
 import { bytesToHex } from '@noble/hashes/utils.js'
@@ -2720,12 +2720,9 @@ function wireOnboard(): void {
     const qrEl = document.getElementById('qr-npub')
     if (qrEl && persisted.identity) {
       try {
-        const qr = qrcode(0, 'L')
         // A link, never bare text (same lesson as the join QR): the inviter's camera
         // opens flock with this key already filled into the send-invite form.
-        qr.addData(`${shareOrigin()}/#invite=${fullNpub(persisted.identity.pk)}`)
-        qr.make()
-        qrEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 16, scalable: true })
+        qrEl.innerHTML = qrSvg(`${shareOrigin()}/#invite=${fullNpub(persisted.identity.pk)}`)
       } catch { qrEl.remove() }
     }
   }
@@ -2765,17 +2762,10 @@ function wireApp(): void {
   const ac = activeCircle()
   if (qrEl && ac) {
     try {
-      // Level 'L' (7% EC): scanning a clean screen has no damage to correct for,
-      // so the lowest EC gives the sparsest code — fewer, bigger modules that a
-      // phone camera resolves far more easily than the denser 'M'.
-      const qr = qrcode(0, 'L')
       // A LINK, never bare text: camera apps open links, but bare text they offer
       // to web-search — which would hand the seed to a search engine (see inviteLink).
-      qr.addData(store.inviteLink(ac, shareOrigin()))
-      qr.make()
-      // margin = 4 modules (16px at cellSize 4): the quiet zone the spec needs to
-      // detect the finder pattern, baked into the SVG so it scales with the code.
-      qrEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 16, scalable: true })
+      // Level L and the 4 module quiet zone are set in qrSvg.
+      qrEl.innerHTML = qrSvg(store.inviteLink(ac, shareOrigin()))
     } catch { qrEl.remove() }
   }
   root.querySelectorAll('[data-action]').forEach((node) => {
