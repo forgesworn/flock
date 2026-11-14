@@ -3,7 +3,7 @@ import { classifyScan, shouldOfferAppHandoff } from './joinassist'
 import { encodeInvite, inviteLink, type Circle } from './store'
 import { nip19, generateSecretKey, getPublicKey } from 'nostr-tools'
 import jsQR from 'jsqr'
-import qrcode from 'qrcode-generator'
+import { qrSvg } from './qr'
 
 const circle = {
   id: 'c1',
@@ -38,24 +38,21 @@ describe('classifyScan', () => {
 
 describe('inviter QR → scanner decode → classify (the full in-person pipeline)', () => {
   it('round-trips: the QR the app shows is the QR the app can scan', () => {
-    // Rasterise exactly what the invite screen draws (qrcode-generator, EC 'L')…
+    // Rasterise exactly what the invite screen draws (qrSvg: level 'L', 4 module
+    // quiet zone, black on white), straight from the SVG it returns…
     const link = inviteLink(circle, 'https://flock.example')
-    const qr = qrcode(0, 'L')
-    qr.addData(link)
-    qr.make()
-    const modules = qr.getModuleCount()
+    const svg = qrSvg(link)
+    expect(svg).toContain('fill="#fff"')
+    const side = Number(/viewBox="0 0 (\d+) \d+"/.exec(svg)![1])
     const scale = 4
-    const margin = 4 * scale
-    const size = modules * scale + margin * 2
+    const size = side * scale
     const rgba = new Uint8ClampedArray(size * size * 4).fill(255)
-    for (let y = 0; y < modules; y++) {
-      for (let x = 0; x < modules; x++) {
-        if (!qr.isDark(y, x)) continue
-        for (let dy = 0; dy < scale; dy++) {
-          for (let dx = 0; dx < scale; dx++) {
-            const px = ((margin + y * scale + dy) * size + margin + x * scale + dx) * 4
-            rgba[px] = rgba[px + 1] = rgba[px + 2] = 0
-          }
+    const d = /<path fill="#000" d="([^"]*)"/.exec(svg)![1]
+    for (const [, x, y, run] of d.matchAll(/M(\d+) (\d+)h(\d+)v1h-\3z/g)) {
+      for (let row = 0; row < scale; row++) {
+        for (let col = 0; col < Number(run) * scale; col++) {
+          const px = ((Number(y) * scale + row) * size + Number(x) * scale + col) * 4
+          rgba[px] = rgba[px + 1] = rgba[px + 2] = 0
         }
       }
     }
